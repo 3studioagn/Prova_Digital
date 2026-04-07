@@ -1,0 +1,31 @@
+name: Keep-Alive Supabase
+
+# Roda a cada 6 dias para manter o projeto Supabase ativo.
+# O free tier pausa apos 7 dias sem requisicoes.
+# Margem de seguranca: 6 dias = 144 horas.
+on:
+  schedule:
+    # A cada 6 dias: minuto 0, hora 8 (UTC), dia 1,7,13,19,25 de cada mes
+    - cron: "0 8 */6 * *"
+  workflow_dispatch: # Permite execucao manual para validacao
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install httpx
+
+      - name: Executar keep-alive
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: python scripts/keep_alive.py "${BACKEND_URL}"
+
+      # Notificacao de falha: o GitHub Actions envia e-mail automaticamente
+      # quando um workflow falha, se configurado nas settings do repo.

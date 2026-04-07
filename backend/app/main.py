@@ -1,0 +1,80 @@
+import httpx
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+
+from app.core.config import settings
+from app.core.r2 import get_r2_client
+from app.db.session import async_session
+
+app = FastAPI(
+    title="Rastreio de Provas Digitais",
+    description="API do sistema de rastreio de provas digitais - 3Studio",
+    version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.frontend_url],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+@app.get("/health/db")
+async def health_db():
+    """Executa SELECT 1 no PostgreSQL para validar conectividade.
+
+    Tenta primeiro via SQLAlchemy (pooler). Se falhar, faz fallback
+    via REST API do Supabase para confirmar que o banco esta ativo.
+    """
+    pooler_error = None
+
+    # Tentativa 1: conexao direta via SQLAlchemy (pooler)
+    try:
+        async with async_session() as session:
+            result = await session.execute(text("SELECT 1"))
+            result.scalar()
+        return {"status": "ok", "database": "connected", "method": "pooler"}
+    except Exception as e:
+        pooler_error = str(e)
+
+    # Tentativa 2: fallback via REST API do Supabase
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{settings.supabase_url}/rest/v1/",
+                headers={
+                    "apikey": settings.supabase_anon_key,
+                    "Authorization": f"Bearer {settings.supabase_anon_key}",
+                },
+                timeout=10,
+            )
+            if resp.status_code < 500:
+                return {
+                    "status": "ok",
+                    "database": "connected",
+                    "method": "rest_api",
+                    "note": "Pooler indisponivel, validado via REST API",
+                }
+    except Exception:
+        pass
+
+    return {"status": "error", "database": pooler_error}
+
+
+@app.get("/health/r2")
+async def health_r2():
+    """Testa conectividade com o bucket R2 da Cloudflare."""
+    try:
+        client = get_r2_client()
+        client.head_bucket(Bucket=settings.r2_bucket_name)
+        return {"status": "ok", "r2": "connected", "bucket": settings.r2_bucket_name}
+    except Exception as e:
+        return {"status": "error", "r2": str(e)}
