@@ -82,7 +82,7 @@ CREATE POLICY pol_provas_select ON provas_digitais
             )
         )
         OR (
-            status IN ('ENVIADA_PARA_CLICHERIA', 'ENCAMINHADA_A_CLICHERIA')
+            status IN ('ENVIADA_PARA_CLICHERIA', 'ENCAMINHADA_A_CLICHERIA', 'RECEBIDA_PELA_CLICHERIA')
             AND EXISTS (
                 SELECT 1 FROM usuarios u WHERE u.auth_uid = auth.uid() AND u.setor = 'CLICHERIA'
             )
@@ -112,7 +112,9 @@ CREATE POLICY pol_provas_update ON provas_digitais
 
 -- ─── MOVIMENTACOES ──────────────────────────────────────────────────────────
 
--- Todos autenticados podem ver movimentacoes das provas que podem ver.
+-- STUDIO: ve todas as movimentacoes.
+-- VENDEDOR: ve movimentacoes das provas onde e o vendedor responsavel.
+-- Demais: veem movimentacoes que eles proprios executaram.
 -- INSERT e feito exclusivamente pelo backend (service_role).
 -- UPDATE/DELETE bloqueados pelo trigger de imutabilidade.
 DROP POLICY IF EXISTS pol_movimentacoes_select ON movimentacoes;
@@ -121,6 +123,12 @@ CREATE POLICY pol_movimentacoes_select ON movimentacoes
     USING (
         EXISTS (
             SELECT 1 FROM usuarios u WHERE u.auth_uid = auth.uid() AND u.setor = 'STUDIO'
+        )
+        OR prova_id IN (
+            SELECT pd.id FROM provas_digitais pd
+            WHERE pd.vendedor_id = (
+                SELECT u.id FROM usuarios u WHERE u.auth_uid = auth.uid()
+            )
         )
         OR usuario_id = (
             SELECT u.id FROM usuarios u WHERE u.auth_uid = auth.uid()

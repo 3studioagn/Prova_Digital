@@ -1,0 +1,171 @@
+.container {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-bg);
+}
+
+/* ── Left panel — image with custom slanted shape ────────────────────────── */
+
+.imagePanel {
+  position: relative;
+  flex: 0 1 55%;
+  margin: 22px;
+  margin-right: 0;
+  clip-path: url(#imagePanelClip);
+  overflow: hidden;
+  background: url("/images/login-bg.png") center / cover no-repeat,
+    linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .imagePanel {
+    display: block;
+  }
+}
+
+/* Hidden SVG for clip-path definition */
+.clipSvg {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* ── Right panel — login form ────────────────────────────────────────────── */
+
+.formPanel {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.formContent {
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+}
+
+.logo {
+  align-self: center;
+  margin-bottom: 4rem;
+}
+
+.title {
+  font-size: 4rem;
+  font-weight: 400;
+  color: var(--color-text-primary);
+  margin-bottom: 0.7rem;
+  line-height: 1.1;
+}
+
+.subtitle {
+  font-size: 1.1rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 2rem;
+  font-weight: 300;
+}
+
+.form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label {
+  font-size: 1.1rem;
+  color: var(--color-text-primary);
+  font-weight: 300;
+}
+
+.input {
+  width: 100%;
+  height: 56px;
+  padding: 0 1.5rem;
+  background: var(--color-bg-input);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+}
+
+.input::placeholder {
+  color: var(--color-text-secondary);
+}
+
+.linksRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  font-weight: 300;
+}
+
+.linkRegister {
+  color: var(--color-accent);
+}
+
+.linkRegisterUnderline {
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.linkForgot {
+  color: #9c9c9c;
+  cursor: default;
+}
+
+.submitBtn {
+  width: 100%;
+  height: 56px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-text-dark);
+  font-size: 1.5rem;
+  font-weight:400;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-top: 1rem;
+}
+
+.submitBtn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.submitBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error {
+  background: rgba(231, 76, 60, 0.15);
+  color: var(--color-danger);
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.footer {
+  margin-top: 5rem;
+  color: var(--color-text-secondary);
+  font-size: 1rem;
+  text-align: center;
+}

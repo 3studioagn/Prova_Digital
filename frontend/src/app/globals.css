@@ -1,0 +1,57 @@
+/* Design tokens extraidos do Figma — ProvaDigital */
+:root {
+  --color-bg: #000000;
+  --color-bg-card: #ffffff;
+  --color-bg-input: #1f1f1f;
+  --color-bg-sidebar: #000000;
+  --color-accent: #ffcb5c;
+  --color-accent-hover: #e6b84e;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #9e9e9e;
+  --color-text-dark: #1a1a1a;
+  --color-text-link: #ffcb5c;
+  --color-danger: #e74c3c;
+  --color-success: #2ecc71;
+  --color-border: #2a2a2a;
+
+  --radius-pill: 50px;
+  --radius-card: 16px;
+  --radius-sm: 8px;
+
+  --font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  --sidebar-width: 280px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  font-family: var(--font-family);
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--color-text-link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+input,
+select,
+button {
+  font-family: inherit;
+}

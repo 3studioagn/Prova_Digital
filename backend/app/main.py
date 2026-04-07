@@ -1,16 +1,24 @@
+import logging
+
 import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app.api.v1.users import router as users_router
 from app.core.config import settings
 from app.core.r2 import get_r2_client
 from app.db.session import async_session
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+)
+
 app = FastAPI(
     title="Rastreio de Provas Digitais",
     description="API do sistema de rastreio de provas digitais - 3Studio",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 app.add_middleware(
@@ -20,6 +28,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(users_router, prefix="/api/v1/users", tags=["users"])
 
 
 @app.get("/health")
