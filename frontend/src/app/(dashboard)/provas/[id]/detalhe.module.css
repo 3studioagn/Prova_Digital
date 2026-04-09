@@ -1,0 +1,561 @@
+/*
+ * Pagina de detalhe de uma prova (Componente 08).
+ * Contem tambem os estilos do modal VisualizarEtiquetaModal para manter
+ * todos os estilos relacionados em um unico arquivo.
+ */
+
+/* ── Mobile-only notice / desktop wrapper ─────────────────────────── */
+
+.mobileNotice {
+  display: none;
+}
+
+.desktopOnly {
+  display: contents;
+}
+
+/* ── Breadcrumb ───────────────────────────────────────────────────── */
+
+.breadcrumb {
+  margin-bottom: 1.5rem;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--fs-sm);
+  color: var(--color-card-text-muted);
+  text-decoration: none;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-card-surface);
+  border: 1px solid var(--color-card-border);
+  transition: background 0.15s ease;
+}
+
+.backLink:hover {
+  background: var(--color-accent);
+  color: var(--color-card-text);
+}
+
+/* ── Header ───────────────────────────────────────────────────────── */
+
+.pageHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-bottom: 2.5rem;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: var(--fs-display);
+  font-weight: 400;
+  line-height: 1.05;
+  color: var(--color-card-text);
+  letter-spacing: -0.01em;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.subtitle {
+  font-size: var(--fs-h2);
+  color: var(--color-card-text-muted);
+  margin-top: 0.5rem;
+  font-weight: 400;
+}
+
+.h2 {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: var(--color-card-text);
+  margin-bottom: 1rem;
+}
+
+/* ── Loading / erro ───────────────────────────────────────────────── */
+
+.loadingBox {
+  padding: 4rem 2rem;
+  text-align: center;
+  color: var(--color-card-text-muted);
+  font-size: var(--fs-base);
+}
+
+.errorBox {
+  padding: 2rem;
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-card-lg);
+  color: var(--color-card-text);
+  font-size: var(--fs-base);
+  text-align: center;
+}
+
+.errorBox p {
+  margin-bottom: 1rem;
+}
+
+/* ── Status badges (reutiliza cores do /provas) ──────────────────── */
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.625rem 1.5rem;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  background: var(--color-card-surface);
+  color: var(--color-card-text);
+  white-space: nowrap;
+}
+
+.status_CRIADA {
+  background: color-mix(in srgb, var(--color-accent) 25%, white);
+}
+
+.status_RETIRADA_PELO_VENDEDOR,
+.status_APROVADA_PELO_VENDEDOR,
+.status_DE_VOLTA_3STUDIO {
+  background: #d4ecff;
+  color: #003766;
+}
+
+.status_COM_MOTORISTA,
+.status_ENVIADA_PARA_CLICHERIA,
+.status_ENCAMINHADA_A_CLICHERIA {
+  background: #fff3c4;
+  color: #664000;
+}
+
+.status_RECEBIDA_PELA_CLICHERIA {
+  background: #c9f0d1;
+  color: #0a4a19;
+}
+
+.status_REPROVADA_PELO_VENDEDOR,
+.status_CANCELADA {
+  background: color-mix(in srgb, var(--color-danger) 20%, white);
+  color: #6b0000;
+}
+
+/* ── Grid principal: dados + arte ─────────────────────────────────── */
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 2rem;
+  margin-bottom: 2.5rem;
+}
+
+.dataCard,
+.artCard {
+  padding: 1.75rem 2rem;
+  background: var(--color-card-surface);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-card-lg);
+}
+
+.dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 1.5rem;
+  row-gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.dl dt {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--color-card-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  align-self: start;
+  padding-top: 0.125rem;
+}
+
+.dl dd {
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  margin: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.625rem;
+  padding: 0.1rem 0.625rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.motivoCancelamento {
+  color: var(--color-danger) !important;
+  font-style: italic;
+}
+
+.cardActions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-card-border);
+}
+
+/* ── Arte ─────────────────────────────────────────────────────────── */
+
+.artContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  background: var(--color-card-surface-alt, #d7d7d7);
+  border-radius: calc(var(--radius-card-lg) - 4px);
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.artImg {
+  max-width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: 0.5rem;
+}
+
+.artPlaceholder {
+  text-align: center;
+  color: var(--color-card-text-muted);
+  font-size: var(--fs-base);
+  padding: 2rem;
+}
+
+.artPlaceholder p {
+  margin-bottom: 0.5rem;
+}
+
+.artHint {
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
+
+/* ── Botoes ───────────────────────────────────────────────────────── */
+
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.75rem;
+  background: var(--color-accent);
+  color: var(--color-card-text);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btnPrimary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btnSecondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.75rem;
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btnSecondary:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.btnSecondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Timeline (placeholder na Wave 2) ─────────────────────────────── */
+
+.timelineCard {
+  padding: 1.75rem 2rem;
+  background: var(--color-card-surface);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-card-lg);
+  margin-bottom: 2rem;
+}
+
+.timelineEmpty {
+  padding: 2rem 0;
+  text-align: center;
+  color: var(--color-card-text-muted);
+}
+
+.timelineEmpty p {
+  margin-bottom: 0.5rem;
+}
+
+.timelineHint {
+  font-size: var(--fs-xs);
+  font-style: italic;
+}
+
+.timelineList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.timelineItem {
+  padding: 1rem 1.25rem;
+  background: var(--color-card-bg);
+  border-radius: 0.75rem;
+  border-left: 3px solid var(--color-accent);
+}
+
+.timelineHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.timelineStatus {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  color: var(--color-card-text);
+}
+
+.timelineDate {
+  font-size: var(--fs-xs);
+  color: var(--color-card-text-muted);
+}
+
+.timelineMeta {
+  font-size: var(--fs-sm);
+  color: var(--color-card-text-muted);
+}
+
+.timelineMotivo {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  border-radius: 0.375rem;
+  font-size: var(--fs-sm);
+  color: var(--color-card-text);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Modal "Visualizar etiqueta"
+   ═══════════════════════════════════════════════════════════════════ */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay, rgba(0, 0, 0, 0.6));
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+}
+
+.modalContent {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1100px;
+  max-height: calc(100vh - 4rem);
+  background: #000;
+  border-radius: var(--radius-card-lg);
+  border: 1px solid #333;
+  overflow: hidden;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.modalTitle {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: #fff;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.modalCloseBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: transparent;
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.modalCloseBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.modalBody {
+  flex: 1;
+  min-height: 0;
+  padding: 1.5rem 1.75rem;
+  overflow: auto;
+}
+
+.modalLoading,
+.modalError {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  color: #ccc;
+  font-size: var(--fs-base);
+  text-align: center;
+}
+
+.modalError {
+  color: var(--color-danger);
+}
+
+.modalGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1.5rem;
+  min-height: 500px;
+}
+
+.modalPdfWrap {
+  background: #fff;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.modalPdfFrame {
+  width: 100%;
+  height: 100%;
+  min-height: 500px;
+  border: none;
+  display: block;
+}
+
+.modalQrWrap {
+  background: #fff;
+  border-radius: 0.5rem;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 1rem;
+}
+
+.modalQrTitle {
+  font-size: var(--fs-base);
+  color: #000;
+  font-weight: 600;
+}
+
+.modalQrImg {
+  width: 280px;
+  height: 280px;
+  max-width: 100%;
+  image-rendering: pixelated;
+}
+
+.modalQrHint {
+  font-size: var(--fs-xs);
+  color: #575757;
+  max-width: 240px;
+  line-height: 1.4;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 1.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.modalFooter .btnSecondary {
+  background: var(--color-bg-input);
+  color: #fff;
+}
+
+.modalFooter .btnPrimary {
+  background: var(--color-accent);
+  color: #000;
+}
+
+/* ── Mobile ───────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .desktopOnly {
+    display: none;
+  }
+
+  .mobileNotice {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    text-align: center;
+  }
+
+  .mobileNotice p {
+    font-size: var(--fs-lg);
+    color: var(--color-card-text-muted);
+    max-width: 320px;
+    line-height: 1.4;
+  }
+}
+
+@media (max-width: 1000px) {
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+  .modalGrid {
+    grid-template-columns: 1fr;
+  }
+  .modalQrImg {
+    width: 220px;
+    height: 220px;
+  }
+}

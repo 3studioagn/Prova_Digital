@@ -12,9 +12,20 @@ Cole a seguinte configuracao JSON:
 ```json
 [
   {
-    "AllowedOrigins": ["http://localhost:3000"],
-    "AllowedMethods": ["GET", "PUT"],
-    "AllowedHeaders": ["Content-Type", "Authorization"],
+    "AllowedOrigins": [
+      "http://localhost:3000"
+    ],
+    "AllowedMethods": [
+      "GET",
+      "PUT",
+      "HEAD"
+    ],
+    "AllowedHeaders": [
+      "*"
+    ],
+    "ExposeHeaders": [
+      "ETag"
+    ],
     "MaxAgeSeconds": 3600
   }
 ]

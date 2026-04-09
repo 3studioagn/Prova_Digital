@@ -1,0 +1,287 @@
+/*
+ * Pagina Configuracoes — reutiliza tokens de `globals.css`.
+ * Estrutura: 2 cards empilhados, cada um com seu form independente.
+ * Mobile: aviso "acesse a versao desktop" (mesmo padrao de /usuarios).
+ */
+
+/* ── Mobile-only notice / desktop wrapper ─────────────────────────── */
+
+.mobileNotice {
+  display: none;
+}
+
+.desktopOnly {
+  display: contents;
+}
+
+/* ── Header ───────────────────────────────────────────────────────── */
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 3rem;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: var(--fs-display);
+  font-weight: 400;
+  line-height: 1.05;
+  color: var(--color-card-text);
+  letter-spacing: -0.01em;
+}
+
+.h2 {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: var(--color-card-text);
+  margin-bottom: 0.5rem;
+}
+
+.description {
+  font-size: var(--fs-base);
+  color: var(--color-card-text-muted);
+  margin-bottom: 1.75rem;
+  line-height: 1.5;
+}
+
+.description strong {
+  color: var(--color-card-text);
+  font-weight: 500;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────── */
+
+.card {
+  padding: 2rem 2.25rem;
+  background: var(--color-card-surface);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-card-lg);
+  margin-bottom: 2rem;
+}
+
+.card:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Estado de loading / erro ─────────────────────────────────────── */
+
+.loadingBox {
+  padding: 2rem;
+  text-align: center;
+  color: var(--color-card-text-muted);
+  font-size: var(--fs-base);
+}
+
+.errorBox {
+  padding: 1rem 1.25rem;
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-card-lg);
+  color: var(--color-card-text);
+  font-size: var(--fs-base);
+  margin-bottom: 1.5rem;
+}
+
+/* ── Forms ────────────────────────────────────────────────────────── */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem 2rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--color-card-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fieldHint {
+  font-size: var(--fs-xs);
+  color: var(--color-card-text-muted);
+  font-style: italic;
+}
+
+.input,
+.select {
+  height: 48px;
+  padding: 0 1.25rem;
+  background: #fff;
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  transition: border-color 0.15s ease;
+}
+
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.input:disabled,
+.select:disabled {
+  opacity: 0.6;
+  background: var(--color-card-surface-alt, #d7d7d7);
+  cursor: not-allowed;
+}
+
+.input[readonly] {
+  background: var(--color-card-surface-alt, #d7d7d7);
+  cursor: not-allowed;
+  color: var(--color-card-text-muted);
+}
+
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1l5 5 5-5' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 1.25rem center;
+  padding-right: 2.75rem;
+  cursor: pointer;
+}
+
+.inputInline {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.inputInline .input {
+  max-width: 160px;
+}
+
+.inputSuffix {
+  font-size: var(--fs-sm);
+  color: var(--color-card-text-muted);
+}
+
+/* ── Checkbox custom ──────────────────────────────────────────────── */
+
+.checkboxGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  color: var(--color-card-text);
+  font-size: var(--fs-base);
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* ── Feedback inline ─────────────────────────────────────────────── */
+
+.inlineError {
+  padding: 0.75rem 1rem;
+  background: color-mix(in srgb, var(--color-danger) 15%, transparent);
+  border-left: 3px solid var(--color-danger);
+  border-radius: 0.5rem;
+  font-size: var(--fs-sm);
+  color: var(--color-card-text);
+}
+
+.inlineSuccess {
+  padding: 0.75rem 1rem;
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  border-left: 3px solid var(--color-accent);
+  border-radius: 0.5rem;
+  font-size: var(--fs-sm);
+  color: var(--color-card-text);
+}
+
+/* ── Botoes ──────────────────────────────────────────────────────── */
+
+.sectionActions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+}
+
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.875rem 2.5rem;
+  background: var(--color-accent);
+  color: var(--color-card-text);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btnPrimary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Mobile ──────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .desktopOnly {
+    display: none;
+  }
+
+  .mobileNotice {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    text-align: center;
+  }
+
+  .mobileNotice p {
+    font-size: var(--fs-lg);
+    color: var(--color-card-text-muted);
+    max-width: 320px;
+    line-height: 1.4;
+  }
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

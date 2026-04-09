@@ -15,6 +15,7 @@ os.environ.update({
     "R2_ACCESS_KEY_ID": "test-key",
     "R2_SECRET_ACCESS_KEY": "test-secret",
     "R2_ENDPOINT_URL": "http://localhost:9000",
+    "QR_CODE_HMAC_SECRET": "test-hmac-secret-not-for-production-min-32-chars",
     "APP_ENV": "test",
     "APP_DEBUG": "false",
 })
@@ -64,6 +65,26 @@ def regular_user():
         email="regular@test.com",
         setor=SetorEnum.VENDEDOR,
         localizacao=LocalizacaoEnum.MATRIZ,
+    )
+
+
+@pytest.fixture
+def vendedor_matriz():
+    return make_user(
+        nome="Vendedor Matriz",
+        email="vendedor.matriz@test.com",
+        setor=SetorEnum.VENDEDOR,
+        localizacao=LocalizacaoEnum.MATRIZ,
+    )
+
+
+@pytest.fixture
+def vendedor_filial():
+    return make_user(
+        nome="Vendedor Filial",
+        email="vendedor.filial@test.com",
+        setor=SetorEnum.VENDEDOR,
+        localizacao=LocalizacaoEnum.FILIAL,
     )
 
 

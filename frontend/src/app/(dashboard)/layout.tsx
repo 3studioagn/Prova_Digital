@@ -43,15 +43,15 @@ interface NavItemSpec {
 
 const MAIN_NAV: NavItemSpec[] = [
   { key: "dashboard", label: "Dashboard", icon: <HomeIcon /> },
-  { key: "provas", label: "Provas", icon: <LaptopIcon /> },
-  { key: "nova-prova", label: "Nova prova", icon: <PlusIcon /> },
+  { key: "provas", label: "Provas", icon: <LaptopIcon />, href: "/provas" },
+  { key: "nova-prova", label: "Nova prova", icon: <PlusIcon />, href: "/nova-prova" },
   { key: "escanear", label: "Escanear", icon: <ScanIcon /> },
   { key: "relatorios", label: "Relatorios", icon: <ChartIcon /> },
   { key: "usuarios", label: "Usuarios", icon: <UserIcon />, href: "/usuarios" },
 ];
 
 const SECONDARY_NAV: NavItemSpec[] = [
-  { key: "configuracoes", label: "Configuracoes", icon: <GearIcon /> },
+  { key: "configuracoes", label: "Configuracoes", icon: <GearIcon />, href: "/configuracoes" },
   { key: "informacoes", label: "Informacoes", icon: <InfoIcon /> },
 ];
 

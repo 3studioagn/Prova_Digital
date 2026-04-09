@@ -1,0 +1,951 @@
+"""Router de Provas Digitais — Componente 06 do Backlog.
+
+Endpoints:
+  - POST /api/v1/provas/upload-url  -> UploadUrlResponse
+  - POST /api/v1/provas/            -> ProvaCreateResponse (201)
+
+Fluxo completo de criacao (ADR-031 — upload direto frontend -> R2):
+
+  1. Frontend chama POST /upload-url com (nro_requerimento, filename, content_type)
+  2. Backend valida unicidade do nro_requerimento e content_type, gera object_key
+     determinstico e retorna presigned URL com TTL 15min
+  3. Frontend faz PUT direto no R2 usando a URL pre-assinada
+  4. Frontend chama POST /provas/ com (nome, nro_requerimento, cliente,
+     vendedor_id, object_key)
+  5. Backend:
+     a. Re-valida nro_requerimento unico (race window entre steps 1 e 4)
+     b. Carrega vendedor (FOR UPDATE) e valida setor + ativo + localizacao
+     c. HeadObject no R2 para confirmar upload + validar ContentLength <= 10MB
+     d. Range GET 16 bytes para validar magic bytes (JPG/PNG) — ADR-032
+     e. Gera UUID da prova no backend (para incluir no HMAC antes do INSERT)
+     f. Gera qr_code_hash via HMAC-SHA256 (ADR-033)
+     g. Renderiza PNG do QR Code (ADR-034)
+     h. Determina rota projetada via state_machine (RN-007, Wave 2 nao persiste)
+     i. INSERT em provas_digitais (rota=NULL) + etiquetas + audit_logs na mesma
+        transacao
+     j. Le template_etiqueta atual de configuracoes_sistema
+     k. Renderiza PDF da etiqueta via etiqueta_service (ADR-035)
+     l. Retorna 201 com prova + PDF base64
+
+  Se qualquer passo entre (b) e (i) falhar apos o upload ter acontecido no R2,
+  o backend chama r2_delete(object_key) best-effort para nao deixar orfao
+  (ADR-041). Falha de cleanup loga "drift manual" para investigacao futura.
+"""
+import base64
+import logging
+import uuid
+from datetime import date, datetime, timedelta, timezone
+
+from botocore.exceptions import ClientError
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy import func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_admin_user, get_current_user
+from app.core.r2 import r2_delete
+from app.db.models import (
+    AuditLog,  # noqa: F401
+    ConfiguracaoSistema,
+    Etiqueta,
+    LocalizacaoEnum,
+    Movimentacao,
+    ProvaDigital,
+    RotaEnum,
+    SetorEnum,
+    StatusProvaEnum,
+    Usuario,
+)
+from app.db.session import get_db
+from app.domain.schemas.prova import (
+    ALLOWED_CONTENT_TYPES,
+    MAX_UPLOAD_BYTES,
+    ImagemUrlResponse,
+    MovimentacaoListResponse,
+    MovimentacaoResponse,
+    ProvaCreateRequest,
+    ProvaCreateResponse,
+    ProvaListItem,
+    ProvaListResponse,
+    ProvaResponse,
+    UploadUrlRequest,
+    UploadUrlResponse,
+    sanitize_filename,
+)
+from app.services import qrcode_service, r2_signed
+from app.services.audit_service import log_audit
+from app.services.etiqueta_service import TEMPLATE_PADRAO, gerar_pdf
+from app.services.state_machine import RotaIndeterminavelError, determinar_rota
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+
+PRESIGNED_URL_TTL_SECONDS = 900  # 15 minutos (DAT: URLs assinadas com TTL curto)
+
+# Magic bytes reconhecidos (ADR-032).
+MAGIC_BYTES = {
+    "image/jpeg": b"\xff\xd8\xff",
+    "image/png": b"\x89PNG\r\n\x1a\n",
+}
+
+
+def _detect_mime_from_bytes(head: bytes) -> str | None:
+    """Inspeciona os primeiros bytes e retorna o MIME detectado ou None."""
+    for mime, signature in MAGIC_BYTES.items():
+        if head.startswith(signature):
+            return mime
+    return None
+
+
+async def _cleanup_r2(object_key: str) -> None:
+    """Best-effort delete de object_key no R2. Loga se falhar (ADR-041)."""
+    try:
+        await r2_delete(object_key)
+        logger.info("R2 cleanup OK: %s", object_key)
+    except Exception:
+        logger.exception(
+            "R2 cleanup FALHOU para %s — orfao possivel, investigar", object_key
+        )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# POST /api/v1/provas/upload-url
+# ───────────────────────────────────────────────────────────────────────
+
+
+@router.post("/upload-url", response_model=UploadUrlResponse)
+async def create_upload_url(
+    body: UploadUrlRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(get_admin_user),
+) -> UploadUrlResponse:
+    """Gera uma URL pre-assinada para o frontend fazer PUT direto no R2.
+
+    Valida unicidade do `nro_requerimento` em `public.provas_digitais` (racing
+    entre cliques de "Criar Prova" no frontend) e MIME aceito (`image/jpeg` ou
+    `image/png`).
+    """
+    # Unicidade do nro_requerimento — tambem re-validada em POST /
+    existing = await db.execute(
+        select(ProvaDigital.id).where(
+            ProvaDigital.nro_requerimento == body.nro_requerimento
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Numero de requerimento ja cadastrado",
+        )
+
+    # Gera object_key particionado por ano/mes — facilita listagem/cleanup futuro.
+    now = datetime.now(tz=timezone.utc)
+    object_uuid = uuid.uuid4().hex
+    safe_filename = sanitize_filename(body.filename)
+    object_key = f"provas/{now.year:04d}/{now.month:02d}/{object_uuid}/{safe_filename}"
+
+    try:
+        upload_url = await r2_signed.generate_presigned_upload_url(
+            key=object_key,
+            content_type=body.content_type,
+            expires_in=PRESIGNED_URL_TTL_SECONDS,
+        )
+    except Exception:
+        logger.exception("Falha ao gerar presigned URL para %s", object_key)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao preparar upload",
+        )
+
+    expires_at = now + timedelta(seconds=PRESIGNED_URL_TTL_SECONDS)
+    logger.info(
+        "Presigned upload URL criada: admin=%s nro_req=%s key=%s",
+        admin.id,
+        body.nro_requerimento,
+        object_key,
+    )
+    return UploadUrlResponse(
+        upload_url=upload_url,
+        object_key=object_key,
+        expires_at=expires_at,
+        max_bytes=MAX_UPLOAD_BYTES,
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# POST /api/v1/provas/
+# ───────────────────────────────────────────────────────────────────────
+
+
+async def _carregar_vendedor(db: AsyncSession, vendedor_id) -> Usuario:
+    """Carrega o vendedor validando setor, ativo e localizacao."""
+    result = await db.execute(
+        select(Usuario).where(Usuario.id == vendedor_id).with_for_update()
+    )
+    vendedor = result.scalar_one_or_none()
+    if vendedor is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vendedor nao encontrado",
+        )
+    if not vendedor.ativo:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Vendedor esta inativo",
+        )
+    if vendedor.setor != SetorEnum.VENDEDOR:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Usuario informado nao e do setor VENDEDOR",
+        )
+    if vendedor.localizacao is None:
+        # Protegido por CHECK constraint tambem, mas garantimos antes de
+        # chamar determinar_rota para dar mensagem mais clara.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Vendedor nao tem localizacao (Matriz ou Filial) cadastrada",
+        )
+    return vendedor
+
+
+async def _validar_upload_no_r2(object_key: str) -> str:
+    """Confirma HeadObject + ContentLength + magic bytes. Retorna MIME detectado.
+
+    A validacao de magic bytes (ADR-032) e a unica barreira contra upload
+    com content-type spoofado — o `content_type` declarado no step 1
+    (/upload-url) nao e persistido entre requests, entao aqui so olhamos
+    o conteudo real do arquivo no R2.
+
+    Raises HTTPException se qualquer validacao falhar.
+    """
+    # HeadObject
+    try:
+        head = await r2_signed.head_object(object_key)
+    except ClientError as exc:
+        code = r2_signed.extract_error_code(exc)
+        if code in ("404", "NoSuchKey", "NotFound"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Arquivo nao encontrado no storage (upload nao completou)",
+            )
+        logger.exception("Falha no HeadObject R2 para %s", object_key)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao validar arquivo no storage",
+        )
+
+    content_length = int(head.get("ContentLength", 0))
+    if content_length == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Arquivo vazio",
+        )
+    if content_length > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Arquivo excede o limite de {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
+
+    # Magic bytes (ADR-032) — nao confiar no ContentType do header.
+    try:
+        head_bytes = await r2_signed.get_object_head_bytes(object_key, n=16)
+    except ClientError:
+        logger.exception("Falha no Range GET para magic bytes: %s", object_key)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao validar conteudo do arquivo",
+        )
+
+    detected_mime = _detect_mime_from_bytes(head_bytes)
+    if detected_mime is None or detected_mime not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Arquivo nao e JPG ou PNG valido (magic bytes)",
+        )
+
+    return detected_mime
+
+
+async def _carregar_template_etiqueta(db: AsyncSession) -> dict:
+    """Le o template atual de configuracoes_sistema. Fallback para padrao."""
+    result = await db.execute(
+        select(ConfiguracaoSistema.valor).where(
+            ConfiguracaoSistema.chave == "template_etiqueta"
+        )
+    )
+    valor = result.scalar_one_or_none()
+    if not isinstance(valor, dict):
+        # Se por qualquer razao o valor ainda for string (migration 009 nao
+        # aplicada) ou ausente, usamos o default e logamos.
+        logger.warning(
+            "template_etiqueta ausente ou em formato legado (type=%s), usando TEMPLATE_PADRAO",
+            type(valor).__name__,
+        )
+        return dict(TEMPLATE_PADRAO)
+    return valor
+
+
+@router.post(
+    "/",
+    response_model=ProvaCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_prova(
+    body: ProvaCreateRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(get_admin_user),
+) -> ProvaCreateResponse:
+    """Cria uma prova digital apos upload confirmado no R2."""
+    # (a) Unicidade do nro_requerimento — race window entre /upload-url e aqui.
+    existing = await db.execute(
+        select(ProvaDigital.id).where(
+            ProvaDigital.nro_requerimento == body.nro_requerimento
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        await _cleanup_r2(body.object_key)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Numero de requerimento ja cadastrado",
+        )
+
+    # (b) Vendedor — carrega com FOR UPDATE para travar mudancas concorrentes.
+    try:
+        vendedor = await _carregar_vendedor(db, body.vendedor_id)
+    except HTTPException:
+        await _cleanup_r2(body.object_key)
+        raise
+
+    # (c, d) Valida upload no R2 — HeadObject + magic bytes.
+    try:
+        await _validar_upload_no_r2(body.object_key)
+    except HTTPException:
+        await _cleanup_r2(body.object_key)
+        raise
+
+    # (e) Gera UUID da prova no backend para incluir no HMAC antes do INSERT.
+    prova_id = uuid.uuid4()
+
+    # (f) Hash HMAC-SHA256 (ADR-033).
+    qr_hash = qrcode_service.gerar_hash(prova_id, body.nro_requerimento)
+
+    # (g) Payload escaneavel + PNG do QR Code.
+    qr_payload = qrcode_service.gerar_payload_qr(body.nro_requerimento, qr_hash)
+    qr_image_bytes = qrcode_service.gerar_imagem_qr(qr_payload, size_px=200)
+
+    # (h) Rota projetada (Wave 2 NAO persiste — RN-007 + ADR-042).
+    try:
+        rota_projetada = determinar_rota(vendedor)
+    except RotaIndeterminavelError as exc:
+        await _cleanup_r2(body.object_key)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+
+    # (i) Carrega template e gera o PDF ANTES do commit.
+    #
+    # Por que antes e nao depois:
+    #   - gerar_pdf pode lancar (caracteres fora da fonte, template invalido,
+    #     fontes faltando no deploy). Fazer isso antes do commit garante que
+    #     uma falha de rendering NAO deixa uma prova orfa no banco sem PDF.
+    #   - `created_at` renderizado no PDF (template "mostrar_data_criacao")
+    #     e gerado no backend via datetime.now(UTC) e depois tambem usado no
+    #     response — consistente com o `now()` que o banco vai escrever,
+    #     dentro do proprio segundo.
+    try:
+        template = await _carregar_template_etiqueta(db)
+        created_at = datetime.now(tz=timezone.utc)
+        pdf_bytes = gerar_pdf(
+            nome_prova=body.nome,
+            nro_requerimento=body.nro_requerimento,
+            vendedor_nome=vendedor.nome,
+            qr_image_bytes=qr_image_bytes,
+            template=template,
+            created_at=created_at,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Falha ao gerar PDF da etiqueta para nro_req=%s",
+            body.nro_requerimento,
+        )
+        await _cleanup_r2(body.object_key)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Falha ao gerar etiqueta: {exc}",
+        )
+
+    # (j) INSERT atomico de prova + etiqueta + audit_log.
+    #
+    # IMPORTANTE: sem `relationship()` declarado entre ProvaDigital e Etiqueta,
+    # o SQLAlchemy nao detecta a dependencia FK automaticamente e o flush
+    # coletivo nao garante que `provas_digitais` seja inserida antes de
+    # `etiquetas`. Reproducao do bug em scripts/reproduce_create_prova.py na
+    # sessao de debug mostrou que o flush comecou pela etiqueta e violou
+    # `etiquetas_prova_id_fkey`. Fix: dois flushes explicitos dentro da mesma
+    # transacao — primeiro a prova, depois etiqueta + audit_log. A transacao
+    # inteira ainda e atomica (commit/rollback no final).
+    nova_prova = ProvaDigital(
+        id=prova_id,
+        nome=body.nome,
+        nro_requerimento=body.nro_requerimento,
+        cliente=body.cliente,
+        vendedor_id=vendedor.id,
+        imagem_url=body.object_key,
+        qr_code_hash=qr_hash,
+        status=StatusProvaEnum.CRIADA,
+        rota=None,  # ADR-042: rota so e definida na aprovacao (Wave 3)
+        ciclo_atual=1,
+    )
+
+    try:
+        db.add(nova_prova)
+        await db.flush()  # garante INSERT de provas_digitais ANTES da etiqueta
+
+        nova_etiqueta = Etiqueta(
+            prova_id=prova_id,
+            nome_prova=body.nome,
+            nro_requerimento=body.nro_requerimento,
+            vendedor_nome=vendedor.nome,
+            qr_code_image=qr_image_bytes,
+        )
+        db.add(nova_etiqueta)
+        await db.flush()  # garante INSERT de etiquetas antes do audit_log
+
+        await log_audit(
+            db,
+            acao="criar_prova",
+            usuario_id=admin.id,
+            prova_id=prova_id,
+            detalhes={
+                "vendedor_id": str(vendedor.id),
+                "vendedor_nome": vendedor.nome,
+                "nro_requerimento": body.nro_requerimento,
+                "cliente": body.cliente,
+                "rota_projetada": rota_projetada.value,
+                "object_key": body.object_key,
+            },
+            request=request,
+        )
+
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "Falha ao persistir prova %s (nro_req=%s). Limpando R2.",
+            prova_id,
+            body.nro_requerimento,
+        )
+        await _cleanup_r2(body.object_key)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Falha ao criar prova digital",
+        )
+
+    await db.refresh(nova_prova)
+
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("ascii")
+
+    logger.info(
+        "Prova criada: id=%s nro_req=%s vendedor=%s rota_projetada=%s admin=%s",
+        nova_prova.id,
+        nova_prova.nro_requerimento,
+        vendedor.id,
+        rota_projetada.value,
+        admin.id,
+    )
+
+    # Monta o response com vendedor_nome e rota_projetada (nao estao no
+    # model ORM, vem do contexto).
+    prova_response = ProvaResponse(
+        id=nova_prova.id,
+        nome=nova_prova.nome,
+        nro_requerimento=nova_prova.nro_requerimento,
+        cliente=nova_prova.cliente,
+        vendedor_id=nova_prova.vendedor_id,
+        vendedor_nome=vendedor.nome,
+        vendedor_localizacao=vendedor.localizacao,
+        imagem_url=nova_prova.imagem_url,
+        qr_code_hash=nova_prova.qr_code_hash,
+        status=nova_prova.status,
+        rota=nova_prova.rota,
+        rota_projetada=rota_projetada,
+        ciclo_atual=nova_prova.ciclo_atual,
+        motivo_cancelamento=nova_prova.motivo_cancelamento,
+        created_at=nova_prova.created_at,
+        updated_at=nova_prova.updated_at,
+    )
+
+    return ProvaCreateResponse(
+        prova=prova_response,
+        etiqueta_pdf_base64=pdf_base64,
+        qr_code_payload=qr_payload,
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# GET /api/v1/provas/  — Listagem com filtros e paginacao (Componente 07)
+# ───────────────────────────────────────────────────────────────────────
+#
+# Autorizacao (ADR-046): `get_current_user` (nao admin-only) + scoping por
+# setor replicado no backend. O backend usa service_role (bypassa RLS),
+# entao a semantica das policies RLS (pol_provas_select) e espelhada aqui:
+#
+#   is_admin=true              -> ve todas
+#   setor=VENDEDOR             -> vendedor_id == user.id
+#   setor=MOTORISTA            -> status == COM_MOTORISTA
+#   setor=CLICHERIA            -> status IN (ENVIADA, ENCAMINHADA, RECEBIDA)
+#   setor=STUDIO sem is_admin  -> nao retorna nada (combinacao invalida)
+#
+# Filtros explicitos do usuario sao aplicados em cima do filtro base (AND).
+
+
+CLICHERIA_STATUSES = (
+    StatusProvaEnum.ENVIADA_PARA_CLICHERIA,
+    StatusProvaEnum.ENCAMINHADA_A_CLICHERIA,
+    StatusProvaEnum.RECEBIDA_PELA_CLICHERIA,
+)
+
+
+def _scoping_filter(user: Usuario):
+    """Retorna a clausula WHERE base que restringe provas por setor.
+
+    Retorna `None` quando nao ha restricao (admin). Retorna uma clausula
+    `false` explicita para combinacoes nao suportadas (scoping defensivo).
+    """
+    if user.is_admin:
+        return None
+    if user.setor == SetorEnum.VENDEDOR:
+        return ProvaDigital.vendedor_id == user.id
+    if user.setor == SetorEnum.MOTORISTA:
+        return ProvaDigital.status == StatusProvaEnum.COM_MOTORISTA
+    if user.setor == SetorEnum.CLICHERIA:
+        return ProvaDigital.status.in_(CLICHERIA_STATUSES)
+    # STUDIO sem is_admin — combinacao invalida pos-ADR-018.
+    # Retorna clausula false para garantir zero resultados.
+    return func.false()
+
+
+@router.get("/", response_model=ProvaListResponse)
+async def list_provas(
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status_filter: StatusProvaEnum | None = Query(None, alias="status"),
+    periodo_inicio: date | None = Query(None),
+    periodo_fim: date | None = Query(None),
+    vendedor_id: uuid.UUID | None = Query(None),
+    cliente: str | None = Query(None, max_length=200),
+    rota: RotaEnum | None = Query(None),
+    busca: str | None = Query(None, max_length=200),
+) -> ProvaListResponse:
+    """Lista provas digitais com filtros combinaveis e paginacao offset-based.
+
+    Autenticado (qualquer setor/perfil ativo). O scoping por setor e feito
+    via `_scoping_filter` — replica a semantica das RLS policies porque o
+    backend usa service_role e bypassa RLS. Filtros explicitos sao combinados
+    com AND sobre o filtro base.
+
+    Ordenacao: `created_at DESC` (mais recentes primeiro).
+
+    Performance: indexes `idx_provas_status`, `idx_provas_status_created`,
+    `idx_provas_vendedor`, `idx_provas_created_at` cobrem os filtros mais
+    comuns. ILIKE em `cliente`/`nome`/`nro_requerimento` e seq scan no
+    volume Wave 2 — aceitavel (ADR-038).
+    """
+    filters: list = []
+
+    # Filtro base de scoping (ADR-046)
+    base = _scoping_filter(current_user)
+    if base is not None:
+        filters.append(base)
+
+    # Filtros explicitos
+    if status_filter is not None:
+        filters.append(ProvaDigital.status == status_filter)
+    if vendedor_id is not None:
+        filters.append(ProvaDigital.vendedor_id == vendedor_id)
+    if rota is not None:
+        filters.append(ProvaDigital.rota == rota)
+    if cliente:
+        filters.append(ProvaDigital.cliente.ilike(f"%{cliente}%"))
+    if busca:
+        pattern = f"%{busca}%"
+        filters.append(
+            or_(
+                ProvaDigital.nome.ilike(pattern),
+                ProvaDigital.nro_requerimento.ilike(pattern),
+            )
+        )
+
+    # Periodo (ADR-048): fim inclusivo — adicionamos 1 dia e usamos `<`.
+    if periodo_inicio is not None:
+        inicio_dt = datetime(
+            periodo_inicio.year, periodo_inicio.month, periodo_inicio.day,
+            tzinfo=timezone.utc,
+        )
+        filters.append(ProvaDigital.created_at >= inicio_dt)
+    if periodo_fim is not None:
+        fim_dt = datetime(
+            periodo_fim.year, periodo_fim.month, periodo_fim.day,
+            tzinfo=timezone.utc,
+        ) + timedelta(days=1)
+        filters.append(ProvaDigital.created_at < fim_dt)
+
+    # Count total (antes do offset/limit)
+    count_stmt = select(func.count()).select_from(ProvaDigital)
+    for f in filters:
+        count_stmt = count_stmt.where(f)
+    total = (await db.execute(count_stmt)).scalar() or 0
+
+    # Data query com JOIN em usuarios para trazer vendedor_nome
+    data_stmt = (
+        select(ProvaDigital, Usuario.nome.label("vendedor_nome"))
+        .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
+    )
+    for f in filters:
+        data_stmt = data_stmt.where(f)
+
+    offset = (page - 1) * page_size
+    data_stmt = (
+        data_stmt.order_by(ProvaDigital.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+    )
+
+    rows = (await db.execute(data_stmt)).all()
+    items = [
+        ProvaListItem(
+            id=prova.id,
+            nome=prova.nome,
+            nro_requerimento=prova.nro_requerimento,
+            cliente=prova.cliente,
+            vendedor_id=prova.vendedor_id,
+            vendedor_nome=vendedor_nome,
+            status=prova.status,
+            rota=prova.rota,
+            ciclo_atual=prova.ciclo_atual,
+            created_at=prova.created_at,
+            updated_at=prova.updated_at,
+        )
+        for prova, vendedor_nome in rows
+    ]
+
+    pages = (total + page_size - 1) // page_size if total > 0 else 0
+    return ProvaListResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        pages=pages,
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# GET /api/v1/provas/{prova_id}  — Detalhe (Componente 08)
+# ───────────────────────────────────────────────────────────────────────
+#
+# Todos os endpoints de detalhe reutilizam `_scoping_filter` do Componente 07
+# (ADR-049) para garantir visibilidade consistente. Se o scoping esconde a
+# prova, retornamos 404 — nao 403 — para nao vazar existencia da prova para
+# usuarios que nao deveriam saber dela.
+
+
+async def _carregar_prova_com_scoping(
+    db: AsyncSession, prova_id: uuid.UUID, user: Usuario
+) -> tuple[ProvaDigital, str, LocalizacaoEnum | None] | None:
+    """Carrega a prova + dados do vendedor respeitando o scoping por setor.
+
+    Retorna uma tupla `(prova, vendedor_nome, vendedor_localizacao)` ou `None`
+    quando a prova nao existe ou o usuario nao tem permissao de ve-la.
+    """
+    stmt = (
+        select(
+            ProvaDigital,
+            Usuario.nome.label("vendedor_nome"),
+            Usuario.localizacao.label("vendedor_localizacao"),
+        )
+        .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
+        .where(ProvaDigital.id == prova_id)
+    )
+    base = _scoping_filter(user)
+    if base is not None:
+        stmt = stmt.where(base)
+
+    row = (await db.execute(stmt)).first()
+    if row is None:
+        return None
+    prova, vendedor_nome, vendedor_localizacao = row
+    return prova, vendedor_nome, vendedor_localizacao
+
+
+def _build_prova_response(
+    prova: ProvaDigital,
+    vendedor_obj: Usuario | None,
+    vendedor_nome: str,
+    vendedor_localizacao: LocalizacaoEnum | None,
+) -> ProvaResponse:
+    """Monta o ProvaResponse calculando `rota_projetada` quando possivel.
+
+    `rota_projetada` e None em edge cases onde o vendedor nao pode ter rota
+    calculada (ex: mudou de setor apos a criacao da prova). O frontend trata
+    None exibindo apenas `prova.rota` ou placeholder.
+    """
+    rota_projetada: RotaEnum | None = None
+    if vendedor_obj is not None:
+        try:
+            rota_projetada = determinar_rota(vendedor_obj)
+        except RotaIndeterminavelError:
+            rota_projetada = None
+
+    return ProvaResponse(
+        id=prova.id,
+        nome=prova.nome,
+        nro_requerimento=prova.nro_requerimento,
+        cliente=prova.cliente,
+        vendedor_id=prova.vendedor_id,
+        vendedor_nome=vendedor_nome,
+        vendedor_localizacao=vendedor_localizacao,
+        imagem_url=prova.imagem_url,
+        qr_code_hash=prova.qr_code_hash,
+        status=prova.status,
+        rota=prova.rota,
+        rota_projetada=rota_projetada,
+        ciclo_atual=prova.ciclo_atual,
+        motivo_cancelamento=prova.motivo_cancelamento,
+        created_at=prova.created_at,
+        updated_at=prova.updated_at,
+    )
+
+
+@router.get("/{prova_id}", response_model=ProvaResponse)
+async def get_prova_detail(
+    prova_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> ProvaResponse:
+    """Retorna os dados completos de uma prova (autenticado + scoping)."""
+    result = await _carregar_prova_com_scoping(db, prova_id, current_user)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
+        )
+    prova, vendedor_nome, vendedor_localizacao = result
+
+    # Para calcular rota_projetada precisamos do Usuario completo (com setor).
+    # Consulta simples pelo id ja retornado.
+    vendedor_obj = (
+        await db.execute(select(Usuario).where(Usuario.id == prova.vendedor_id))
+    ).scalar_one_or_none()
+
+    return _build_prova_response(
+        prova, vendedor_obj, vendedor_nome, vendedor_localizacao
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# GET /api/v1/provas/{prova_id}/imagem-url  — Presigned GET URL (ADR-050)
+# ───────────────────────────────────────────────────────────────────────
+
+
+IMAGEM_URL_TTL_SECONDS = 900  # 15 minutos (ADR-050)
+
+
+@router.get("/{prova_id}/imagem-url", response_model=ImagemUrlResponse)
+async def get_imagem_url(
+    prova_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> ImagemUrlResponse:
+    """Retorna uma URL assinada GET (TTL 15min) da arte da prova no R2."""
+    result = await _carregar_prova_com_scoping(db, prova_id, current_user)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
+        )
+    prova, _vendedor_nome, _vendedor_localizacao = result
+
+    try:
+        url = await r2_signed.generate_presigned_get_url(
+            prova.imagem_url, expires_in=IMAGEM_URL_TTL_SECONDS
+        )
+    except Exception:
+        logger.exception(
+            "Falha ao gerar presigned GET URL para %s", prova.imagem_url
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao gerar URL da arte",
+        )
+
+    expires_at = datetime.now(tz=timezone.utc) + timedelta(
+        seconds=IMAGEM_URL_TTL_SECONDS
+    )
+    return ImagemUrlResponse(url=url, expires_at=expires_at)
+
+
+# ───────────────────────────────────────────────────────────────────────
+# GET /api/v1/provas/{prova_id}/movimentacoes  — Historico (ADR-051)
+# ───────────────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/{prova_id}/movimentacoes", response_model=MovimentacaoListResponse
+)
+async def list_movimentacoes(
+    prova_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> MovimentacaoListResponse:
+    """Lista o historico de movimentacoes da prova (ordem cronologica).
+
+    Na Wave 2 retorna sempre `items=[]` porque nenhuma transicao aconteceu.
+    A query e real — quando a Wave 3 inserir movimentacoes, o handler ja
+    devolve sem mudanca de contrato.
+    """
+    # (1) Verifica scoping da prova (404 se escondida/inexistente)
+    scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
+    if scoped is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
+        )
+
+    # (2) Le movimentacoes com JOIN para pegar nome/setor do autor
+    stmt = (
+        select(
+            Movimentacao,
+            Usuario.nome.label("usuario_nome"),
+            Usuario.setor.label("usuario_setor"),
+        )
+        .join(Usuario, Usuario.id == Movimentacao.usuario_id)
+        .where(Movimentacao.prova_id == prova_id)
+        .order_by(Movimentacao.created_at.asc())
+    )
+    rows = (await db.execute(stmt)).all()
+    items = [
+        MovimentacaoResponse(
+            id=m.id,
+            prova_id=m.prova_id,
+            usuario_id=m.usuario_id,
+            usuario_nome=usuario_nome,
+            usuario_setor=usuario_setor,
+            status_anterior=m.status_anterior,
+            status_novo=m.status_novo,
+            motivo_reprovacao=m.motivo_reprovacao,
+            ciclo=m.ciclo,
+            rota_no_momento=m.rota_no_momento,
+            created_at=m.created_at,
+        )
+        for m, usuario_nome, usuario_setor in rows
+    ]
+
+    return MovimentacaoListResponse(items=items, total=len(items))
+
+
+# ───────────────────────────────────────────────────────────────────────
+# GET /api/v1/provas/{prova_id}/etiqueta.pdf  — Re-download PDF
+# ───────────────────────────────────────────────────────────────────────
+
+
+@router.get("/{prova_id}/etiqueta.pdf")
+async def get_etiqueta_pdf(
+    prova_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> Response:
+    """Re-gera o PDF da etiqueta da prova e retorna como streaming binario."""
+    scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
+    if scoped is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
+        )
+    prova, vendedor_nome, _vendedor_localizacao = scoped
+
+    # Busca a etiqueta (snapshot imutavel criado junto com a prova)
+    etiqueta = (
+        await db.execute(
+            select(Etiqueta).where(Etiqueta.prova_id == prova_id)
+        )
+    ).scalar_one_or_none()
+    if etiqueta is None:
+        logger.error(
+            "Prova %s sem etiqueta associada — defeito de integridade.", prova_id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Etiqueta nao encontrada para esta prova",
+        )
+
+    template = await _carregar_template_etiqueta(db)
+    pdf_bytes = gerar_pdf(
+        nome_prova=etiqueta.nome_prova,
+        nro_requerimento=etiqueta.nro_requerimento,
+        vendedor_nome=etiqueta.vendedor_nome,
+        qr_image_bytes=etiqueta.qr_code_image,
+        template=template,
+        created_at=prova.created_at,
+    )
+
+    # Sanitiza o nro_requerimento para uso no Content-Disposition
+    safe_nro = "".join(c if c.isalnum() or c in "-_" else "_" for c in prova.nro_requerimento)
+    filename = f"etiqueta-{safe_nro}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "private, no-cache",
+        },
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# GET /api/v1/provas/{prova_id}/qr-code.png  — QR isolado (ADR-052)
+# ───────────────────────────────────────────────────────────────────────
+
+
+@router.get("/{prova_id}/qr-code.png")
+async def get_qr_code_png(
+    prova_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> Response:
+    """Retorna a imagem PNG do QR Code da prova (BYTEA da tabela etiquetas).
+
+    Usado pelo modal "Visualizar etiqueta" do Componente 08 para exibir o
+    QR code em tamanho grande lado a lado com o PDF da etiqueta — facilita
+    leitura com celular sem imprimir.
+    """
+    scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
+    if scoped is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
+        )
+
+    etiqueta = (
+        await db.execute(
+            select(Etiqueta.qr_code_image).where(Etiqueta.prova_id == prova_id)
+        )
+    ).scalar_one_or_none()
+    if etiqueta is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="QR Code nao encontrado para esta prova",
+        )
+
+    return Response(
+        content=etiqueta,
+        media_type="image/png",
+        headers={
+            "Content-Disposition": 'inline; filename="qr-code.png"',
+            # QR code e imutavel apos criacao (RN-001). Cache privado 5min.
+            "Cache-Control": "private, max-age=300",
+        },
+    )

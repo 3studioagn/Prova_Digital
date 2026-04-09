@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app.api.v1.configuracoes import router as configuracoes_router
+from app.api.v1.provas import router as provas_router
 from app.api.v1.users import router as users_router
 from app.core.config import settings
 from app.core.r2 import get_r2_client
@@ -58,6 +60,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 app.include_router(users_router, prefix="/api/v1/users", tags=["users"])
+app.include_router(provas_router, prefix="/api/v1/provas", tags=["provas"])
+app.include_router(
+    configuracoes_router, prefix="/api/v1/configuracoes", tags=["configuracoes"]
+)
 
 
 @app.get("/health")

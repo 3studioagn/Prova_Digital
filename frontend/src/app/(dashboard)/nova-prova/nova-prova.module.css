@@ -1,0 +1,357 @@
+/*
+ * Pagina Nova Prova — conteudo dentro do .card do dashboard.
+ * Reutiliza os tokens de superficie clara de `globals.css`.
+ * Mobile: esconde o form e exibe aviso (mesmo padrao de /usuarios).
+ */
+
+/* ── Mobile-only notice / desktop wrapper ─────────────────────────────── */
+
+.mobileNotice {
+  display: none;
+}
+
+.desktopOnly {
+  display: contents;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 3rem;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: var(--fs-display);
+  font-weight: 400;
+  line-height: 1.05;
+  color: var(--color-card-text);
+  letter-spacing: -0.01em;
+}
+
+.h2 {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: var(--color-card-text);
+  margin-bottom: 1rem;
+}
+
+/* ── Form ─────────────────────────────────────────────────────────────── */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem 2rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.label {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--color-card-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.input,
+.select {
+  height: 48px;
+  padding: 0 1.25rem;
+  background: var(--color-card-surface);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  transition: border-color 0.15s ease;
+}
+
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.input:disabled,
+.select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1l5 5 5-5' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 1.25rem center;
+  padding-right: 2.75rem;
+  cursor: pointer;
+}
+
+.inlineError {
+  font-size: var(--fs-xs);
+  color: var(--color-danger);
+}
+
+/* ── Dropzone ─────────────────────────────────────────────────────────── */
+
+.dropzone {
+  display: block;
+  min-height: 220px;
+  padding: 1.5rem;
+  background: var(--color-card-surface);
+  border: 2px dashed var(--color-card-border);
+  border-radius: var(--radius-card-lg);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  position: relative;
+}
+
+.dropzone:hover {
+  border-color: var(--color-accent);
+}
+
+.dropzoneActive {
+  border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-card-surface));
+}
+
+.dropzoneFilled {
+  border-style: solid;
+  border-color: var(--color-card-border);
+}
+
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.dropzoneEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 188px;
+  color: var(--color-card-text-muted);
+  text-align: center;
+}
+
+.dropzoneTitle {
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--color-card-text);
+}
+
+.dropzoneHint {
+  font-size: var(--fs-sm);
+}
+
+.previewContainer {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.previewImg {
+  width: 180px;
+  height: 180px;
+  object-fit: cover;
+  border-radius: var(--radius-card-lg);
+  background: var(--color-bg);
+}
+
+.previewInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--color-card-text);
+  font-size: var(--fs-base);
+}
+
+.previewInfo span {
+  color: var(--color-card-text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* ── Botoes ───────────────────────────────────────────────────────────── */
+
+.footerActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-card-border);
+}
+
+.btnPrimary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.875rem 2.5rem;
+  background: var(--color-accent);
+  color: var(--color-card-text);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.btnPrimary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btnSecondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.75rem;
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btnSecondary:hover {
+  opacity: 0.85;
+}
+
+/* ── Erro ─────────────────────────────────────────────────────────────── */
+
+.errorBox {
+  padding: 1rem 1.25rem;
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-card-lg);
+  color: var(--color-card-text);
+  font-size: var(--fs-base);
+}
+
+/* ── Tela de sucesso ──────────────────────────────────────────────────── */
+
+.successGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 2rem;
+  align-items: start;
+}
+
+.infoCard {
+  padding: 1.75rem 2rem;
+  background: var(--color-card-surface);
+  border-radius: var(--radius-card-lg);
+  border: 1px solid var(--color-card-border);
+}
+
+.dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 1.5rem;
+  row-gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.dl dt {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--color-card-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  align-self: start;
+}
+
+.dl dd {
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-card-border);
+}
+
+.pdfPreview {
+  padding: 1.75rem 2rem;
+  background: var(--color-card-surface);
+  border-radius: var(--radius-card-lg);
+  border: 1px solid var(--color-card-border);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 600px;
+}
+
+.pdfFrame {
+  flex: 1;
+  width: 100%;
+  min-height: 540px;
+  border: none;
+  border-radius: calc(var(--radius-card-lg) - 4px);
+  background: #fff;
+}
+
+/* ── Mobile ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .desktopOnly {
+    display: none;
+  }
+
+  .mobileNotice {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    text-align: center;
+  }
+
+  .mobileNotice p {
+    font-size: var(--fs-lg);
+    color: var(--color-card-text-muted);
+    max-width: 320px;
+    line-height: 1.4;
+  }
+}
+
+@media (max-width: 1080px) {
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+  .successGrid {
+    grid-template-columns: 1fr;
+  }
+}
