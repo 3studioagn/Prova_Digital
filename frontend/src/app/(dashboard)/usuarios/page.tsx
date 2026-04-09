@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch, ApiError } from "@/lib/api";
+import { ChevronDownIcon, SearchIcon } from "@/components/icons";
 import styles from "./usuarios.module.css";
 
 interface User {
@@ -42,6 +43,7 @@ async function getToken(): Promise<string | null> {
 export default function UsuariosPage() {
   const [data, setData] = useState<ListResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [listError, setListError] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [busca, setBusca] = useState("");
   const [filtroSetor, setFiltroSetor] = useState("");
@@ -65,6 +67,7 @@ export default function UsuariosPage() {
     const token = await getToken();
     if (!token) return;
     setLoading(true);
+    setListError(null);
     try {
       const params = new URLSearchParams({
         page: String(page),
@@ -79,8 +82,13 @@ export default function UsuariosPage() {
         { token }
       );
       setData(res);
-    } catch {
-      // silent
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : "Falha ao carregar usuarios. Verifique sua conexao.";
+      setListError(message);
+      setData(null);
     } finally {
       setLoading(false);
     }
@@ -218,70 +226,107 @@ export default function UsuariosPage() {
 
   return (
     <>
-      <div className={styles.header}>
-        <h1 className={styles.title}>Usuarios</h1>
-        <button className={styles.createBtn} onClick={openCreate}>
-          + Novo usuario
+      {/* Aviso mostrado apenas em viewports mobile — o recurso nao esta disponivel
+          no tamanho reduzido e a versao desktop continua totalmente funcional. */}
+      <div className={styles.mobileNotice}>
+        <p>Para acessar esse recurso, acesse a versão desktop.</p>
+      </div>
+
+      <div className={styles.desktopOnly}>
+      <header className={styles.pageHeader}>
+        <h1 className={styles.title}>Gerenciador de usuarios</h1>
+        <button
+          type="button"
+          className={styles.primaryBtn}
+          onClick={openCreate}
+        >
+          Novo usuario
         </button>
-      </div>
+      </header>
 
-      <div className={styles.filters}>
-        <input
-          className={styles.filterInput}
-          placeholder="Buscar por nome ou email..."
-          value={busca}
-          onChange={(e) => {
-            setBusca(e.target.value);
-            setPage(1);
-          }}
-        />
-        <select
-          className={styles.filterSelect}
-          value={filtroSetor}
-          onChange={(e) => {
-            setFiltroSetor(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">Todos os setores</option>
-          {SETORES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        <select
-          className={styles.filterSelect}
-          value={filtroAtivo}
-          onChange={(e) => {
-            setFiltroAtivo(e.target.value);
-            setPage(1);
-          }}
-        >
-          <option value="">Todos</option>
-          <option value="true">Ativos</option>
-          <option value="false">Inativos</option>
-        </select>
-      </div>
+      <section className={styles.filters}>
+        <div className={styles.searchField}>
+          <SearchIcon className={styles.searchIcon} aria-hidden="true" />
+          <input
+            type="search"
+            className={styles.searchInput}
+            placeholder="Buscar por nome ou email..."
+            value={busca}
+            onChange={(e) => {
+              setBusca(e.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
 
-      <div className={styles.tableWrap}>
+        <div className={styles.selectField}>
+          <select
+            className={styles.select}
+            value={filtroSetor}
+            onChange={(e) => {
+              setFiltroSetor(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">Todos os setores</option>
+            {SETORES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+          <ChevronDownIcon className={styles.selectChevron} aria-hidden="true" />
+        </div>
+
+        <div className={styles.selectField}>
+          <select
+            className={styles.select}
+            value={filtroAtivo}
+            onChange={(e) => {
+              setFiltroAtivo(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">Todos</option>
+            <option value="true">Ativos</option>
+            <option value="false">Inativos</option>
+          </select>
+          <ChevronDownIcon className={styles.selectChevron} aria-hidden="true" />
+        </div>
+      </section>
+
+      <section className={styles.tableWrap}>
+        <div className={styles.tableScroll}>
         <table className={styles.table}>
           <thead>
             <tr>
               <th>Nome</th>
-              <th>Email</th>
+              <th>E-mail</th>
               <th>Setor</th>
-              <th>Localizacao</th>
+              <th>Localização</th>
               <th>Status</th>
               <th>Perfil</th>
-              <th>Acoes</th>
+              <th className={styles.thActions}>Ações</th>
             </tr>
           </thead>
           <tbody>
             {loading && !data ? (
               <tr>
-                <td colSpan={7} className={styles.empty}>
+                <td colSpan={7} className={styles.stateCell}>
                   Carregando...
+                </td>
+              </tr>
+            ) : listError ? (
+              <tr>
+                <td colSpan={7} className={styles.errorCell}>
+                  <div className={styles.errorMessage}>{listError}</div>
+                  <button
+                    type="button"
+                    className={styles.retryBtn}
+                    onClick={fetchUsers}
+                  >
+                    Tentar novamente
+                  </button>
                 </td>
               </tr>
             ) : data && data.items.length > 0 ? (
@@ -294,49 +339,51 @@ export default function UsuariosPage() {
                   <td>
                     <span
                       className={
-                        u.ativo ? styles.badgeActive : styles.badgeInactive
+                        u.ativo ? styles.statusActive : styles.statusInactive
                       }
                     >
                       {u.ativo ? "Ativo" : "Inativo"}
                     </span>
                   </td>
+                  <td>{u.is_admin ? "Admin" : "—"}</td>
                   <td>
-                    {u.is_admin && (
-                      <span className={styles.badgeAdmin}>Admin</span>
-                    )}
-                  </td>
-                  <td>
-                    <button
-                      className={styles.actionBtn}
-                      onClick={() => openEdit(u)}
-                    >
-                      Editar
-                    </button>
-                    {u.ativo && (
+                    <div className={styles.actions}>
                       <button
-                        className={styles.actionBtnDanger}
-                        onClick={() => openDeactivate(u)}
+                        type="button"
+                        className={styles.editBtn}
+                        onClick={() => openEdit(u)}
                       >
-                        Desativar
+                        Editar
                       </button>
-                    )}
+                      {u.ativo && (
+                        <button
+                          type="button"
+                          className={styles.dangerBtn}
+                          onClick={() => openDeactivate(u)}
+                        >
+                          Desativar
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={7} className={styles.empty}>
+                <td colSpan={7} className={styles.stateCell}>
                   Nenhum usuario encontrado.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
-      </div>
+        </div>
+      </section>
 
       {data && data.pages > 1 && (
         <div className={styles.pagination}>
           <button
+            type="button"
             className={styles.pageBtn}
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
@@ -347,6 +394,7 @@ export default function UsuariosPage() {
             Pagina {data.page} de {data.pages} ({data.total} registros)
           </span>
           <button
+            type="button"
             className={styles.pageBtn}
             disabled={page >= data.pages}
             onClick={() => setPage((p) => p + 1)}
@@ -355,87 +403,125 @@ export default function UsuariosPage() {
           </button>
         </div>
       )}
+      </div>
 
       {/* ── Create Modal ──────────────────────────────────────────────────── */}
       {modal === "create" && (
-        <div className={styles.modalOverlay} onClick={closeModal}>
+        <div
+          className={styles.modalOverlay}
+          onClick={closeModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-create-title"
+        >
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h2 className={styles.modalTitle}>Novo usuario</h2>
-            {modalError && <div className={styles.modalError}>{modalError}</div>}
+            <h2 id="modal-create-title" className={styles.modalTitle}>
+              Novo usuario
+            </h2>
+            <div className={styles.modalDivider} />
+            {modalError && (
+              <div className={styles.modalError}>{modalError}</div>
+            )}
             <form className={styles.modalForm} onSubmit={handleCreate}>
-              <div className={styles.field}>
-                <label>Nome</label>
+              <div className={styles.modalField}>
+                <label htmlFor="create-nome">Nome:</label>
                 <input
+                  id="create-nome"
                   required
                   maxLength={150}
                   value={fNome}
                   onChange={(e) => setFNome(e.target.value)}
+                  className={styles.modalInput}
                 />
               </div>
-              <div className={styles.field}>
-                <label>Email</label>
+              <div className={styles.modalField}>
+                <label htmlFor="create-email">E-mail:</label>
                 <input
+                  id="create-email"
                   required
                   type="email"
                   maxLength={255}
                   value={fEmail}
                   onChange={(e) => setFEmail(e.target.value)}
+                  className={styles.modalInput}
                 />
               </div>
-              <div className={styles.field}>
-                <label>Senha (min. 8, com letra e numero)</label>
+              <div className={styles.modalField}>
+                <label htmlFor="create-senha">
+                  Senha (min. 8, com letra e numero):
+                </label>
                 <input
+                  id="create-senha"
                   required
                   type="password"
                   minLength={8}
                   maxLength={128}
                   value={fSenha}
                   onChange={(e) => setFSenha(e.target.value)}
+                  className={styles.modalInput}
+                  placeholder="********************"
                 />
               </div>
-              <div className={styles.field}>
-                <label>Setor</label>
-                <select
-                  required
-                  value={fSetor}
-                  onChange={(e) => {
-                    setFSetor(e.target.value);
-                    if (e.target.value !== "VENDEDOR") setFLocalizacao("");
-                  }}
-                >
-                  {SETORES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {fSetor === "VENDEDOR" && (
-                <div className={styles.field}>
-                  <label>Localizacao</label>
+              <div className={styles.modalField}>
+                <label htmlFor="create-setor">Setor</label>
+                <div className={styles.modalSelectWrap}>
                   <select
+                    id="create-setor"
                     required
-                    value={fLocalizacao}
-                    onChange={(e) => setFLocalizacao(e.target.value)}
+                    value={fSetor}
+                    onChange={(e) => {
+                      setFSetor(e.target.value);
+                      if (e.target.value !== "VENDEDOR") setFLocalizacao("");
+                    }}
+                    className={styles.modalInput}
                   >
-                    <option value="">Selecione...</option>
-                    {LOCALIZACOES.map((l) => (
-                      <option key={l} value={l}>
-                        {l}
+                    {SETORES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
                       </option>
                     ))}
                   </select>
+                  <ChevronDownIcon
+                    className={styles.modalChevron}
+                    aria-hidden="true"
+                  />
+                </div>
+              </div>
+              {fSetor === "VENDEDOR" && (
+                <div className={styles.modalField}>
+                  <label htmlFor="create-loc">Localizacao</label>
+                  <div className={styles.modalSelectWrap}>
+                    <select
+                      id="create-loc"
+                      required
+                      value={fLocalizacao}
+                      onChange={(e) => setFLocalizacao(e.target.value)}
+                      className={styles.modalInput}
+                    >
+                      <option value="">Selecione...</option>
+                      {LOCALIZACOES.map((l) => (
+                        <option key={l} value={l}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDownIcon
+                      className={styles.modalChevron}
+                      aria-hidden="true"
+                    />
+                  </div>
                 </div>
               )}
-              <div className={styles.checkRow}>
+              <label className={styles.checkRow}>
                 <input
                   type="checkbox"
-                  id="isAdmin"
+                  className={styles.checkInput}
                   checked={fIsAdmin}
                   onChange={(e) => setFIsAdmin(e.target.checked)}
                 />
-                <label htmlFor="isAdmin">Administrador</label>
-              </div>
+                <span className={styles.checkBox} aria-hidden="true" />
+                <span>Administrador</span>
+              </label>
               <div className={styles.modalActions}>
                 <button
                   type="button"
@@ -449,7 +535,7 @@ export default function UsuariosPage() {
                   className={styles.btnPrimary}
                   disabled={modalLoading}
                 >
-                  {modalLoading ? "Criando..." : "Criar"}
+                  {modalLoading ? "Cadastrando..." : "Cadastrar"}
                 </button>
               </div>
             </form>
@@ -459,67 +545,102 @@ export default function UsuariosPage() {
 
       {/* ── Edit Modal ────────────────────────────────────────────────────── */}
       {modal === "edit" && modalUser && (
-        <div className={styles.modalOverlay} onClick={closeModal}>
+        <div
+          className={styles.modalOverlay}
+          onClick={closeModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-edit-title"
+        >
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h2 className={styles.modalTitle}>Editar usuario</h2>
-            {modalError && <div className={styles.modalError}>{modalError}</div>}
+            <h2 id="modal-edit-title" className={styles.modalTitle}>
+              Editar usuario
+            </h2>
+            <div className={styles.modalDivider} />
+            {modalError && (
+              <div className={styles.modalError}>{modalError}</div>
+            )}
             <form className={styles.modalForm} onSubmit={handleEdit}>
-              <div className={styles.field}>
-                <label>Nome</label>
+              <div className={styles.modalField}>
+                <label htmlFor="edit-nome">Nome:</label>
                 <input
+                  id="edit-nome"
                   required
                   maxLength={150}
                   value={fNome}
                   onChange={(e) => setFNome(e.target.value)}
+                  className={styles.modalInput}
                 />
               </div>
-              <div className={styles.field}>
-                <label>Email</label>
-                <input disabled value={modalUser.email} />
+              <div className={styles.modalField}>
+                <label htmlFor="edit-email">E-mail:</label>
+                <input
+                  id="edit-email"
+                  disabled
+                  value={modalUser.email}
+                  className={`${styles.modalInput} ${styles.modalInputDisabled}`}
+                />
               </div>
-              <div className={styles.field}>
-                <label>Setor</label>
-                <select
-                  required
-                  value={fSetor}
-                  onChange={(e) => {
-                    setFSetor(e.target.value);
-                    if (e.target.value !== "VENDEDOR") setFLocalizacao("");
-                  }}
-                >
-                  {SETORES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {fSetor === "VENDEDOR" && (
-                <div className={styles.field}>
-                  <label>Localizacao</label>
+              <div className={styles.modalField}>
+                <label htmlFor="edit-setor">Setor</label>
+                <div className={styles.modalSelectWrap}>
                   <select
+                    id="edit-setor"
                     required
-                    value={fLocalizacao}
-                    onChange={(e) => setFLocalizacao(e.target.value)}
+                    value={fSetor}
+                    onChange={(e) => {
+                      setFSetor(e.target.value);
+                      if (e.target.value !== "VENDEDOR") setFLocalizacao("");
+                    }}
+                    className={styles.modalInput}
                   >
-                    <option value="">Selecione...</option>
-                    {LOCALIZACOES.map((l) => (
-                      <option key={l} value={l}>
-                        {l}
+                    {SETORES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
                       </option>
                     ))}
                   </select>
+                  <ChevronDownIcon
+                    className={styles.modalChevron}
+                    aria-hidden="true"
+                  />
+                </div>
+              </div>
+              {fSetor === "VENDEDOR" && (
+                <div className={styles.modalField}>
+                  <label htmlFor="edit-loc">Localizacao</label>
+                  <div className={styles.modalSelectWrap}>
+                    <select
+                      id="edit-loc"
+                      required
+                      value={fLocalizacao}
+                      onChange={(e) => setFLocalizacao(e.target.value)}
+                      className={styles.modalInput}
+                    >
+                      <option value="">Selecione...</option>
+                      {LOCALIZACOES.map((l) => (
+                        <option key={l} value={l}>
+                          {l}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDownIcon
+                      className={styles.modalChevron}
+                      aria-hidden="true"
+                    />
+                  </div>
                 </div>
               )}
-              <div className={styles.checkRow}>
+              <label className={styles.checkRow}>
                 <input
                   type="checkbox"
-                  id="editAdmin"
+                  className={styles.checkInput}
                   checked={fIsAdmin}
                   onChange={(e) => setFIsAdmin(e.target.checked)}
                 />
-                <label htmlFor="editAdmin">Administrador</label>
-              </div>
+                <span className={styles.checkBox} aria-hidden="true" />
+                <span>Administrador</span>
+              </label>
               <div className={styles.modalActions}>
                 <button
                   type="button"
@@ -543,22 +664,36 @@ export default function UsuariosPage() {
 
       {/* ── Deactivate Confirmation Modal ─────────────────────────────────── */}
       {modal === "deactivate" && modalUser && (
-        <div className={styles.modalOverlay} onClick={closeModal}>
+        <div
+          className={styles.modalOverlay}
+          onClick={closeModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-deact-title"
+        >
           <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <h2 className={styles.modalTitle}>Desativar usuario</h2>
-            {modalError && <div className={styles.modalError}>{modalError}</div>}
-            <p style={{ color: "var(--color-text-secondary)", marginBottom: "1.5rem" }}>
-              Tem certeza que deseja desativar <strong>{modalUser.nome}</strong>?
-              O usuario nao conseguira mais acessar o sistema.
+            <h2 id="modal-deact-title" className={styles.modalTitle}>
+              Desativar usuario
+            </h2>
+            <div className={styles.modalDivider} />
+            {modalError && (
+              <div className={styles.modalError}>{modalError}</div>
+            )}
+            <p className={styles.modalText}>
+              Tem certeza que deseja desativar{" "}
+              <strong>{modalUser.nome}</strong>? O usuario nao conseguira mais
+              acessar o sistema.
             </p>
             <div className={styles.modalActions}>
               <button
+                type="button"
                 className={styles.btnSecondary}
                 onClick={closeModal}
               >
                 Cancelar
               </button>
               <button
+                type="button"
                 className={styles.btnDanger}
                 disabled={modalLoading}
                 onClick={handleDeactivate}

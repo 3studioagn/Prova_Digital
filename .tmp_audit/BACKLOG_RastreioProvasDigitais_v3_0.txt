@@ -1,0 +1,149 @@
+Rastreio de Provas Digitais
+Backlog de Produto
+Versão
+v3.0
+Data
+Abril / 2026
+Organização
+3Studio
+Critérios de Prioridade (MoSCoW)
+Must Have
+Requisito bloqueante — sem o qual o sistema não opera ou não cumpre seu objetivo.
+Should Have
+Importante para a experiência completa, mas não bloqueia o MVP.
+Could Have
+Desejável se não impactar prazo ou esforço dos itens acima.
+Won’t Have
+Fora do escopo desta versão — documentado para versões futuras.
+Definition of Done — Global
+Todo componente do backlog deve atender aos critérios abaixo antes de ser marcado como concluído:
+1.  Código revisado por ao menos um outro membro da equipe (code review).
+2.  Testes unitários implementados para a lógica de negócio — cobertura mínima de 80%.
+3.  Testes de integração passando no ambiente de staging.
+4.  Migrations de banco de dados aplicadas, versionadas e documentadas.
+5.  Funcionalidade validada contra os critérios de aceitação das histórias de usuário vinculadas.
+6.  Sem erros no console do browser ou logs de erro crítico no backend.
+7.  Documentação interna (comentários de código, README do módulo) atualizada se aplicável.
+8.  Políticas de RLS relacionadas ao componente verificadas e versionadas em /migrations/rls/.
+Waves de Entrega
+Cada wave só pode ser iniciada após a conclusão de todas as dependências da wave anterior. A coluna “Depende de” referencia os números dos componentes que devem estar operacionais antes de iniciar o desenvolvimento do item.
+#
+Componente
+Prioridade
+Depende
+Justificativa
+Wave 0  ·  Infraestrutura e Pipeline — Setup do ambiente e keep-alive. Nada mais roda sem isso.
+01
+Configuração de Infraestrutura
+Supabase · PostgreSQL · Alembic · R2 · Deploy
+Must Have
+—
+Todas as camadas dependem do banco, storage e deploy. Sem isso, nenhum endpoint existe.
+02
+Cron Job de Keep-Alive
+Script agendado · Supabase free tier · previne pausa após 7 dias
+Must Have
+01
+Risco de indisponibilidade total do banco se ignorado. Custo zero. Deve entrar em produção junto com o deploy do Componente 01.
+Wave 1  ·  Autenticação e Controle de Acesso — Identidade e permissões — base de toda interação com o sistema.
+03
+Tela de Login e Sessão
+Supabase Auth · JWT · PyJWT · timeout 30 min
+Must Have
+01
+Nenhuma rota do sistema pode ser acessada sem usuário autenticado. É o ponto de entrada universal.
+04
+Cadastro e Gestão de Usuários
+CRUD de usuários · setores · localização (Matriz/Filial) para vendedores · perfil 3Studio (master)
+Must Have
+03
+Os setores e a localização do vendedor determinam o que cada ator pode fazer e qual rota a prova seguirá. Sem usuários cadastrados, a operação não começa.
+05
+Controle de Acesso por Perfil (RBAC)
+Middleware de rotas · restrição por role e localização · RLS no PostgreSQL
+Must Have
+04
+Impede que um vendedor crie provas ou acesse relatórios. Garante integridade das transições e roteamento por localização (RN-004, RN-007). Deve estar ativo antes de qualquer funcionalidade de domínio.
+Wave 2  ·  Núcleo do Domínio — Criação, visibilidade, etiqueta e configurações — o objeto central do sistema.
+06
+Cadastro de Prova Digital + Etiqueta
+Formulário · upload JPG/PNG (máx 10 MB) no R2 · geração de QR Code · geração automática de etiqueta imprimível (nome, requerimento, vendedor, QR Code)
+Must Have
+01, 04, 05
+É o objeto central do sistema. Sem provas criadas, não há nada a rastrear. A etiqueta (RF-003) é gerada no mesmo momento da criação e disponibilizada para impressão/download, permitindo fixação na pasta física. Depende do storage (R2) e das permissões (RBAC).
+07
+Listagem, Pesquisa e Filtros de Provas
+Paginação · filtros por status, período, vendedor, cliente e rota
+Must Have
+06
+Sem listagem, as provas criadas ficam inacessíveis. É a tela de operação diária da 3Studio. Filtro por rota (padrão/direta) adicionado nesta versão.
+08
+Visualização de Prova (Detalhe)
+Dados completos · arte · histórico de movimentações · rota seguida · motivo de reprovação
+Must Have
+06
+Pré-requisito da timeline (Componente 12). O detalhe da prova exibe rota determinada, eventuais reprovações com motivo e o histórico completo de ciclos.
+09
+Tela de Configurações do Sistema
+Parâmetro de atraso em horas úteis · template de etiqueta · RF-021 · acesso exclusivo 3Studio
+Must Have
+05
+Implementa RF-021 e RN-008. O parâmetro de atraso deve existir antes do dashboard exibir o contador “Atrasadas”. Inclui configuração do template de etiqueta (RN-011). Acesso restrito ao perfil 3Studio.
+Wave 3  ·  Fluxo de Movimentação e Rastreamento — QR Code, assinatura, transição de status, reprovação e roteamento.
+10
+Leitura de QR Code via Câmera
+html5-qrcode · permissão de câmera · decode do ID da prova
+Must Have
+06
+É o mecanismo de identidade. O QR Code conecta o objeto físico (prova impressa + etiqueta) ao registro digital. Sem ele, o fluxo não pode ser iniciado por atores externos à 3Studio.
+11
+Assinatura Digital e Transição de Status
+react-signature-canvas · máquina de estados (Pydantic v2) · log imutável · suporte a aprovação/reprovação · roteamento por localização
+Must Have
+10, 05
+A assinatura é o comprovante de cada movimentação (RN-003). A máquina de estados implementa as três rotas da Matriz de Transições (Seção 5 dos Requisitos): rota padrão (Matriz), rota direta (Filial) e reprovação. O roteamento automático por localização do vendedor (RN-007) é resolvido neste componente. Motivo obrigatório na reprovação (RF-007).
+12
+Timeline Visual de Estágios
+Framer Motion · ramificação de rotas · indicação de reprovação · responsável e timestamp por etapa
+Must Have
+11
+Exibe o histórico acumulado pelas transições, incluindo a rota seguida (padrão ou direta), reprovações com motivo e múltiplos ciclos. Só existe dado útil para renderizar após o fluxo de movimentação estar funcionando.
+13
+Cancelamento de Prova Digital
+Motivo obrigatório · imutabilidade pós-cancelamento (RN-005)
+Must Have
+06, 05
+Requisito operacional necessário desde o início da operação real. Independe da timeline completa, mas exige que a prova exista e o perfil seja validado.
+14
+Reinício de Ciclo (Reprovação)
+Ação administrativa 3Studio · retorna status a “Criada” · preserva histórico completo no audit log
+Must Have
+11, 06
+Implementa RF-008 e RN-006. Permite que a 3Studio reinicie o fluxo de provas reprovadas após correção, sem perda de rastreabilidade. O histórico do ciclo anterior é preservado integralmente.
+Wave 4  ·  Dashboard e Visibilidade Operacional — Contadores em tempo real — depende de provas em trânsito.
+15
+Dashboard em Tempo Real
+Recharts · Supabase Realtime (WebSocket) · contadores clicáveis · inclui contadores de Reprovadas e Com Motorista
+Must Have
+11
+Os contadores só são significativos quando há provas transitando entre status. Os novos contadores “Reprovadas” e “Com Motorista” refletem os fluxos adicionados nesta versão. Sem Supabase Realtime, seria necessário refresh manual, quebrando o RNF-008.
+Wave 5  ·  Relatórios e Refinamento de UX — Camada analítica — requer histórico acumulado.
+16
+Relatórios Gerenciais
+Tempo médio de aprovação · provas por vendedor · atrasadas · taxa de reprovação · distribuição por rota · exportação CSV
+Should Have
+12, 15
+Requer dados históricos acumulados. Não bloqueia a operação. Novos indicadores: taxa de reprovação por vendedor e distribuição de provas por rota (padrão vs. direta). O indicador de “atrasadas” (RN-008) depende do parâmetro configurado no Componente 09.
+17
+Atalhos Rápidos
+Shortcuts para escanear QR Code, listar provas e acessar relatórios
+Should Have
+10, 07, 16
+Melhoria de UX sobre funcionalidades já existentes (RF-016). Só agrega valor quando os módulos atalhos já estão operacionais.
+Wave 6  ·  Segurança e Auditoria — Interface de consulta ao log imutável gerado desde a Wave 3.
+18
+Interface de Log de Auditoria
+Tabela imutável · acesso restrito ao perfil 3Studio · RNF-005 · inclui registros de reprovação e reinício de ciclo
+Should Have
+11
+O log em si é gerado a partir do Componente 11 (Wave 3) — esta entrada entrega apenas a interface de consulta acessível pelo perfil 3Studio. Reclassificado de Must Have para Should Have: o log existe e é imutável independentemente desta tela. A interface de visualização não bloqueia a operação.

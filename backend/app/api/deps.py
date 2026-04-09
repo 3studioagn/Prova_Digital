@@ -40,7 +40,7 @@ async def get_current_user(
 
     token = credentials.credentials
     try:
-        payload = verify_token(token)
+        payload = await verify_token(token)
     except jwt.ExpiredSignatureError:
         logger.warning("JWT expirado")
         raise HTTPException(

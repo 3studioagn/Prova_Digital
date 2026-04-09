@@ -1,0 +1,103 @@
+Rastreio de Provas Digitais
+Documento de Arquitetura Técnica
+Versão  v2.0
+Data  Abril / 2026
+Organização  3Studio
+1. Stack Tecnológica
+Frontend
+Next.js 14+
+App Router — estrutura de rotas, SSR e suporte TypeScript nativo.
+TypeScript
+Tipagem estrita obrigatória em todo o projeto.
+CSS Modules
+Estilização modular com escopo local por componente — sem dependência de framework CSS externo.
+Libs Especializadas — Frontend
+Framer Motion
+Animações da timeline de status e transições de tela.
+Recharts
+Gráficos e contadores do dashboard em tempo real.
+html5-qrcode
+Leitura de QR Code pela câmera integrada no browser.
+qrcode.react
+Geração do QR Code único no momento de criação da prova.
+react-signature-canvas
+Captura da assinatura digital do usuário responsável.
+Backend
+FastAPI
+Python 3.11+ — framework async com geração automática de OpenAPI.
+SQLAlchemy 2.0
+ORM com suporte async e mapeamento das entidades do domínio.
+Pydantic v2
+Validação de payloads e enforcement da máquina de estados de transição.
+Alembic
+Migrations versionadas do schema do banco de dados (tabelas de domínio).
+PyJWT ≥ 2.8
+Verificação da assinatura dos tokens JWT emitidos pelo Supabase Auth. Substitui o python-jose (inativo, CVEs em aberto). Nunca emite tokens.
+Separação de responsabilidades — Autenticação:  Supabase Auth emite tokens JWT, gerencia sessões, refresh e expiração.  PyJWT verifica a assinatura do JWT no FastAPI. Nunca emite tokens.
+Banco de Dados
+PostgreSQL
+Banco relacional via Supabase free tier (500 MB incluídos).
+Supabase Realtime
+WebSocket nativo para atualização dos contadores do dashboard.
+Supabase Auth
+Fonte de verdade da autenticação — emissão de JWT, sessões e expiração.
+Storage de Arquivos
+Cloudflare R2
+Object storage com 10 GB gratuitos e zero cobrança de egress. Armazena as artes das provas digitais.
+boto3
+SDK Python compatível com a API S3 para upload e acesso às artes no R2.
+Custo operacional estimado:  R$ 0 dentro dos limites de uso projetados para o projeto.  Ponto de custo futuro:  Cloudflare R2 acima de 10 GB acumulados de artes.  Atenção operacional:  Supabase free tier pausa projetos após 7 dias sem requisições. O Componente 02 do Backlog (Cron Job de Keep-Alive) mitiga esse risco a custo zero.
+2. Separação de Responsabilidades — Alembic vs Supabase
+O projeto utiliza dois mecanismos de gerenciamento de schema. A tabela abaixo define o que cada um controla. Misturar as responsabilidades — por exemplo, criar tabelas de domínio via painel do Supabase ou tentar versionar as tabelas de Auth via Alembic — resulta em estados inconsistentes difíceis de reproduzir.
+Responsabilidade
+Gerenciado por
+Mecanismo
+Tabelas de domínio (provas, movimentações, usuários da aplicação, logs)
+Alembic
+Migrations versionadas em /migrations/. Executadas via alembic upgrade head no deploy.
+Tabelas de autenticação (auth.users, auth.sessions)
+Supabase Dashboard
+Gerenciadas internamente pelo Supabase Auth. Não tocar via Alembic.
+Políticas de Row Level Security (RLS)
+Scripts SQL versionados
+Mantidos em /migrations/rls/. Reaplicados manualmente após recriação de tabela. Nunca criar RLS exclusivamente via painel do Supabase sem versionamento.
+Índices de performance
+Alembic
+Incluídos nas migrations versionadas junto às tabelas correspondentes.
+Seeds de dados iniciais (perfis, configurações padrão)
+Alembic
+Migration de seed executada uma única vez no primeiro deploy do ambiente.
+Regra crítica: toda política de RLS deve existir como arquivo .sql em /migrations/rls/ antes de ser aplicada ao banco. Após qualquer DROP TABLE ou recriação de tabela via Alembic, as políticas de RLS daquele schema devem ser reaplicadas manualmente a partir dos arquivos versionados.
+3. Estratégia de Testes
+A estratégia segue três camadas complementares, cobrindo desde a lógica de negócio isolada até fluxos de usuário completos no browser. A cobertura mínima de 80% aplica-se à lógica de negócio do backend — máquina de estados, RBAC e regras de cálculo de atraso.
+Camada
+Foco e Cenários Críticos
+Ferramentas
+Meta de Cobertura
+Camada 1 — Unitários
+Máquina de estados: transições válidas e tentativas de salto de etapa.
+RBAC: cada perfil só acessa o que é permitido.
+RN-006: lógica de cálculo de provas atrasadas.
+Validação de campos com Pydantic v2.
+pytest ≥ 8.0
+pytest-asyncio ≥ 0.23
+≥ 80% nas camadas de domínio e serviço do backend.
+Camada 2 — Integração
+Endpoints FastAPI com banco PostgreSQL real (ambiente isolado de teste).
+Ciclo completo: criação → transição → cancelamento.
+Rejeição de transições inválidas.
+RLS impedindo acesso entre perfis diferentes.
+pytest + httpx
+(AsyncClient)
+banco PostgreSQL isolado
+100% dos endpoints críticos (transições de status, autenticação, RBAC).
+Camada 3 — E2E
+Fluxo completo: login → escanear QR Code → assinar → confirmar transição.
+Dashboard em tempo real após transição.
+Fluxo de cancelamento com motivo.
+Restrição de ações por perfil no browser.
+Playwright ≥ 1.40
+(câmera mockada via
+API de permissões)
+Cenários críticos cobertos manualmente antes de cada deploy em staging.
+Nota sobre câmera em E2E: o Playwright suporta injeção de media streams via API de permissões do browser, permitindo simular a leitura de QR Code em ambiente headless sem câmera física. O QR Code de teste deve ser pré-gerado como fixture estática nos testes.

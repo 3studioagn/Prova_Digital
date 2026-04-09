@@ -1,17 +1,31 @@
+/*
+ * Layout dashboard — sidebar escura a esquerda + cartao claro a direita.
+ *
+ * Estrutura:
+ *   .wrapper         : flex horizontal (sidebar + main)
+ *     .sidebar       : fixed, 280px, fundo preto, conteudo alinhado em coluna
+ *     .main          : flex 1, padding que mostra o fundo preto em volta
+ *       .card        : cartao cinza claro com cantos arredondados, conteudo real
+ *
+ * Breakpoint mobile < 768px: sidebar vira drawer off-canvas, .main vai full-width.
+ */
+
 .wrapper {
   display: flex;
   min-height: 100vh;
   background: var(--color-bg);
 }
 
-/* Sidebar */
+/* ── Sidebar ────────────────────────────────────────────────────────────── */
+
 .sidebar {
   width: var(--sidebar-width);
   background: var(--color-bg-sidebar);
-  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
-  padding: 2rem 1.5rem;
+  justify-content: center;
+  gap: 4rem;
+  padding: 4rem;
   position: fixed;
   top: 0;
   left: 0;
@@ -19,122 +33,380 @@
   z-index: 10;
 }
 
-.logo {
-  font-size: 1.125rem;
-  font-weight: 700;
-  letter-spacing: 0.15em;
-  color: var(--color-text-primary);
-  margin-bottom: 3rem;
+.sidebarTop {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
+.logo {
+  display: block;
+  width: 100px;
+  height: auto;
+  margin-bottom: 4rem;
+}
+
+.greeting {
+  font-size: 1.5rem;
+  font-weight: 400;
+  color: var(--color-text-primary);
+  margin-bottom: 1rem;
+}
+
+/* Campo de busca na sidebar */
+.searchBox {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: var(--color-bg-input);
+  border-radius: var(--radius-pill);
+  padding: 0 1rem 0 2.75rem;
+  height: 44px;
+  margin-bottom: 3rem;
+  width: 280px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  color: var(--color-text-dim);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: 0.9375rem;
+}
+
+.searchInput::placeholder {
+  color: var(--color-text-dim);
+}
+
+.searchInput::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Lista de itens da sidebar */
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  flex: 1;
+  gap: 0.1rem;
 }
 
 .navItem {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.625rem 0.75rem;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-secondary);
-  font-size: 0.9375rem;
+  gap: 0.875rem;
+  padding: 0.625rem 0.5rem 0.625rem 0.75rem;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  font-weight: 300;
   text-decoration: none;
-  transition: background 0.15s, color 0.15s;
+  border-radius: 6px;
+  transition: color 0.15s;
+  cursor: pointer;
 }
 
 .navItem:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-primary);
+  color: var(--color-accent);
   text-decoration: none;
+}
+
+.navItem[aria-disabled="true"] {
+  cursor: default;
+}
+
+.navItem[aria-disabled="true"]:hover {
+  color: var(--color-text-primary);
 }
 
 .navItemActive {
   composes: navItem;
-  color: var(--color-text-primary);
-  background: rgba(255, 203, 92, 0.1);
-  border-left: 2px solid var(--color-accent);
+  color: var(--color-accent);
 }
 
-.navSection {
-  margin-top: 2rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+.navItemActive::before {
+  content: "";
+  position: absolute;
+  left: -0.5rem;
+  top: 0.25rem;
+  bottom: 0.25rem;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--color-accent);
 }
+
+.navIcon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.navDivider {
+  height: 1px;
+  margin: 2rem 0 2rem;
+}
+
+/* ── Bloco inferior com avatar / nome / sair ────────────────────────────── */
 
 .userBlock {
-  display: flex;
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
   align-items: center;
   gap: 0.75rem;
-  padding-top: 1.5rem;
-  border-top: 1px solid var(--color-border);
-  margin-top: auto;
+  padding-top: 1rem;
+  margin-top: 1rem;
 }
 
 .avatar {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: var(--color-accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 600;
-  color: var(--color-text-dark);
-  font-size: 1rem;
+  background: #d9d9d9;
+  flex-shrink: 0;
 }
 
 .userInfo {
-  flex: 1;
+  min-width: 0;
 }
 
 .userName {
-  font-size: 0.875rem;
+  font-size: 0.9rem;
   color: var(--color-text-primary);
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .userRole {
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
 }
 
 .logoutBtn {
   background: none;
   border: none;
-  color: var(--color-text-secondary);
+  color: var(--color-accent);
   cursor: pointer;
-  font-size: 0.8125rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  transition: color 0.15s;
+  font-size: 0.875rem;
+  padding: 0.25rem 0.25rem;
+  transition: opacity 0.15s;
 }
 
 .logoutBtn:hover {
-  color: var(--color-danger);
+  opacity: 0.8;
 }
 
-/* Main content */
+/* ── Main content — cartao claro a direita ──────────────────────────────── */
+
 .main {
   flex: 1;
   margin-left: var(--sidebar-width);
-  padding: 2rem;
-  background: #0a0a0a;
+  padding: 1rem;
   min-height: 100vh;
+  background: var(--color-bg);
 }
 
-/* Responsive: hide sidebar on small screens */
+.card {
+  background: var(--color-card-bg);
+  border-radius: var(--radius-card-xl);
+  padding: var(--card-padding);
+  min-height: calc(100vh - 2rem);
+  color: var(--color-card-text);
+}
+
+/* ── Mobile helpers (hidden on desktop) ─────────────────────────────────── */
+
+.mobileHeader {
+  display: none;
+}
+
+.mobileHeaderInner {
+  /* Base estrutura — so se torna visivel quando o parent mobileHeader vira visible */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hamburger {
+  display: none;
+}
+
+.mobileLogo {
+  display: none;
+}
+
+.closeBtn {
+  /* Botao X do drawer mobile — escondido no desktop, posicionado no topo-direita no mobile */
+  display: none;
+}
+
+.backdrop {
+  display: none;
+}
+
+/* ── Responsive: < 768px ────────────────────────────────────────────────── *
+ * Mobile redesenhado para o Figma:
+ *   • .mobileHeader vira um "pill" flutuante com padding ao redor (respiro)
+ *   • Drawer e off-canvas com cantos arredondados no lado direito
+ *   • Greeting e search sao escondidos no drawer (design do Figma)
+ *   • Botao X no topo-direita do drawer para fechar
+ */
+
 @media (max-width: 768px) {
+  .wrapper {
+    flex-direction: column;
+  }
+
+  /* Container externo do mobile header: da o respiro em volta do pill */
+  .mobileHeader {
+    display: block;
+    padding: 1rem 1rem 0.5rem;
+    background: transparent;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
+  /* Pill dark rounded — logo a esquerda, hamburger a direita */
+  .mobileHeaderInner {
+    height: 56px;
+    padding: 0 1.5rem;
+    background: var(--color-bg-input);
+    border-radius: 9999px;
+  }
+
+  .mobileLogo {
+    display: block;
+    height: auto;
+    width: 90px;
+  }
+
+  .hamburger {
+    display: inline-flex;
+    flex-direction: column;
+    justify-content: space-between;
+    width: 26px;
+    height: 18px;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .hamburgerBar {
+    display: block;
+    width: 100%;
+    height: 2px;
+    background: var(--color-text-primary);
+    border-radius: 2px;
+  }
+
+  /* ── Drawer off-canvas ──────────────────────────────────────────────── */
   .sidebar {
+    display: flex;
+    width: min(80vw, 340px);
+    padding: 1.75rem 1.75rem 1.25rem;
+    justify-content: flex-start;
+    gap: 1.5rem;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease-out;
+    z-index: 30;
+    border-top-right-radius: 28px;
+    border-bottom-right-radius: 28px;
+  }
+
+  .sidebarOpen {
+    transform: translateX(0);
+  }
+
+  /* Botao X no topo-direita do drawer */
+  .closeBtn {
+    display: inline-flex;
+    position: absolute;
+    top: 1.5rem;
+    right: 1.25rem;
+    width: 36px;
+    height: 36px;
+    background: none;
+    border: none;
+    color: var(--color-text-primary);
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 6px;
+    transition: opacity 0.15s;
+  }
+
+  .closeBtn:hover {
+    opacity: 0.75;
+  }
+
+  /* Logo do drawer menor no mobile, sem o margin-bottom generoso do desktop */
+  .logo {
+    width: 100px;
+    margin-bottom: 1.5rem;
+  }
+
+  /* Escondido no drawer mobile (segue o Figma) */
+  .greeting {
     display: none;
   }
+
+  .searchBox {
+    display: none;
+  }
+
+  .navDivider {
+    margin: 1.25rem 0;
+    background: var(--color-border);
+  }
+
+  .navItem,
+  .navItemActive {
+    font-size: 0.9375rem;
+    padding: 0.5rem 0.5rem 0.5rem 0.75rem;
+  }
+
+  .userBlock {
+    margin-top: 0.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 25;
+  }
+
+  /* Main content no mobile */
   .main {
     margin-left: 0;
+    padding: 0 1rem 1rem;
+  }
+
+  .card {
+    padding: 1.5rem 1.25rem;
+    border-radius: var(--radius-card-lg);
+    min-height: calc(100vh - 72px - 1rem);
   }
 }

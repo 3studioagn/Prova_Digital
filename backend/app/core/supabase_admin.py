@@ -57,14 +57,36 @@ async def delete_auth_user(auth_uid: str) -> None:
 
 
 async def disable_auth_user(auth_uid: str) -> None:
-    """Ban user in Supabase Auth so existing tokens are rejected on refresh."""
+    """Ban user in Supabase Auth so existing tokens are rejected on refresh.
+
+    Raises httpx.HTTPStatusError on failure so the caller can roll back DB state
+    when the auth state must stay in sync (PATCH ativo=false / DELETE soft-delete).
+    """
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.put(
             f"{settings.supabase_url}/auth/v1/admin/users/{auth_uid}",
             headers=_admin_headers(),
             json={"ban_duration": "876600h"},  # ~100 years
         )
-        if resp.is_success:
-            logger.info("Auth user disabled: %s", auth_uid)
-        else:
-            logger.warning("Failed to disable auth user %s: %s", auth_uid, resp.text)
+        resp.raise_for_status()
+        logger.info("Auth user disabled: %s", auth_uid)
+
+
+async def enable_auth_user(auth_uid: str) -> None:
+    """Unban user in Supabase Auth so they can sign in again.
+
+    Mirror of disable_auth_user — used when an admin reactivates a previously
+    deactivated user via PATCH /users/{id} with ativo=true. Without this call,
+    public.usuarios.ativo would say "active" but auth.users.banned_until would
+    still block any login attempt, causing real production drift.
+
+    Raises httpx.HTTPStatusError on failure so the caller can roll back DB state.
+    """
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.put(
+            f"{settings.supabase_url}/auth/v1/admin/users/{auth_uid}",
+            headers=_admin_headers(),
+            json={"ban_duration": "none"},
+        )
+        resp.raise_for_status()
+        logger.info("Auth user enabled (unbanned): %s", auth_uid)

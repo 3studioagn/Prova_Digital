@@ -1,8 +1,9 @@
 import logging
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.api.v1.users import router as users_router
@@ -14,6 +15,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Rastreio de Provas Digitais",
@@ -28,6 +30,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch unhandled exceptions and return a clean 500 JSONResponse.
+
+    Without this handler, Starlette's ServerErrorMiddleware (which sits OUTSIDE
+    user middleware) returns the 500 response without ever going through the
+    CORSMiddleware. The browser then reports a misleading 'CORS error' instead
+    of showing the real backend failure.
+
+    By registering an exception handler at the app level, the 500 response is
+    produced INSIDE the middleware stack and CORS headers get attached on the
+    way out.
+    """
+    logger.exception(
+        "Unhandled exception on %s %s: %s",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Erro interno do servidor"},
+    )
+
 
 app.include_router(users_router, prefix="/api/v1/users", tags=["users"])
 

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ':*)",
+      "Read(//tmp/**)",
+      "Bash(python -m pytest -q --tb=short)",
+      "Bash(python -m pytest --cov=app --cov-report=term-missing -q)"
+    ]
+  }
+}

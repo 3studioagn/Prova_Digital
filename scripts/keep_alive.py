@@ -1,12 +1,7 @@
 """
-Keep-alive para o Supabase free tier.
-
-O Supabase pausa projetos apos 7 dias sem requisicoes.
-Este script faz uma requisicao leve ao /health/db, forcando um SELECT 1
-no PostgreSQL e mantendo o projeto ativo.
-
-Agendado via GitHub Actions cron a cada 6 dias (margem de seguranca).
-
+Esse arquivo impede que o arquivo seja encerrado no supabase após 7 dias inativos.
+Esse script faz uma requisição leve ao /health/db, forçando um SELECT 1 no PostgreSQL e evita essa desativação do projeto.
+Ação agendada via GitHub Actions cron a cada 6 dias.
 Uso: python scripts/keep_alive.py [URL_BASE]
 """
 

@@ -11,7 +11,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_admin_user, get_current_user
-from app.core.supabase_admin import create_auth_user, delete_auth_user, disable_auth_user
+from app.core.supabase_admin import (
+    create_auth_user,
+    delete_auth_user,
+    disable_auth_user,
+    enable_auth_user,
+)
 from app.db.models import LocalizacaoEnum, SetorEnum, Usuario
 from app.db.session import get_db
 from app.domain.schemas.user import (
@@ -23,6 +28,25 @@ from app.domain.schemas.user import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def _count_other_active_admins(db: AsyncSession, exclude_user_id: UUID) -> int:
+    """Count active admins (is_admin=true AND ativo=true), excluding one user_id.
+
+    Used to enforce the system invariant: there must always be at least one
+    active admin. Returning 0 means the excluded user is the last one — and the
+    operation that prompted this check must be blocked.
+    """
+    result = await db.execute(
+        select(func.count())
+        .select_from(Usuario)
+        .where(
+            Usuario.is_admin.is_(True),
+            Usuario.ativo.is_(True),
+            Usuario.id != exclude_user_id,
+        )
+    )
+    return result.scalar() or 0
 
 
 # ── GET /me (before /{id} to avoid route conflict) ──────────────────────────
@@ -189,7 +213,7 @@ async def update_user(
     update_data = body.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Nenhum campo para atualizar",
         )
 
@@ -205,6 +229,19 @@ async def update_user(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Administrador nao pode desativar a si mesmo",
             )
+    else:
+        # System invariant: the system must always have >= 1 active admin.
+        # If the target is currently an active admin and we are about to demote
+        # or deactivate them, ensure at least one OTHER active admin exists.
+        if user.is_admin and user.ativo:
+            demoting = "is_admin" in update_data and not update_data["is_admin"]
+            deactivating = "ativo" in update_data and not update_data["ativo"]
+            if demoting or deactivating:
+                if await _count_other_active_admins(db, user.id) == 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Nao e possivel remover o ultimo administrador ativo do sistema",
+                    )
 
     # Cross-validate setor + localizacao (CHECK constraint chk_vendedor_localizacao)
     if "setor" in update_data:
@@ -213,7 +250,7 @@ async def update_user(
             new_loc = update_data.get("localizacao", user.localizacao)
             if new_loc is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="Vendedor deve ter localizacao (MATRIZ ou FILIAL)",
                 )
         else:
@@ -223,19 +260,80 @@ async def update_user(
         current_setor = user.setor
         if current_setor != SetorEnum.VENDEDOR and update_data["localizacao"] is not None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Apenas vendedores podem ter localizacao",
             )
         if current_setor == SetorEnum.VENDEDOR and update_data["localizacao"] is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Vendedor deve ter localizacao",
             )
 
+    # Detect ativo transition BEFORE we mutate the object so the snapshot is reliable.
+    was_active = user.ativo
+    will_be_active = update_data.get("ativo", was_active)
+    needs_ban = was_active and not will_be_active
+    needs_unban = (not was_active) and will_be_active
+
+    # Apply in-memory changes (persisted on commit below).
     for field, value in update_data.items():
         setattr(user, field, value)
 
-    await db.commit()
+    # Sync Supabase Auth FIRST. If the auth call fails, abort the operation
+    # WITHOUT touching the DB so we never end up with auth/app drift.
+    if needs_ban:
+        try:
+            await disable_auth_user(str(user.auth_uid))
+        except Exception:
+            await db.rollback()
+            logger.exception(
+                "Falha ao desabilitar usuario no Supabase Auth: %s", user.auth_uid
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Falha ao desativar usuario na autenticacao",
+            )
+    elif needs_unban:
+        try:
+            await enable_auth_user(str(user.auth_uid))
+        except Exception:
+            await db.rollback()
+            logger.exception(
+                "Falha ao reabilitar usuario no Supabase Auth: %s", user.auth_uid
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Falha ao reativar usuario na autenticacao",
+            )
+
+    # Persist DB changes. If commit fails after we already changed auth state,
+    # compensate the auth call so the two systems stay in sync.
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception("Falha ao persistir update do usuario %s", user.id)
+        if needs_ban:
+            try:
+                await enable_auth_user(str(user.auth_uid))
+            except Exception:
+                logger.exception(
+                    "Compensacao auth (enable) FALHOU para %s — drift manual",
+                    user.auth_uid,
+                )
+        elif needs_unban:
+            try:
+                await disable_auth_user(str(user.auth_uid))
+            except Exception:
+                logger.exception(
+                    "Compensacao auth (disable) FALHOU para %s — drift manual",
+                    user.auth_uid,
+                )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Falha ao atualizar usuario",
+        )
+
     await db.refresh(user)
     logger.info(
         "Usuario atualizado: id=%s campos=%s por admin=%s",
@@ -275,10 +373,45 @@ async def deactivate_user(
             detail="Usuario ja esta desativado",
         )
 
-    user.ativo = False
-    await db.commit()
+    # System invariant: cannot deactivate the last active admin in the system.
+    if user.is_admin and await _count_other_active_admins(db, user.id) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Nao e possivel desativar o ultimo administrador ativo do sistema",
+        )
 
-    # Best-effort: disable in Supabase Auth too
-    await disable_auth_user(str(user.auth_uid))
+    # Disable in Supabase Auth FIRST. If the ban fails we abort BEFORE touching
+    # the DB so the two systems can never end up out of sync (was a real
+    # production drift before — see ADR-019).
+    try:
+        await disable_auth_user(str(user.auth_uid))
+    except Exception:
+        logger.exception(
+            "Falha ao desabilitar usuario no Supabase Auth: %s", user.auth_uid
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao desativar usuario na autenticacao",
+        )
+
+    user.ativo = False
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        # Compensation: re-enable auth user so we don't end up with the user
+        # banned in auth.users but still ativo=true in public.usuarios.
+        try:
+            await enable_auth_user(str(user.auth_uid))
+        except Exception:
+            logger.exception(
+                "Compensacao auth (enable) FALHOU para %s — drift manual",
+                user.auth_uid,
+            )
+        logger.exception("Falha ao soft-delete usuario %s", user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Falha ao desativar usuario",
+        )
 
     logger.info("Usuario desativado: id=%s por admin=%s", user.id, admin.id)

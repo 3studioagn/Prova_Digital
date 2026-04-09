@@ -2,7 +2,7 @@
 import os
 import uuid as _uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 # Set test env vars BEFORE any app import
 os.environ.update({
@@ -69,7 +69,23 @@ def regular_user():
 
 @pytest.fixture
 def mock_db():
-    return AsyncMock()
+    """Mock AsyncSession.
+
+    SQLAlchemy's AsyncSession mixes sync methods (``add``, ``add_all``,
+    ``expunge``, ``delete``) with async ones (``commit``, ``rollback``,
+    ``refresh``, ``execute``). ``AsyncMock`` by itself would return a
+    coroutine for every attribute access, including the sync ones — calling
+    ``db.add(user)`` would then raise a ``RuntimeWarning: coroutine was never
+    awaited``. We override the sync methods with plain ``MagicMock`` so they
+    behave exactly like the real AsyncSession.
+    """
+    db = AsyncMock()
+    db.add = MagicMock()
+    db.add_all = MagicMock()
+    db.expunge = MagicMock()
+    db.expunge_all = MagicMock()
+    db.delete = MagicMock()
+    return db
 
 
 @pytest.fixture(autouse=True)

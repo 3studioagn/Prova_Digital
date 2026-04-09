@@ -1,0 +1,844 @@
+
+
+Rastreio de Provas Digitais
+
+Documento de Requisitos
+
+Versão
+
+v3.0
+
+Data
+
+Abril / 2026
+
+Organização
+
+3Studio
+
+1. Visão Geral do Projeto
+
+Nome do projeto
+
+Sistema de Rastreio de Provas Digitais
+
+Responsável
+
+Mario Souza
+
+Versão
+
+3.0
+
+Data
+
+Abril / 2026
+
+1.1 Contexto e Problema
+
+Atualmente, o controle de provas digitais na 3Studio é realizado de forma manual e descentralizada, gerando perda de rastreabilidade ao longo do fluxo. Com frequência, não é possível identificar em qual etapa uma prova se encontra, quem foi o último responsável ou há quanto tempo está parada em determinado ponto do processo.
+
+Essa falta de visibilidade resulta em atrasos na aprovação, retrabalho na localização de provas e dificuldade em responsabilizar os envolvidos. A ausência de um sistema centralizado compromete a eficiência operacional e a comunicação entre os setores (3Studio, vendedores, motorista e clicheria).
+
+Além disso, a existência de vendedores lotados na filial — onde a clicheria opera — e de vendedores na matriz exige que o sistema suporte rotas distintas de encaminhamento, evitando deslocamentos desnecessários e garantindo rastreabilidade independentemente do caminho percorrido pela prova.
+
+1.2 Objetivo do Sistema
+
+Centralizar o controle do fluxo de provas digitais em uma plataforma única e rastreável, permitindo saber em tempo real a localização exata de cada prova, identificar o último responsável por sua movimentação e garantir um fluxo claro, imediato e auditável desde a criação até a conclusão na clicheria. O sistema deve acomodar múltiplas rotas de encaminhamento (rota padrão via motorista e rota direta na filial), bem como o ciclo de reprovação, mantendo rastreabilidade integral em todos os cenários.
+
+1.3 Escopo
+
+Incluído nesta versão
+
+•  Criação de prova digital com nome, nº de requerimento, cliente, vendedor e upload da arte (JPG ou PNG, máximo 10 MB).
+
+•  Geração automática de QR Code único vinculado à prova.
+
+•  Geração automática de etiqueta imprimível contendo nome da prova, número do requerimento, vendedor responsável e QR Code, para fixação na pasta física da prova.
+
+•  Câmera integrada na interface web para leitura de QR Code com identificação automática do usuário logado.
+
+•  Assinatura digital vinculada ao escaneamento do QR Code para transição de status no fluxo.
+
+•  Fluxo de reprovação pelo vendedor, com retorno da prova à 3Studio e possibilidade de reiniciar o ciclo.
+
+•  Rota padrão de encaminhamento: vendedor aprova → devolve à 3Studio → motorista transporta → clicheria recebe.
+
+•  Rota direta de encaminhamento (filial): vendedor na filial aprova → encaminha diretamente à clicheria.
+
+•  Pesquisa e filtragem de provas por nome, nº de requerimento, período e status.
+
+•  Cancelamento de prova digital com registro de motivo.
+
+•  Dashboard com contadores em tempo real dos status das provas.
+
+•  Seção de relatórios com tempo médio de aprovação, total por vendedor, provas atrasadas e exportação em CSV.
+
+•  Seção de atalhos rápidos para ações mais frequentes.
+
+•  Timeline visual com ramificação de rotas (padrão e direta) e indicação de reprovação.
+
+•  Cadastro de usuários com definição de setor (3Studio, Clicheria, Vendedor, Motorista) e localização (Matriz ou Filial) para vendedores.
+
+•  Tela de login e perfil 3Studio (Administrador) para gestão de permissões e configurações.
+
+•  Validação de movimentação por motorista no fluxo padrão (rota Matriz).
+
+Fora do escopo nesta versão
+
+•  Aplicativo mobile nativo para leitura de QR Code — utilizar interface web responsiva.
+
+•  Notificações push ou e-mail automáticas sobre movimentações de provas.
+
+2. Atores / Usuários
+
+Perfis de usuário que interagem com o sistema e suas respectivas permissões:
+
+Perfil
+
+Descrição e Permissões
+
+3Studio
+(Administrador)
+
+Acesso total ao sistema. Cria provas digitais, gerencia configurações, cadastra usuários, acessa relatórios e dashboard. Responsável pela operação e controle do fluxo. Único perfil com acesso à tela de configurações, ao log de auditoria e à função de reiniciar o ciclo de provas reprovadas.
+
+Vendedor
+
+Escaneia o QR Code pela câmera integrada, que o identifica automaticamente pelo login ativo. Pode aprovar ou reprovar a prova digital. Na aprovação, o encaminhamento segue a rota determinada pela localização do vendedor: vendedores na Matriz devolvem à 3Studio (rota padrão); vendedores na Filial encaminham diretamente à clicheria (rota direta). Na reprovação, a prova retorna à 3Studio para início de novo ciclo.
+
+Motorista
+
+Responsável pelo transporte físico da prova entre a 3Studio (Matriz) e a clicheria (Filial). Confirma via assinatura digital o recebimento da prova para transporte, registrando a movimentação no sistema. Ativo apenas na rota padrão.
+
+Clicheria
+
+Confirma via assinatura digital o recebimento da prova, encerrando o ciclo de rastreamento. Recebe provas tanto pela rota padrão (via motorista) quanto pela rota direta (vendedor na filial).
+
+3. Requisitos Funcionais
+
+3.1 Gestão de Provas Digitais
+
+ID
+
+Descrição
+
+Prioridade
+
+RF-001
+
+O sistema deve permitir a criação de uma prova digital com os seguintes campos obrigatórios: nome da prova, número do requerimento, cliente, vendedor responsável e imagem da arte. O arquivo deve ser do tipo JPG ou PNG, com tamanho máximo de 10 MB por arquivo.
+
+Must
+
+RF-002
+
+O sistema deve gerar automaticamente um QR Code único e não reutilizável vinculado à prova digital no momento de sua criação.
+
+Must
+
+RF-003
+
+O sistema deve gerar automaticamente, no momento da criação da prova, uma etiqueta imprimível em formato padronizado contendo: nome da prova, número do requerimento, vendedor responsável e o QR Code da prova. A etiqueta deve ser disponibilizada para impressão ou download (PDF) para fixação na pasta física da prova digital.
+
+Must
+
+RF-004
+
+O sistema deve possuir câmera integrada na interface web que permita ao usuário escanear o QR Code da prova digital diretamente pelo sistema, sem necessidade de aplicativo externo.
+
+Must
+
+RF-005
+
+Ao escanear o QR Code, o sistema deve identificar automaticamente o usuário logado, validar seu perfil e exibir a tela de assinatura digital para confirmar a movimentação para a próxima etapa do fluxo.
+
+Must
+
+RF-006
+
+O sistema deve registrar automaticamente o usuário responsável, a data/hora e o novo status a cada movimentação da prova. O QR Code é o identificador de autenticidade da ação. A transição ocorre somente após a assinatura digital e a confirmação explícita do usuário.
+
+Must
+
+RF-007
+
+Ao escanear o QR Code de uma prova no status “Retirada pelo Vendedor”, o sistema deve apresentar ao vendedor duas opções: Aprovar ou Reprovar. Na reprovação, o vendedor deve informar obrigatoriamente o motivo, assinar digitalmente e confirmar. O status da prova é alterado para “Reprovada pelo Vendedor”.
+
+Must
+
+RF-008
+
+Após a reprovação, a prova retorna à 3Studio com status “Reprovada pelo Vendedor”. O perfil 3Studio pode então reiniciar o ciclo da prova, retornando-a ao status “Criada”, preservando integralmente o histórico de movimentações anteriores no log de auditoria.
+
+Must
+
+RF-009
+
+Ao aprovar uma prova, o sistema deve determinar automaticamente a rota de encaminhamento com base na localização cadastrada do vendedor: (a) Vendedor na Matriz — rota padrão: a prova segue para “De volta à 3Studio”, depois “Com Motorista” e por fim “Recebida pela Clicheria”; (b) Vendedor na Filial — rota direta: a prova segue para “Encaminhada à Clicheria” e depois “Recebida pela Clicheria”.
+
+Must
+
+RF-010
+
+O sistema deve permitir o cancelamento de uma prova digital, registrando obrigatoriamente o motivo, o usuário responsável e a data/hora do cancelamento.
+
+Must
+
+RF-011
+
+O sistema deve exibir uma timeline visual para cada prova, indicando claramente: os estágios percorridos, a rota seguida (padrão ou direta), eventuais reprovações com motivo, o responsável e o timestamp de cada etapa.
+
+Must
+
+3.2 Pesquisa e Filtros
+
+ID
+
+Descrição
+
+Prioridade
+
+RF-012
+
+O sistema deve permitir a pesquisa de provas digitais por nome e/ou número de requerimento.
+
+Must
+
+RF-013
+
+O sistema deve exibir uma seção com a listagem de todas as provas digitais, com filtros por período, status, vendedor, cliente e rota (padrão/direta).
+
+Must
+
+3.3 Dashboard e Relatórios
+
+ID
+
+Descrição
+
+Prioridade
+
+RF-014
+
+O sistema deve exibir um dashboard com contadores em tempo real dos status das provas: Criadas hoje, Com vendedor, Aprovadas, Reprovadas, Aguardando envio, Com motorista, Na clicheria, Concluídas e Atrasadas. Os contadores devem ser clicáveis, exibindo as provas daquele status.
+
+Must
+
+RF-015
+
+O sistema deve disponibilizar uma seção de relatórios contendo: tempo médio de aprovação, total de provas por vendedor, quantidade de provas atrasadas, total geral de provas, taxa de reprovação por vendedor e exportação dos dados em formato CSV.
+
+Should
+
+RF-016
+
+O sistema deve disponibilizar uma seção de atalhos rápidos com acesso direto a: escanear QR Code, visualizar provas e acessar relatórios.
+
+Should
+
+3.4 Usuários e Permissões
+
+ID
+
+Descrição
+
+Prioridade
+
+RF-017
+
+O sistema deve permitir o cadastro de usuários com os seguintes campos: nome, e-mail, senha, setor (3Studio, Clicheria, Vendedor, Motorista) e, para o setor Vendedor, a localização (Matriz ou Filial). A localização determina a rota de encaminhamento após aprovação.
+
+Must
+
+RF-018
+
+O sistema deve possuir uma tela de login com autenticação por e-mail e senha.
+
+Must
+
+RF-019
+
+O sistema deve possuir um perfil 3Studio (Administrador) com permissões para gerenciar perfis, cadastrar/editar/desativar usuários e acessar as configurações do sistema.
+
+Must
+
+RF-020
+
+O sistema deve restringir funcionalidades de acordo com o perfil do usuário logado, exibindo apenas as ações permitidas para seu setor, conforme a Matriz de Transições (Seção 5).
+
+Must
+
+3.5 Configurações do Sistema
+
+ID
+
+Descrição
+
+Prioridade
+
+RF-021
+
+O sistema deve disponibilizar uma tela de Configurações, acessível exclusivamente pelo perfil 3Studio (Administrador), contendo os seguintes parâmetros configuráveis: (a) tempo em horas úteis sem movimentação para que uma prova seja classificada como Atrasada (padrão: 48 horas úteis); (b) template de etiqueta (layout padrão ou personalizado); (c) demais parâmetros operacionais definidos pelo administrador.
+
+Must
+
+4. Histórias de Usuário
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-001
+
+Como usuário da 3Studio, eu quero criar uma prova digital preenchendo os dados e anexando a arte para que ela entre no fluxo de rastreamento imediatamente.
+
+1. Os campos nome, nº requerimento, cliente, vendedor e imagem são obrigatórios.
+
+2. Apenas JPG e PNG são aceitos, com tamanho máximo de 10 MB.
+
+3. O QR Code é gerado automaticamente após a criação.
+
+4. A etiqueta imprimível é gerada automaticamente e disponibilizada para download/impressão.
+
+5. A prova aparece no dashboard com status “Criada”.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-002
+
+Como vendedor, eu quero escanear o QR Code da prova pela câmera integrada para que o sistema me identifique automaticamente e me direcione à tela de assinatura digital.
+
+1. A câmera abre diretamente no sistema, sem app externo.
+
+2. O sistema identifica o vendedor logado automaticamente ao escanear.
+
+3. Após a leitura, a tela de assinatura digital é exibida.
+
+4. Após assinar e confirmar, o status muda para “Retirada pelo vendedor” com data/hora e nome do vendedor.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-003
+
+Como vendedor, eu quero aprovar uma prova digital para que ela siga no fluxo de encaminhamento à clicheria.
+
+1. O vendedor só consegue aprovar provas no status “Retirada pelo vendedor”.
+
+2. O sistema apresenta as opções Aprovar e Reprovar.
+
+3. Ao selecionar Aprovar, a assinatura é registrada com data/hora.
+
+4. O sistema determina a rota automaticamente pela localização do vendedor.
+
+5. Status muda para “Aprovada pelo vendedor”.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-004
+
+Como vendedor, eu quero reprovar uma prova digital informando o motivo para que a 3Studio saiba que precisa corrigir e reiniciar o processo.
+
+1. O vendedor só consegue reprovar provas no status “Retirada pelo vendedor”.
+
+2. O campo de motivo da reprovação é obrigatório.
+
+3. A assinatura é registrada com data/hora.
+
+4. O status muda para “Reprovada pelo vendedor”.
+
+5. A prova fica visível no dashboard como reprovada.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-005
+
+Como vendedor na Matriz, eu quero devolver a prova aprovada à 3Studio para que ela seja encaminhada via motorista à clicheria.
+
+1. O vendedor só consegue devolver provas no status “Aprovada pelo vendedor” com rota padrão.
+
+2. Após assinar e confirmar, o status muda para “De volta à 3Studio”.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-006
+
+Como vendedor na Filial, eu quero encaminhar a prova aprovada diretamente à clicheria, sem necessidade de retorno à 3Studio.
+
+1. O vendedor na Filial só consegue encaminhar provas no status “Aprovada pelo vendedor” com rota direta.
+
+2. Após assinar e confirmar, o status muda para “Encaminhada à Clicheria”.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-007
+
+Como usuário da 3Studio, eu quero confirmar o recebimento da prova devolvida e registrar o envio para o motorista.
+
+1. A 3Studio só consegue realizar esta ação em provas no status “De volta à 3Studio”.
+
+2. Após escanear, assinar e confirmar, o status muda para “Com Motorista”.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-008
+
+Como motorista, eu quero confirmar o recebimento da prova para transporte, registrando minha responsabilidade pela movimentação.
+
+1. O motorista só consegue realizar esta ação em provas no status “Com Motorista”.
+
+2. Após escanear, assinar e confirmar, o status muda para “Enviada para Clicheria”.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-009
+
+Como usuário da clicheria, eu quero confirmar o recebimento da prova para encerrar o ciclo de rastreamento.
+
+1. A clicheria consegue realizar esta ação em provas no status “Enviada para Clicheria” ou “Encaminhada à Clicheria”.
+
+2. Após escanear, assinar e confirmar, o status muda para “Recebida pela Clicheria” (Concluída).
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-010
+
+Como usuário da 3Studio, eu quero reiniciar o ciclo de uma prova reprovada para que ela volte ao fluxo após correção.
+
+1. A 3Studio só consegue reiniciar provas no status “Reprovada pelo Vendedor”.
+
+2. Após confirmação, o status retorna a “Criada”.
+
+3. O histórico completo do ciclo anterior é preservado no log de auditoria.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-011
+
+Como usuário da 3Studio, eu quero visualizar a timeline completa de uma prova para saber em que etapa e com quem ela está.
+
+1. A timeline exibe todos os estágios percorridos, incluindo ramificações.
+
+2. Cada etapa concluída mostra responsável e data/hora.
+
+3. Reprovações são exibidas com motivo e destaque visual.
+
+4. A rota seguida (padrão ou direta) é indicada.
+
+5. A etapa atual é destacada visualmente.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-012
+
+Como usuário da 3Studio, eu quero filtrar a listagem de provas por período, status e rota para localizar rapidamente uma prova específica.
+
+1. O filtro por período aceita intervalos predefinidos (hoje, últimos 2 dias, última semana, personalizado).
+
+2. Os filtros podem ser combinados.
+
+3. A lista atualiza em tempo real ao aplicar filtros.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-013
+
+Como usuário da 3Studio, eu quero acessar o dashboard com os contadores de status para ter uma visão geral imediata da operação.
+
+1. Os contadores refletem dados em tempo real.
+
+2. O dashboard exibe: Criadas hoje, Com vendedor, Aprovadas, Reprovadas, Aguardando envio, Com motorista, Na clicheria, Concluídas, Atrasadas.
+
+3. É possível clicar em cada contador para ver as provas daquele status.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-014
+
+Como usuário da 3Studio, eu quero acessar relatórios de tempo médio de aprovação, provas atrasadas e taxa de reprovação para identificar gargalos no fluxo.
+
+1. O relatório exibe tempo médio por vendedor e geral.
+
+2. Provas atrasadas são listadas com dias de atraso.
+
+3. Taxa de reprovação por vendedor é exibida.
+
+4. É possível exportar os dados em formato CSV.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-015
+
+Como usuário master, eu quero cadastrar, editar e desativar usuários com seus respectivos setores e localizações para manter o controle de acesso atualizado.
+
+1. O cadastro exige nome, e-mail, senha, setor e localização (para vendedores).
+
+2. A desativação impede o login sem excluir o histórico.
+
+3. Apenas o perfil 3Studio (Administrador) tem acesso a esta funcionalidade.
+
+ID
+
+História de Usuário
+
+Critérios de Aceitação
+
+US-016
+
+Como usuário da 3Studio, eu quero configurar o tempo de atraso padrão para que o sistema classifique automaticamente provas paradas.
+
+1. A tela de configurações é acessível apenas pelo perfil 3Studio.
+
+2. O parâmetro de tempo de atraso aceita valores numéricos em horas úteis.
+
+3. Ao salvar, o novo valor é aplicado imediatamente a todos os cálculos de atraso.
+
+5. Matriz de Transições do Fluxo
+
+O mecanismo de transição é único e invariável para todas as etapas: o ator responsável escaneia o QR Code da prova pela câmera integrada, assina digitalmente e confirma a ação. Somente após a confirmação o status é atualizado.
+
+O fluxo possui três caminhos possíveis a partir da retirada pelo vendedor, determinados pela ação do vendedor (aprovação ou reprovação) e por sua localização cadastrada (Matriz ou Filial).
+
+5.1 Fluxo Comum (todas as rotas)
+
+Estado Atual
+
+Ator
+
+Mecanismo
+
+Estado Destino
+
+(início)
+
+3Studio
+
+Preenchimento do formulário de criação da prova. Etiqueta gerada automaticamente.
+
+Criada
+
+Criada
+
+Vendedor
+
+Escanear QR Code → Assinar digitalmente → Confirmar.
+
+Retirada pelo Vendedor
+
+5.2 Rota Padrão — Vendedor na Matriz
+
+Quando o vendedor está lotado na Matriz, a prova aprovada retorna à 3Studio e é encaminhada à clicheria via motorista.
+
+Estado Atual
+
+Ator
+
+Mecanismo
+
+Estado Destino
+
+Retirada pelo Vendedor
+
+Vendedor
+
+Escanear QR Code → Selecionar “Aprovar” → Assinar → Confirmar.
+
+Aprovada pelo Vendedor
+
+Aprovada pelo Vendedor
+
+Vendedor
+
+Escanear QR Code → Assinar → Confirmar devolução.
+
+De volta à 3Studio
+
+De volta à 3Studio
+
+3Studio
+
+Escanear QR Code → Assinar → Confirmar envio ao motorista.
+
+Com Motorista
+
+Com Motorista
+
+Motorista
+
+Escanear QR Code → Assinar → Confirmar entrega à clicheria.
+
+Enviada para Clicheria
+
+Enviada para Clicheria
+
+Clicheria
+
+Escanear QR Code → Assinar → Confirmar recebimento.
+
+Recebida pela Clicheria (Concluída)
+
+5.3 Rota Direta — Vendedor na Filial
+
+Quando o vendedor está lotado na Filial (onde a clicheria opera), a prova aprovada é encaminhada diretamente à clicheria, sem retorno à 3Studio e sem envolvimento do motorista.
+
+Estado Atual
+
+Ator
+
+Mecanismo
+
+Estado Destino
+
+Retirada pelo Vendedor
+
+Vendedor (Filial)
+
+Escanear QR Code → Selecionar “Aprovar” → Assinar → Confirmar.
+
+Aprovada pelo Vendedor
+
+Aprovada pelo Vendedor
+
+Vendedor (Filial)
+
+Escanear QR Code → Assinar → Confirmar encaminhamento direto.
+
+Encaminhada à Clicheria
+
+Encaminhada à Clicheria
+
+Clicheria
+
+Escanear QR Code → Assinar → Confirmar recebimento.
+
+Recebida pela Clicheria (Concluída)
+
+5.4 Reprovação — Todas as localizações
+
+Independentemente da localização do vendedor, a reprovação retorna a prova à 3Studio para correção e eventual reinício do ciclo.
+
+Estado Atual
+
+Ator
+
+Mecanismo
+
+Estado Destino
+
+Retirada pelo Vendedor
+
+Vendedor
+
+Escanear QR Code → Selecionar “Reprovar” → Informar motivo → Assinar → Confirmar.
+
+Reprovada pelo Vendedor
+
+Reprovada pelo Vendedor
+
+3Studio
+
+Ação administrativa: “Reiniciar Ciclo”. O histórico é preservado integralmente.
+
+Criada (novo ciclo)
+
+Nota: O cancelamento de uma prova pode ser realizado pelo perfil 3Studio a partir de qualquer estado ativo (exceto “Cancelada” e “Recebida pela Clicheria”). Após o cancelamento, nenhuma transição é possível. Para retomar o processo, um novo registro deve ser criado.
+
+6. Regras de Negócio
+
+ID
+
+Regra de Negócio
+
+RN-001
+
+Toda prova digital deve possuir um QR Code único e não reutilizável, gerado automaticamente pelo sistema no momento da criação.
+
+RN-002
+
+A transição de status da prova só pode seguir os caminhos definidos na Seção 5 (Matriz de Transições). Não é permitido pular etapas dentro de uma rota, nem alternar entre a rota padrão e a rota direta após a aprovação.
+
+RN-003
+
+Toda movimentação de status exige assinatura digital do usuário responsável, registrando nome, setor, data e hora.
+
+RN-004
+
+Apenas o usuário do setor e localização autorizados para a próxima etapa pode realizar a transição de status. O mapeamento completo de atores por transição está definido na Seção 5.
+
+RN-005
+
+Provas canceladas não podem ter seu status reativado. Um novo registro deve ser criado caso necessário. O histórico do registro cancelado é preservado.
+
+RN-006
+
+Provas reprovadas podem ter seu ciclo reiniciado exclusivamente pelo perfil 3Studio. O reinício retorna o status a “Criada”, preservando integralmente o histórico de movimentações do ciclo anterior no log de auditoria.
+
+RN-007
+
+A rota de encaminhamento (padrão ou direta) é determinada automaticamente pela localização cadastrada do vendedor (Matriz ou Filial) no momento da aprovação. Não é possível alterar a rota após a confirmação da aprovação.
+
+RN-008
+
+O sistema deve considerar uma prova como “Atrasada” se permanecer no mesmo status por mais tempo do que o configurado na tela de Configurações do Sistema (RF-021). Valor padrão: 48 horas úteis.
+
+RN-009
+
+Cada usuário pode pertencer a apenas um setor (3Studio, Clicheria, Vendedor ou Motorista). Vendedores devem ter obrigatoriamente uma localização cadastrada (Matriz ou Filial).
+
+RN-010
+
+O perfil 3Studio (Administrador) não pode ser desativado pelo próprio sistema. Somente outro administrador pode criar ou remover permissões de administrador.
+
+RN-011
+
+A etiqueta imprimível é gerada automaticamente no momento da criação da prova e deve conter: nome da prova, número do requerimento, vendedor responsável e QR Code. O layout segue o template padrão do sistema, configurável pelo perfil 3Studio.
+
+7. Requisitos Não-Funcionais
+
+ID
+
+Categoria
+
+Descrição
+
+RNF-001
+
+Performance
+
+O sistema deve carregar o dashboard e a listagem de provas em no máximo 3 segundos, considerando até 30 usuários simultâneos.
+
+RNF-002
+
+Performance
+
+A leitura do QR Code pela câmera integrada e a exibição da tela de assinatura devem ocorrer em no máximo 2 segundos após a captura.
+
+RNF-003
+
+Segurança
+
+O sistema deve exigir autenticação por e-mail e senha para acesso. Sessões inativas por mais de 30 minutos devem ser encerradas automaticamente.
+
+RNF-004
+
+Segurança
+
+Senhas devem ser armazenadas com hash criptográfico (gerenciado pelo Supabase Auth). Dados em trânsito devem utilizar HTTPS/TLS.
+
+RNF-005
+
+Segurança
+
+O sistema deve manter um log de auditoria completo e imutável de todas as movimentações de provas, incluindo reprovações e reinícios de ciclo, acessível apenas pelo perfil 3Studio (Administrador).
+
+RNF-006
+
+Usabilidade
+
+A interface deve ser responsiva e funcional em navegadores modernos (Chrome, Firefox, Edge, Safari) em dispositivos com tela a partir de 5 polegadas.
+
+RNF-007
+
+Usabilidade
+
+O fluxo de abrir a câmera integrada, escanear o QR Code, assinar digitalmente e confirmar a movimentação deve ser concluído em no máximo 3 toques/cliques.
+
+RNF-008
+
+Disponibilidade
+
+O sistema deve manter disponibilidade contínua durante o horário comercial (segunda a sexta, 07h às 18h), sustentada pelo mecanismo de keep-alive configurado na infraestrutura (Backlog, Componente 02).
+
+RNF-009
+
+Manutenibilidade
+
+O código deve seguir padrões de arquitetura que permitam a adição de novas rotas, estágios e regras de transição na máquina de estados sem necessidade de refatoração estrutural.
+
+8. Restrições e Premissas
+
+8.1 Restrições Técnicas
+
+•  A leitura de QR Code será feita por câmera integrada na interface web, sem necessidade de aplicativo externo.
+
+•  O sistema deve ser compatível com Chrome, Firefox, Edge e Safari em suas versões mais recentes.
+
+•  O acesso à câmera do dispositivo será solicitado via permissões do navegador.
+
+•  A etiqueta imprimível deve ser gerada em formato compatível com impressoras térmicas e a jato de tinta padrão.
+
+8.2 Restrições de Negócio
+
+•  O fluxo da timeline suporta três rotas nesta versão: rota padrão (Matriz), rota direta (Filial) e reprovação. Novas rotas poderão ser adicionadas em versões futuras.
+
+•  A rota é determinada automaticamente pela localização do vendedor — não há seleção manual de rota.
+
+8.3 Premissas
+
+•  Todos os usuários terão acesso a dispositivos com câmera e conexão à internet.
+
+•  O cadastro inicial de usuários será realizado pelo perfil 3Studio antes do início da operação.
+
+•  As artes das provas digitais serão fornecidas em formato de imagem (JPG ou PNG) no momento da criação, com tamanho máximo de 10 MB por arquivo.
+
+•  Vendedores terão sua localização (Matriz ou Filial) configurada previamente pelo administrador antes do início da operação.
+
+

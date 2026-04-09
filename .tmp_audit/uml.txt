@@ -1,0 +1,383 @@
+Diagrama de Casos de Uso — Rastreio de Provas Digitais v3.0
+UML Use Case Diagram · 3Studio · Abril 2026
+Sistema de Rastreio de Provas Digitais
+3Studio&#xa;(Administrador)
+Vendedor&#xa;(Matriz)
+Vendedor&#xa;(Filial)
+Motorista
+Clicheria
+UC-01&#xa;Criar Prova Digital
+UC-02&#xa;Gerar QR Code
+UC-03&#xa;Gerar Etiqueta&#xa;Imprimível
+UC-04&#xa;Escanear QR Code&#xa;(Câmera Integrada)
+UC-05&#xa;Assinar Digitalmente&#xa;e Confirmar
+UC-06&#xa;Retirar Prova&#xa;(Vendedor)
+UC-07&#xa;Aprovar Prova
+UC-08&#xa;Reprovar Prova&#xa;(com motivo)
+UC-09&#xa;Devolver Prova&#xa;à 3Studio
+UC-10&#xa;Encaminhar&#xa;Diretamente à&#xa;Clicheria
+UC-11&#xa;Enviar Prova&#xa;via Motorista
+UC-12&#xa;Confirmar&#xa;Transporte
+UC-13&#xa;Confirmar Recebimento&#xa;(Clicheria)
+UC-14&#xa;Cancelar Prova
+UC-15&#xa;Reiniciar Ciclo&#xa;(Reprovação)
+UC-16&#xa;Gerenciar&#xa;Usuários (CRUD)
+UC-17&#xa;Visualizar Dashboard&#xa;e Relatórios
+UC-18&#xa;Configurar&#xa;Sistema
+UC-19&#xa;Visualizar Timeline&#xa;da Prova
+«include»
+«include»
+«include»
+«include»
+«include»
+«include»
+«include»
+«include»
+«include»
+«include»
+«generalização»
+Diagrama de Classes — Rastreio de Provas Digitais v3.0
+UML Class Diagram · Modelo de Domínio · 3Studio · Abril 2026
+Usuario
+- id : UUID «PK»&#xa;- nome : VARCHAR(150)&#xa;- email : VARCHAR(255) «UNIQUE»&#xa;- senha_hash : VARCHAR(255)&#xa;- setor : SetorEnum&#xa;- localizacao : LocalizacaoEnum «NULL»&#xa;- ativo : BOOLEAN&#xa;- created_at : TIMESTAMP&#xa;- updated_at : TIMESTAMP
++ autenticar(email, senha) : Session&#xa;+ desativar() : void&#xa;+ isAdmin() : boolean&#xa;+ getRotaEncaminhamento() : RotaEnum
+«enumeration»&#xa;SetorEnum
+STUDIO&#xa;VENDEDOR&#xa;MOTORISTA&#xa;CLICHERIA
+«enumeration»&#xa;LocalizacaoEnum
+MATRIZ&#xa;FILIAL
+«enumeration»&#xa;StatusProvaEnum
+CRIADA&#xa;RETIRADA_PELO_VENDEDOR&#xa;APROVADA_PELO_VENDEDOR&#xa;DE_VOLTA_3STUDIO&#xa;COM_MOTORISTA&#xa;ENVIADA_PARA_CLICHERIA&#xa;ENCAMINHADA_A_CLICHERIA&#xa;RECEBIDA_PELA_CLICHERIA&#xa;REPROVADA_PELO_VENDEDOR&#xa;CANCELADA
+«enumeration»&#xa;RotaEnum
+PADRAO&#xa;DIRETA
+ProvaDigital
+- id : UUID «PK»&#xa;- nome : VARCHAR(200)&#xa;- nro_requerimento : VARCHAR(50) «UNIQUE»&#xa;- cliente : VARCHAR(200)&#xa;- vendedor_id : UUID «FK → Usuario»&#xa;- imagem_url : TEXT&#xa;- qr_code_hash : VARCHAR(64) «UNIQUE»&#xa;- status : StatusProvaEnum&#xa;- rota : RotaEnum «NULL»&#xa;- ciclo_atual : INTEGER&#xa;- motivo_cancelamento : TEXT «NULL»&#xa;- created_at : TIMESTAMP&#xa;- updated_at : TIMESTAMP
++ criar(dados) : ProvaDigital&#xa;+ transitarStatus(novoStatus, usuario) : void&#xa;+ cancelar(motivo, usuario) : void&#xa;+ reiniciarCiclo(usuario) : void&#xa;+ isAtrasada(horasLimite) : boolean&#xa;+ getTimelineCompleta() : List lt;Movimentacao gt;
+Movimentacao
+- id : UUID «PK»&#xa;- prova_id : UUID «FK → ProvaDigital»&#xa;- usuario_id : UUID «FK → Usuario»&#xa;- status_anterior : StatusProvaEnum&#xa;- status_novo : StatusProvaEnum&#xa;- assinatura_digital : BYTEA&#xa;- motivo_reprovacao : TEXT «NULL»&#xa;- ciclo : INTEGER&#xa;- rota_no_momento : RotaEnum «NULL»&#xa;- created_at : TIMESTAMP «IMMUTABLE»
++ registrar(prova, usuario, status, assinatura) : void&#xa;+ isImutavel() : boolean
+Etiqueta
+- id : UUID «PK»&#xa;- prova_id : UUID «FK → ProvaDigital»&#xa;- nome_prova : VARCHAR(200)&#xa;- nro_requerimento : VARCHAR(50)&#xa;- vendedor_nome : VARCHAR(150)&#xa;- qr_code_image : BYTEA&#xa;- template_id : UUID «FK»&#xa;- created_at : TIMESTAMP
++ gerar(prova) : Etiqueta&#xa;+ exportarPDF() : bytes&#xa;+ imprimir() : void
+AuditLog
+- id : UUID «PK»&#xa;- prova_id : UUID «FK → ProvaDigital»&#xa;- usuario_id : UUID «FK → Usuario»&#xa;- acao : VARCHAR(100)&#xa;- detalhes_json : JSONB&#xa;- ip_address : INET&#xa;- user_agent : TEXT&#xa;- created_at : TIMESTAMP «IMMUTABLE»
++ registrar(prova, usuario, acao, detalhes) : void&#xa;+ listar(filtros) : List lt;AuditLog gt;
+ConfiguracaoSistema
+- id : UUID «PK»&#xa;- chave : VARCHAR(100) «UNIQUE»&#xa;- valor : JSONB&#xa;- descricao : TEXT&#xa;- updated_by : UUID «FK → Usuario»&#xa;- updated_at : TIMESTAMP
++ get(chave) : JSONB&#xa;+ set(chave, valor, usuario) : void&#xa;+ getTempoAtraso() : INTEGER
+«service»&#xa;QRCodeService
+- salt : VARCHAR(32)
++ gerar(prova_id) : QRCodeData&#xa;+ decodificar(payload) : ProvaDigital&#xa;+ validar(hash) : boolean
+«service»&#xa;MaquinaEstados
+- transicoes_validas : Dict&#xa;- atores_por_transicao : Dict
++ validarTransicao(prova, novoStatus, usuario) : bool&#xa;+ executarTransicao(prova, novoStatus, usuario, assinatura) : void&#xa;+ determinarRota(vendedor) : RotaEnum&#xa;+ getProximoStatus(statusAtual, acao, rota) : StatusProvaEnum
+1 0..*
+1 1
+1 0..*
+vendedor_responsavel&#xa;1 0..*
+responsavel&#xa;1 0..*
+«uses»
+«uses»
+«uses»
+Regras de Negócio:&#xa;• QR Code único e não reutilizável (RN-001)&#xa;• Transições seguem Matriz Seção 5 (RN-002)&#xa;• Toda movimentação exige assinatura (RN-003)&#xa;• Rota determinada pela localização (RN-007)&#xa;• Log de auditoria imutável (RNF-005)
+Diagrama de Máquina de Estados — Prova Digital v3.0
+UML State Machine Diagram · Lifecycle da ProvaDigital · 3Studio · Abril 2026
+Criada
+Retirada pelo&#xa;Vendedor
+Ação do&#xa;Vendedor?
+Aprovada pelo&#xa;Vendedor
+Reprovada pelo&#xa;Vendedor
+Localização&#xa;Vendedor?
+De volta à&#xa;3Studio
+Com Motorista
+Enviada para&#xa;Clicheria
+Encaminhada à&#xa;Clicheria
+Recebida pela&#xa;Clicheria&#xa;(Concluída)
+Cancelada
+3Studio cria prova&#xa;/ gerar QR + etiqueta
+Vendedor escaneia QR&#xa;/ assinar + confirmar
+[Aprovar]&#xa;/ assinar
+[Reprovar]&#xa;/ motivo + assinar
+3Studio reinicia ciclo&#xa;/ preservar histórico&#xa;[RN-006]
+[Matriz]&#xa;Vendedor devolve à 3Studio&#xa;/ assinar
+3Studio envia ao motorista&#xa;/ assinar
+Motorista confirma&#xa;transporte / assinar
+Clicheria confirma&#xa;recebimento / assinar
+[Filial]&#xa;Vendedor encaminha&#xa;diretamente / assinar
+Clicheria confirma&#xa;recebimento / assinar
+3Studio cancela&#xa;/ motivo obrigatório [RN-005]
+b Legenda /b &#xa;&#xa;▶ Mecanismo uniforme em todas as transições:&#xa; Escanear QR → Assinar → Confirmar&#xa;&#xa;🟢 Rota Padrão (Matriz): 6 estágios&#xa;🔵 Rota Direta (Filial): 4 estágios&#xa;🔴 Reprovação: retorno a Criada&#xa;⛔ Cancelamento: estado terminal&#xa;&#xa;Guarda [condição] / ação
+ROTA PADRÃO (Matriz)
+ROTA DIRETA (Filial)
+Diagrama de Sequência — Criação de Prova Digital
+UML Sequence Diagram · UC-01 · 3Studio · Abril 2026
+:3Studio&#xa;(Administrador)
+:Frontend&#xa;(React)
+:API&#xa;(FastAPI)
+:MaquinaEstados
+:QRCodeService
+:PostgreSQL&#xa;(Supabase)
+:R2 Storage
+1: preencherFormulario(nome, nro_req, cliente, vendedor, imagem)
+2: uploadImagem(arquivo)
+2.1: imagem_url
+3: POST /api/provas {dados, imagem_url}
+4: validarCriacao(dados)
+4.1: válido
+5: gerarQRCode(prova_id)
+5.1: qr_code_data + hash
+6: INSERT prova + etiqueta + audit_log
+6.1: prova_criada
+7: {prova, etiqueta_pdf, qr_code}
+8: exibir confirmação + download etiqueta
+Regras Aplicadas:&#xa;• RF-001: Campos obrigatórios&#xa;• RF-002: QR Code auto-gerado&#xa;• RF-003: Etiqueta auto-gerada&#xa;• RN-001: Hash único&#xa;• RN-011: Template configurável
+Diagrama de Sequência — Fluxo Completo: Rota Padrão (Matriz)
+UML Sequence Diagram · UC-04 a UC-13 · 3Studio · Abril 2026
+:Vendedor&#xa;(Matriz)
+:Frontend&#xa;(React)
+:API&#xa;(FastAPI)
+:MaquinaEstados
+:PostgreSQL
+:3Studio&#xa;(Admin)
+:Motorista
+:Clicheria
+1. RETIRADA PELO VENDEDOR
+escanearQR() + assinar()
+POST /transicao
+validar + executar
+INSERT movimentacao
+2. APROVAÇÃO + DETERMINAÇÃO ROTA
+aprovar() + assinar()
+POST /transicao {ação: APROVAR}
+determinarRota(vendedor.loc=MATRIZ)
+3. DEVOLUÇÃO À 3STUDIO
+escanearQR() + assinar()
+POST /transicao {→ DE_VOLTA_3STUDIO}
+4. ENVIO AO MOTORISTA
+escanearQR() + assinar()
+POST /transicao {→ COM_MOTORISTA}
+5. MOTORISTA CONFIRMA TRANSPORTE
+escanearQR() + assinar()
+POST /transicao {→ ENVIADA_CLICHERIA}
+6. CLICHERIA CONFIRMA RECEBIMENTO
+escanearQR() + assinar()
+POST /transicao {→ RECEBIDA_CLICHERIA}
+UPDATE status = CONCLUÍDA
+Rota Padrão (Matriz):&#xa;6 transições de status&#xa;4 atores envolvidos&#xa;Mecanismo uniforme:&#xa;QR → Assinar → Confirmar
+Diagrama de Atividades — Fluxo Completo da Prova Digital v3.0
+UML Activity Diagram · Todas as Rotas + Reprovação + Cancelamento · 3Studio · Abril 2026
+3Studio
+Vendedor
+Motorista
+Clicheria
+Preencher formulário&#xa;e criar prova digital
+Gerar QR Code&#xa;+ Etiqueta
+Vendedor escaneia QR&#xa;e retira prova
+Aprovar&#xa;ou&#xa;Reprovar?
+Reprovar prova&#xa;(informar motivo)
+3Studio reinicia&#xa;ciclo (preserva log)
+Aprovar prova&#xa;(assinar)
+Localização?
+Devolver prova&#xa;à 3Studio
+3Studio envia&#xa;ao motorista
+Motorista confirma&#xa;transporte
+Encaminhar&#xa;diretamente à&#xa;Clicheria
+Clicheria confirma&#xa;recebimento&#xa;(CONCLUÍDA)
+Cancelar Prova&#xa;(motivo obrigatório)
+[Reprovar]
+[Reiniciar Ciclo]
+[Aprovar]
+[Matriz]
+[Filial]
+O cancelamento pode ser&#xa;realizado a partir de&#xa;qualquer estado ativo&#xa;pelo perfil 3Studio.&#xa;(RN-005)
+Diagrama de Componentes — Arquitetura do Sistema v3.0
+UML Component Diagram · Visão Arquitetural · 3Studio · Abril 2026
+«subsystem»&#xa;Frontend (React + TypeScript)
+Pages&#xa;(Login, Dashboard,&#xa;Listagem, Detalhe,&#xa;Configuração, Relatórios)
+QRCodeScanner&#xa;(html5-qrcode)
+SignaturePad&#xa;(react-signature-canvas)
+TimelineView&#xa;(Framer Motion)
+DashboardWidgets&#xa;(Recharts + Realtime)
+AuthContext&#xa;(Supabase Client)
+ReportExporter&#xa;(CSV)
+«subsystem»&#xa;Backend (Python + FastAPI)
+AuthRouter&#xa;(/auth/*)&#xa;PyJWT + Supabase Auth
+ProvasRouter&#xa;(/api/provas/*)&#xa;CRUD + Filtros
+TransicaoRouter&#xa;(/api/transicao/*)&#xa;Máquina de Estados
+MaquinaEstados&#xa;(Pydantic v2)&#xa;Validação + Roteamento
+QRCodeService&#xa;Geração + Validação
+EtiquetaService&#xa;Geração PDF
+AuditLogger&#xa;Log Imutável
+RBACMiddleware&#xa;Autorização por Perfil
+«subsystem»&#xa;Infraestrutura (Supabase + Cloud)
+PostgreSQL 15+&#xa;(Supabase)&#xa;RLS · Triggers · Imutabilidade
+Supabase Auth&#xa;JWT · Sessions
+Supabase Realtime&#xa;WebSocket · Broadcast
+Cloudflare R2&#xa;Object Storage&#xa;(Imagens + Artes)
+Cron Keep-Alive&#xa;(Previne pausa Supabase)
+Deploy&#xa;(Vercel / Railway)
+REST API&#xa;(HTTPS)
+SQL · Auth · Storage
+WebSocket&#xa;(Realtime)
+«uses»
+«uses»
+«uses»
+«uses»
+«uses»
+Diagrama de Implantação — Infraestrutura v3.0
+UML Deployment Diagram · Topologia de Deploy · 3Studio · Abril 2026
+«device»&#xa;Navegador Web&#xa;(Chrome/Firefox/Edge/Safari)
+React SPA&#xa;+ html5-qrcode&#xa;+ react-signature-canvas
+«device»&#xa;Dispositivo com Câmera&#xa;(5 + tela)
+WebRTC Camera API
+«execution environment»&#xa;Vercel (CDN + SSR)
+Next.js / Static Build&#xa;+ API Routes (Proxy)
+«execution environment»&#xa;Railway (Container)
+FastAPI Application&#xa;(Python 3.11+)&#xa;+ Uvicorn&#xa;+ Alembic Migrations
+«execution environment»&#xa;Supabase Cloud
+PostgreSQL 15+&#xa;· RLS Policies&#xa;· Triggers&#xa;· Audit Log (imutável)
+Supabase Auth&#xa;· JWT&#xa;· Session Management
+Supabase Realtime&#xa;· WebSocket&#xa;· Broadcasts
+Cron Keep-Alive&#xa;(previne pausa 7d)
+Cloudflare R2&#xa;· Object Storage&#xa;· Imagens / Artes
+«device»&#xa;Impressora&#xa;(térmica / jato de tinta)
+Etiqueta PDF&#xa;(download)
+«HTTPS»
+«REST API / HTTPS»
+«SQL / Auth API»
+«WebSocket»&#xa;(Realtime)
+«HTTPS»&#xa;(S3-compatible)
+«WebRTC»
+«download PDF»
+Premissas de Deploy:&#xa;• Supabase Free Tier&#xa;• Keep-alive previne pausa (7 dias)&#xa;• R2 para reduzir custos de storage&#xa;• HTTPS/TLS obrigatório (RNF-004)&#xa;• 30 usuários simultâneos (RNF-001)
+Diagrama Entidade-Relacionamento — Modelo de Dados v3.0
+UML / ER Hybrid · Schema PostgreSQL · 3Studio · Abril 2026
+usuarios
+PK
+id : UUID
+gen_random_uuid()
+nome : VARCHAR(150)
+NOT NULL
+email : VARCHAR(255)
+UNIQUE NOT NULL
+senha_hash : VARCHAR(255)
+NOT NULL
+setor : setor_enum
+NOT NULL
+localizacao : localizacao_enum
+NULL (obrig. se Vendedor)
+ativo : BOOLEAN
+DEFAULT true
+created_at : TIMESTAMPTZ
+DEFAULT now()
+updated_at : TIMESTAMPTZ
+DEFAULT now()
+provas_digitais
+PK
+id : UUID
+gen_random_uuid()
+nome : VARCHAR(200)
+NOT NULL
+nro_requerimento : VARCHAR(50)
+UNIQUE NOT NULL
+cliente : VARCHAR(200)
+NOT NULL
+FK
+vendedor_id : UUID
+→ usuarios.id
+imagem_url : TEXT
+NOT NULL
+qr_code_hash : VARCHAR(64)
+UNIQUE NOT NULL
+status : status_prova_enum
+DEFAULT &#39;CRIADA&#39;
+rota : rota_enum
+NULL (set on approval)
+ciclo_atual : INTEGER
+DEFAULT 1
+motivo_cancelamento : TEXT
+NULL
+created_at : TIMESTAMPTZ
+DEFAULT now()
+updated_at : TIMESTAMPTZ
+DEFAULT now()
+movimentacoes
+PK
+id : UUID
+gen_random_uuid()
+FK
+prova_id : UUID
+→ provas_digitais.id
+FK
+usuario_id : UUID
+→ usuarios.id
+status_anterior : status_prova_enum
+NOT NULL
+status_novo : status_prova_enum
+NOT NULL
+assinatura_digital : BYTEA
+NOT NULL
+motivo_reprovacao : TEXT
+NULL
+ciclo : INTEGER
+NOT NULL
+rota_no_momento : rota_enum
+NULL
+created_at : TIMESTAMPTZ
+IMMUTABLE · DEFAULT now()
+etiquetas
+PK
+id : UUID
+gen_random_uuid()
+FK
+prova_id : UUID
+→ provas_digitais.id
+nome_prova : VARCHAR(200)
+NOT NULL
+nro_requerimento : VARCHAR(50)
+NOT NULL
+vendedor_nome : VARCHAR(150)
+NOT NULL
+qr_code_image : BYTEA
+NOT NULL
+created_at : TIMESTAMPTZ
+DEFAULT now()
+audit_logs
+PK
+id : UUID
+gen_random_uuid()
+FK
+prova_id : UUID
+→ provas_digitais.id
+FK
+usuario_id : UUID
+→ usuarios.id
+acao : VARCHAR(100)
+NOT NULL
+detalhes_json : JSONB
+NULL
+ip_address : INET
+NULL
+user_agent : TEXT
+NULL
+created_at : TIMESTAMPTZ
+IMMUTABLE · DEFAULT now()
+configuracoes_sistema
+PK
+id : UUID
+gen_random_uuid()
+chave : VARCHAR(100)
+UNIQUE NOT NULL
+valor : JSONB
+NOT NULL
+descricao : TEXT
+NULL
+FK
+updated_by : UUID
+→ usuarios.id
+updated_at : TIMESTAMPTZ
+DEFAULT now()
+vendedor
+1:N
+1:1
+1:N
+Proteções PostgreSQL:&#xa;• RLS por perfil/setor&#xa;• Trigger IMMUTABLE em movimentacoes&#xa;• Trigger IMMUTABLE em audit_logs&#xa;• CHECK constraint: localizacao&#xa; obrigatória se setor = VENDEDOR&#xa;• Guard contra race conditions&#xa; (SELECT ... FOR UPDATE)

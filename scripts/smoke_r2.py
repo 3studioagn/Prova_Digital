@@ -1,9 +1,7 @@
 """
-Smoke test de conectividade com o Cloudflare R2.
-
+Esse script de conectividade com o Cloudflare R2.
 Valida o ciclo completo: upload -> list -> download -> delete.
 Este script NAO deve subir para producao — serve apenas como validacao.
-
 Uso: python scripts/smoke_r2.py
 """
 

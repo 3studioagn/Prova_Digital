@@ -66,11 +66,16 @@ provaDigital/
 │   │   │   ├── 001_create_enums_tables_triggers_indexes.py
 │   │   │   ├── 002_seed_configuracoes_iniciais.py
 │   │   │   ├── 003_fix_constraints_indexes_trigger.py
-│   │   │   └── 004_add_is_admin_created_by_to_usuarios.py
+│   │   │   ├── 004_add_is_admin_created_by_to_usuarios.py
+│   │   │   ├── 005_add_index_on_usuarios_created_by.py  # auditoria Wave 1 — index FK created_by
+│   │   │   ├── 006_set_search_path_on_trigger_functions.py  # ADR-024 — search_path='' nas funcoes
+│   │   │   ├── 007_enable_rls_on_alembic_version.py  # ADR-025 — fix side effect do alembic stamp
+│   │   │   └── 008_add_index_on_configuracoes_sistema_updated_by.py  # ADR-026 — index FK
 │   │   └── rls/
 │   │       ├── 001_enable_rls.sql
 │   │       ├── 002_policies_por_perfil.sql
 │   │       ├── 003_policies_wave1_usuarios.sql
+│   │       ├── 004_unify_rls_is_admin.sql  # ADR-018
 │   │       └── apply_rls.py
 │   └── tests/
 │       ├── conftest.py          # Fixtures: make_user, admin_user, mock_db

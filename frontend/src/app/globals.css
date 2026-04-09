@@ -1,26 +1,71 @@
-/* Design tokens extraidos do Figma — ProvaDigital */
+/* Design tokens extraidos do Figma — ProvaDigital
+ *
+ * O projeto tem DUAS superficies visuais, por design:
+ *   1. Superficie escura (sidebar, tela de login, modais): fundo #000, texto branco.
+ *   2. Superficie clara (cartao principal do dashboard): fundo #EAEAEA, texto preto.
+ *
+ * Os tokens --color-card-* sao exclusivamente da superficie clara e nao devem ser
+ * usados na sidebar/modais. Os tokens --color-bg-*, --color-text-* sao da superficie escura.
+ */
 :root {
+  /* ── Superficie escura (sidebar, modais, login) ─────────────────────────── */
   --color-bg: #000000;
-  --color-bg-card: #ffffff;
-  --color-bg-input: #1f1f1f;
   --color-bg-sidebar: #000000;
+  --color-bg-input: #1f1f1f;
+  --color-bg-surface-2: #2a2a2a;
+  --color-bg-card: #ffffff;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #b7b7b7;
+  --color-text-dim: #868686;
+  --color-text-dark: #000000;
+  --color-text-link: #ffcb5c;
+  --color-border: #2a2a2a;
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+
+  /* ── Superficie clara (cartao principal do dashboard) ───────────────────── */
+  --color-card-bg: #eaeaea;
+  --color-card-surface: #d9d9d9;
+  --color-card-surface-alt: #d7d7d7;
+  --color-card-divider: #b7b7b7;
+  --color-card-text: #000000;
+  --color-card-text-muted: #575757;
+  --color-card-text-dim: #868686;
+  --color-card-border: #868686;
+
+  /* ── Acentos (comuns as duas superficies) ───────────────────────────────── */
   --color-accent: #ffcb5c;
   --color-accent-hover: #e6b84e;
-  --color-text-primary: #ffffff;
-  --color-text-secondary: #9e9e9e;
-  --color-text-dark: #1a1a1a;
-  --color-text-link: #ffcb5c;
-  --color-danger: #e74c3c;
+  --color-accent-soft: rgba(255, 203, 92, 0.14);
+  --color-danger: #ff5959;
+  --color-danger-hover: #e64545;
+  --color-danger-soft: rgba(255, 89, 89, 0.14);
   --color-success: #2ecc71;
-  --color-border: #2a2a2a;
 
-  --radius-pill: 50px;
+  /* ── Overlay (modal) ────────────────────────────────────────────────────── */
+  --color-overlay: rgba(59, 59, 59, 0.4);
+
+  /* ── Radius ─────────────────────────────────────────────────────────────── */
+  --radius-pill: 9999px;
+  --radius-field: 9999px;
   --radius-card: 16px;
+  --radius-card-lg: 24px;
+  --radius-card-xl: 28px;
   --radius-sm: 8px;
 
+  /* ── Tipografia ─────────────────────────────────────────────────────────── */
   --font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --fs-display: clamp(2rem, 4.5vw, 3.75rem);
+  --fs-title: clamp(1.5rem, 2.6vw, 2.25rem);
+  --fs-h2: 1.875rem;
+  --fs-xl: 1.25rem;
+  --fs-lg: 1.125rem;
+  --fs-base: 1rem;
+  --fs-sm: 0.875rem;
+  --fs-xs: 0.8125rem;
 
-  --sidebar-width: 280px;
+  /* ── Layout ─────────────────────────────────────────────────────────────── */
+  --sidebar-width: 400px;
+  --card-padding: clamp(2rem, 4vw, 4rem);
 }
 
 *,
@@ -52,6 +97,14 @@ a:hover {
 
 input,
 select,
-button {
+button,
+textarea {
   font-family: inherit;
+}
+
+/* Remove default chevron do select nativo para podermos posicionar um SVG */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
