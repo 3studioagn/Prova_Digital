@@ -1,10 +1,63 @@
 """Testes do EtiquetaService (ADR-035)."""
 from datetime import datetime, timezone
 
-from app.services.etiqueta_service import TEMPLATE_PADRAO, gerar_pdf
+from app.services.etiqueta_service import (
+    _ASSETS_DIR,
+    _FONTS_DIR,
+    _LOGO_3STUDIO,
+    _LOGO_STUDIO_ART,
+    TEMPLATE_PADRAO,
+    _check_assets,
+    gerar_pdf,
+)
 from app.services.qrcode_service import gerar_imagem_qr
 
 QR_IMG = gerar_imagem_qr("3SD|REQ-TEST|aaaaaaaaaaaaaaaa", size_px=200)
+
+
+# ─── Deploy smoke (C1 — hardening pos-auditoria) ──────────────────────────
+
+
+def test_etiqueta_assets_existem_no_repo():
+    """Falha rapido se os SVGs dos logos nao estiverem versionados.
+
+    C1 da auditoria Wave 2: os assets estavam untracked no git, o que
+    teria quebrado o deploy em producao (Railway). Este teste existe para
+    garantir que alguem que apague ou esqueca de commitar os SVGs veja a
+    falha no CI, nao em producao.
+    """
+    assert _ASSETS_DIR.exists(), f"Diretorio de assets nao existe: {_ASSETS_DIR}"
+    assert _LOGO_3STUDIO.exists(), (
+        f"logo_3studio.svg ausente em {_LOGO_3STUDIO}. Versione o arquivo."
+    )
+    assert _LOGO_STUDIO_ART.exists(), (
+        f"logo_studio_e_arte.svg ausente em {_LOGO_STUDIO_ART}. Versione o arquivo."
+    )
+    # Sanity check de formato: SVGs validos comecam com header XML ou tag svg.
+    for path in (_LOGO_3STUDIO, _LOGO_STUDIO_ART):
+        head = path.read_bytes()[:200].lower()
+        assert b"<svg" in head or b"<?xml" in head, (
+            f"{path.name} nao parece ser um SVG valido"
+        )
+
+
+def test_etiqueta_fonts_existem_no_repo():
+    """Mesmo espirito de test_etiqueta_assets_existem_no_repo, mas para os TTFs.
+
+    Se os arquivos DejaVu sumirem, _register_fonts levanta RuntimeError
+    e nenhuma prova pode ser criada.
+    """
+    assert _FONTS_DIR.exists(), f"Diretorio de fontes nao existe: {_FONTS_DIR}"
+    regular = _FONTS_DIR / "DejaVuSans.ttf"
+    bold = _FONTS_DIR / "DejaVuSans-Bold.ttf"
+    assert regular.exists(), f"DejaVuSans.ttf ausente em {regular}"
+    assert bold.exists(), f"DejaVuSans-Bold.ttf ausente em {bold}"
+
+
+def test_check_assets_nao_levanta_com_arquivos_presentes():
+    """_check_assets e chamada em cada gerar_pdf — garante que nao quebra."""
+    _check_assets()  # nao deve levantar
+
 
 
 def test_pdf_tem_magic_header_padrao():
@@ -29,7 +82,14 @@ def test_pdf_a4_e_maior_que_vazio():
     assert len(pdf) > 1000
 
 
-def test_pdf_80mm_thermal_tem_tamanho_diferente_do_a4():
+def test_pdf_formato_legacy_e_aceito_mas_ignorado():
+    """Sessao 14: o campo `formato` do template foi obsoleto.
+
+    A etiqueta tem dimensao fixa 90x57mm conforme design Figma. Os valores
+    legacy "A4" e "80mm_thermal" continuam sendo aceitos pelo schema (para
+    compat com configuracao existente) mas nao afetam o render — geram
+    PDFs identicos byte-a-byte (com os mesmos inputs).
+    """
     a4 = gerar_pdf(
         nome_prova="Teste",
         nro_requerimento="REQ-1",
@@ -44,10 +104,10 @@ def test_pdf_80mm_thermal_tem_tamanho_diferente_do_a4():
         qr_image_bytes=QR_IMG,
         template={**TEMPLATE_PADRAO, "formato": "80mm_thermal"},
     )
-    # Ambos validos, tamanhos distintos (layout e dimensoes da pagina diferem).
     assert a4.startswith(b"%PDF-")
     assert thermal.startswith(b"%PDF-")
-    assert a4 != thermal
+    # Ambos geram o MESMO output — formato e ignorado pelo render.
+    assert a4 == thermal
 
 
 def test_pdf_sem_logo_gera_menor():

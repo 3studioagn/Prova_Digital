@@ -39,6 +39,7 @@ from datetime import date, datetime, timedelta, timezone
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_admin_user, get_current_user
@@ -207,13 +208,18 @@ async def _carregar_vendedor(db: AsyncSession, vendedor_id) -> Usuario:
     return vendedor
 
 
-async def _validar_upload_no_r2(object_key: str) -> str:
-    """Confirma HeadObject + ContentLength + magic bytes. Retorna MIME detectado.
+async def _validar_upload_no_r2(object_key: str) -> None:
+    """Confirma HeadObject + ContentLength + magic bytes.
 
     A validacao de magic bytes (ADR-032) e a unica barreira contra upload
     com content-type spoofado — o `content_type` declarado no step 1
     (/upload-url) nao e persistido entre requests, entao aqui so olhamos
     o conteudo real do arquivo no R2.
+
+    Pos-ADR-057: esta funcao nao retorna mais o MIME detectado porque
+    nenhum caller usava o valor. A validacao em si continua igual — se
+    os magic bytes nao baterem com JPG ou PNG, levanta 422 e o caller
+    limpa o R2.
 
     Raises HTTPException se qualquer validacao falhar.
     """
@@ -261,8 +267,6 @@ async def _validar_upload_no_r2(object_key: str) -> str:
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Arquivo nao e JPG ou PNG valido (magic bytes)",
         )
-
-    return detected_mime
 
 
 async def _carregar_template_etiqueta(db: AsyncSession) -> dict:
@@ -429,6 +433,30 @@ async def create_prova(
         )
 
         await db.commit()
+    except IntegrityError:
+        # A2 (auditoria Wave 2): race entre dois admins criando a mesma prova.
+        #
+        # Cenario: o check de unicidade do nro_requerimento no inicio do handler
+        # (linhas 300-310) roda ANTES do INSERT, entao existe uma janela TOCTOU
+        # em que outra requisicao paralela pode criar a mesma prova e commitar
+        # primeiro. O constraint UNIQUE no banco detecta o conflito e levanta
+        # IntegrityError no commit — mapeamos para 409 Conflict em vez de 500.
+        #
+        # Outros tipos de IntegrityError (FK quebrada, NOT NULL violado) tambem
+        # caem aqui porque estruturalmente estao no mesmo caminho de escrita;
+        # a mensagem e generica o suficiente para cobrir todos mas nao vaza
+        # detalhes internos de schema.
+        await db.rollback()
+        logger.warning(
+            "IntegrityError ao persistir prova nro_req=%s (provavel race de unicidade). "
+            "Limpando R2.",
+            body.nro_requerimento,
+        )
+        await _cleanup_r2(body.object_key)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Numero de requerimento ja cadastrado",
+        )
     except Exception:
         await db.rollback()
         logger.exception(
@@ -507,6 +535,30 @@ CLICHERIA_STATUSES = (
 )
 
 
+# ─── Escape de wildcards para ILIKE (C1 da auditoria Wave 2) ──────────
+#
+# O ILIKE do Postgres trata `%` (qualquer sequencia) e `_` (1 char) como
+# wildcards. Se o usuario digita esses chars nos filtros `busca` ou
+# `cliente`, eles sao interpretados como pattern SQL em vez de literais
+# — um admin que filtra por "100%" ve resultados errados, e "a_b" casa
+# "axb" inesperadamente.
+#
+# Solucao canonica: escapar `\`, `%` e `_` com um escape char explicito,
+# e passar esse mesmo escape char para o `.ilike(..., escape="\\")`. A
+# ordem importa — `\` DEVE ser escapado primeiro para nao reescapar os
+# chars escapados depois.
+ILIKE_ESCAPE_CHAR = "\\"
+
+
+def _escape_ilike(term: str) -> str:
+    """Escapa wildcards (`\\`, `%`, `_`) para uso literal em ILIKE."""
+    return (
+        term.replace(ILIKE_ESCAPE_CHAR, ILIKE_ESCAPE_CHAR + ILIKE_ESCAPE_CHAR)
+        .replace("%", ILIKE_ESCAPE_CHAR + "%")
+        .replace("_", ILIKE_ESCAPE_CHAR + "_")
+    )
+
+
 def _scoping_filter(user: Usuario):
     """Retorna a clausula WHERE base que restringe provas por setor.
 
@@ -552,8 +604,22 @@ async def list_provas(
     Performance: indexes `idx_provas_status`, `idx_provas_status_created`,
     `idx_provas_vendedor`, `idx_provas_created_at` cobrem os filtros mais
     comuns. ILIKE em `cliente`/`nome`/`nro_requerimento` e seq scan no
-    volume Wave 2 — aceitavel (ADR-038).
+    volume Wave 2 — aceitavel (ADR-038). Wildcards sao escapados (C1 da
+    auditoria Wave 2 — ver `_escape_ilike`).
     """
+    # A3 (auditoria Wave 2): validacao cruzada de periodo.
+    # Se o usuario inverter as datas, retornamos 422 em vez de aceitar o
+    # filtro e devolver lista vazia silenciosamente (UX confusa).
+    if (
+        periodo_inicio is not None
+        and periodo_fim is not None
+        and periodo_fim < periodo_inicio
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Data final do periodo nao pode ser anterior a inicial",
+        )
+
     filters: list = []
 
     # Filtro base de scoping (ADR-046)
@@ -569,13 +635,20 @@ async def list_provas(
     if rota is not None:
         filters.append(ProvaDigital.rota == rota)
     if cliente:
-        filters.append(ProvaDigital.cliente.ilike(f"%{cliente}%"))
+        # C1 (auditoria Wave 2): escape de wildcards antes de concatenar.
+        cliente_pattern = f"%{_escape_ilike(cliente)}%"
+        filters.append(
+            ProvaDigital.cliente.ilike(cliente_pattern, escape=ILIKE_ESCAPE_CHAR)
+        )
     if busca:
-        pattern = f"%{busca}%"
+        # C1 (auditoria Wave 2): escape de wildcards antes de concatenar.
+        busca_pattern = f"%{_escape_ilike(busca)}%"
         filters.append(
             or_(
-                ProvaDigital.nome.ilike(pattern),
-                ProvaDigital.nro_requerimento.ilike(pattern),
+                ProvaDigital.nome.ilike(busca_pattern, escape=ILIKE_ESCAPE_CHAR),
+                ProvaDigital.nro_requerimento.ilike(
+                    busca_pattern, escape=ILIKE_ESCAPE_CHAR
+                ),
             )
         )
 
@@ -597,7 +670,6 @@ async def list_provas(
     count_stmt = select(func.count()).select_from(ProvaDigital)
     for f in filters:
         count_stmt = count_stmt.where(f)
-    total = (await db.execute(count_stmt)).scalar() or 0
 
     # Data query com JOIN em usuarios para trazer vendedor_nome
     data_stmt = (
@@ -614,7 +686,25 @@ async def list_provas(
         .limit(page_size)
     )
 
-    rows = (await db.execute(data_stmt)).all()
+    # A2 (auditoria Wave 2): try/except explicito em torno das queries de
+    # listagem. Erros transitorios (DB timeout, pooler OFF, connection
+    # reset) devolvem 502 com mensagem acionavel em vez de cair no
+    # exception handler global do main.py que loga "Erro interno do
+    # servidor" sem contexto util.
+    try:
+        total = (await db.execute(count_stmt)).scalar() or 0
+        rows = (await db.execute(data_stmt)).all()
+    except Exception:
+        logger.exception(
+            "Falha ao executar listagem de provas (user=%s, page=%d)",
+            current_user.id,
+            page,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar provas",
+        )
+
     items = [
         ProvaListItem(
             id=prova.id,
@@ -725,20 +815,40 @@ async def get_prova_detail(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> ProvaResponse:
-    """Retorna os dados completos de uma prova (autenticado + scoping)."""
-    result = await _carregar_prova_com_scoping(db, prova_id, current_user)
-    if result is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Prova nao encontrada",
-        )
-    prova, vendedor_nome, vendedor_localizacao = result
+    """Retorna os dados completos de uma prova (autenticado + scoping).
 
-    # Para calcular rota_projetada precisamos do Usuario completo (com setor).
-    # Consulta simples pelo id ja retornado.
-    vendedor_obj = (
-        await db.execute(select(Usuario).where(Usuario.id == prova.vendedor_id))
-    ).scalar_one_or_none()
+    A1 (auditoria Wave 2 — Sessao 20): envolve as queries em try/except
+    para mapear erros transitorios de DB (pooler OFF, connection reset,
+    timeout) para 502 com mensagem acionavel em vez do 500 generico do
+    exception handler global. HTTPException (ex: 404 do scoping) e
+    re-levantada para nao ser mascarada.
+    """
+    try:
+        result = await _carregar_prova_com_scoping(db, prova_id, current_user)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prova nao encontrada",
+            )
+        prova, vendedor_nome, vendedor_localizacao = result
+
+        # Para calcular rota_projetada precisamos do Usuario completo (com setor).
+        # Consulta simples pelo id ja retornado.
+        vendedor_obj = (
+            await db.execute(select(Usuario).where(Usuario.id == prova.vendedor_id))
+        ).scalar_one_or_none()
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha ao carregar detalhe da prova %s (user=%s)",
+            prova_id,
+            current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar prova",
+        )
 
     return _build_prova_response(
         prova, vendedor_obj, vendedor_nome, vendedor_localizacao
@@ -805,27 +915,44 @@ async def list_movimentacoes(
     Na Wave 2 retorna sempre `items=[]` porque nenhuma transicao aconteceu.
     A query e real — quando a Wave 3 inserir movimentacoes, o handler ja
     devolve sem mudanca de contrato.
+
+    A1 (auditoria Wave 2 — Sessao 20): try/except em torno das queries
+    mapeia erros transitorios de DB para 502 acionavel.
     """
-    # (1) Verifica scoping da prova (404 se escondida/inexistente)
-    scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
-    if scoped is None:
+    try:
+        # (1) Verifica scoping da prova (404 se escondida/inexistente)
+        scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
+        if scoped is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prova nao encontrada",
+            )
+
+        # (2) Le movimentacoes com JOIN para pegar nome/setor do autor
+        stmt = (
+            select(
+                Movimentacao,
+                Usuario.nome.label("usuario_nome"),
+                Usuario.setor.label("usuario_setor"),
+            )
+            .join(Usuario, Usuario.id == Movimentacao.usuario_id)
+            .where(Movimentacao.prova_id == prova_id)
+            .order_by(Movimentacao.created_at.asc())
+        )
+        rows = (await db.execute(stmt)).all()
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha ao carregar movimentacoes da prova %s (user=%s)",
+            prova_id,
+            current_user.id,
+        )
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Prova nao encontrada",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar movimentacoes",
         )
 
-    # (2) Le movimentacoes com JOIN para pegar nome/setor do autor
-    stmt = (
-        select(
-            Movimentacao,
-            Usuario.nome.label("usuario_nome"),
-            Usuario.setor.label("usuario_setor"),
-        )
-        .join(Usuario, Usuario.id == Movimentacao.usuario_id)
-        .where(Movimentacao.prova_id == prova_id)
-        .order_by(Movimentacao.created_at.asc())
-    )
-    rows = (await db.execute(stmt)).all()
     items = [
         MovimentacaoResponse(
             id=m.id,
@@ -857,42 +984,81 @@ async def get_etiqueta_pdf(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> Response:
-    """Re-gera o PDF da etiqueta da prova e retorna como streaming binario."""
-    scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
-    if scoped is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Prova nao encontrada",
-        )
-    prova, vendedor_nome, _vendedor_localizacao = scoped
+    """Re-gera o PDF da etiqueta da prova e retorna como streaming binario.
 
-    # Busca a etiqueta (snapshot imutavel criado junto com a prova)
-    etiqueta = (
-        await db.execute(
-            select(Etiqueta).where(Etiqueta.prova_id == prova_id)
-        )
-    ).scalar_one_or_none()
-    if etiqueta is None:
-        logger.error(
-            "Prova %s sem etiqueta associada — defeito de integridade.", prova_id
+    A1 + A2 (auditoria Wave 2 — Sessao 20): dois try/except em sequencia.
+      - Primeiro bloco: queries de DB (scoped + SELECT etiqueta +
+        _carregar_template_etiqueta). Erro transitorio → 502.
+      - Segundo bloco: `gerar_pdf` isolado. Falha de rendering (Unicode,
+        fonte ausente, template invalido) → 422 com mensagem acionavel,
+        mesmo padrao do ADR-054 (create_prova).
+    """
+    try:
+        scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
+        if scoped is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prova nao encontrada",
+            )
+        prova, vendedor_nome, _vendedor_localizacao = scoped
+
+        # Busca a etiqueta (snapshot imutavel criado junto com a prova)
+        etiqueta = (
+            await db.execute(
+                select(Etiqueta).where(Etiqueta.prova_id == prova_id)
+            )
+        ).scalar_one_or_none()
+        if etiqueta is None:
+            logger.error(
+                "Prova %s sem etiqueta associada — defeito de integridade.",
+                prova_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Etiqueta nao encontrada para esta prova",
+            )
+
+        template = await _carregar_template_etiqueta(db)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha ao carregar dados da etiqueta da prova %s (user=%s)",
+            prova_id,
+            current_user.id,
         )
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Etiqueta nao encontrada para esta prova",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar dados da etiqueta",
         )
 
-    template = await _carregar_template_etiqueta(db)
-    pdf_bytes = gerar_pdf(
-        nome_prova=etiqueta.nome_prova,
-        nro_requerimento=etiqueta.nro_requerimento,
-        vendedor_nome=etiqueta.vendedor_nome,
-        qr_image_bytes=etiqueta.qr_code_image,
-        template=template,
-        created_at=prova.created_at,
-    )
+    # Bloco dedicado ao rendering do PDF. Separado do bloco de DB porque
+    # a classe de erro e diferente (422 — input problematico — vs 502 —
+    # upstream indisponivel). Mesma filosofia do ADR-054.
+    try:
+        pdf_bytes = gerar_pdf(
+            nome_prova=etiqueta.nome_prova,
+            nro_requerimento=etiqueta.nro_requerimento,
+            vendedor_nome=etiqueta.vendedor_nome,
+            qr_image_bytes=etiqueta.qr_code_image,
+            template=template,
+            created_at=prova.created_at,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Falha ao gerar PDF da etiqueta para prova %s (nro_req=%s)",
+            prova_id,
+            prova.nro_requerimento,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Falha ao gerar etiqueta: {exc}",
+        )
 
     # Sanitiza o nro_requerimento para uso no Content-Disposition
-    safe_nro = "".join(c if c.isalnum() or c in "-_" else "_" for c in prova.nro_requerimento)
+    safe_nro = "".join(
+        c if c.isalnum() or c in "-_" else "_" for c in prova.nro_requerimento
+    )
     filename = f"etiqueta-{safe_nro}.pdf"
 
     return Response(
@@ -921,23 +1087,39 @@ async def get_qr_code_png(
     Usado pelo modal "Visualizar etiqueta" do Componente 08 para exibir o
     QR code em tamanho grande lado a lado com o PDF da etiqueta — facilita
     leitura com celular sem imprimir.
-    """
-    scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
-    if scoped is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Prova nao encontrada",
-        )
 
-    etiqueta = (
-        await db.execute(
-            select(Etiqueta.qr_code_image).where(Etiqueta.prova_id == prova_id)
+    A1 (auditoria Wave 2 — Sessao 20): try/except em torno das 2 queries
+    mapeia erros transitorios de DB para 502 acionavel.
+    """
+    try:
+        scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
+        if scoped is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prova nao encontrada",
+            )
+
+        etiqueta = (
+            await db.execute(
+                select(Etiqueta.qr_code_image).where(Etiqueta.prova_id == prova_id)
+            )
+        ).scalar_one_or_none()
+        if etiqueta is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="QR Code nao encontrado para esta prova",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha ao carregar QR code da prova %s (user=%s)",
+            prova_id,
+            current_user.id,
         )
-    ).scalar_one_or_none()
-    if etiqueta is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="QR Code nao encontrado para esta prova",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar QR code",
         )
 
     return Response(

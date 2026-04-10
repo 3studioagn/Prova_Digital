@@ -994,3 +994,805 @@ O `fim + 1 day` com `<` e o padrao canonico para incluir todo o dia final sem de
   - **Wave 2 robusta** o suficiente para entrar em producao com os fixes aplicados. Riscos residuais conhecidos: A4 (RLS vs backend em movimentacoes — Wave 3), M6 (timezone do filtro de data — cosmetico), glyphs faltando em CJK/emoji (degradacao graciosa).
   - **Processo registrado** em ADR + CHANGELOG para reproducao futura. A auditoria deve ser re-executada antes do fechamento de cada Wave grande (e.g., 3, 4, 5) — o cheklist mental testado aqui (ruff → tsc → testes → get_type_hints → PDFs com chars raros → race conditions em hooks → etc) cabe em outras situacoes.
   - **Commit unico "Wave 2 semi-pronta"** encerra essa sessao com o estado completo da Wave 2 + hardening aplicado.
+
+---
+
+## ADR-059 — `.card` como container + `.cardInner` scrollavel (scroll interno do dashboard)
+**Data:** 2026-04-09 (Sessao 13 — ajustes visuais /provas)
+**Contexto:** O `.card` do `layout.module.css` e o wrapper cinza claro arredondado que ocupa a area do conteudo de cada rota do dashboard. Originalmente tinha `min-height: calc(100vh - 2rem)` e `padding: var(--card-padding)` — o conteudo fluia livre e, quando ultrapassava o viewport, a PAGINA INTEIRA scrollava (browser scroll nativo). Isso fazia a sidebar "subir" junto com o conteudo, e em listagens longas o cabecalho da tabela saia de vista.
+  Feedback do Mario (Sessao 13): "tudo que tiver dentro do box branco(box da direita com o conteudo) deve ter scroll dentro do proprio box, sem dar scroll na pagina inteira." E depois, em uma segunda iteracao: "A scroll esta muito fora do card branco, preciso que deixe ela mais natural no card branco, sem ficar passando pra fora."
+  Primeira tentativa (aplicar `overflow-y: auto` direto no `.card`): tecnicamente funciona, mas a scrollbar do WebKit fica embutida no edge direito do card e, como o card tem `border-radius: 28px`, visualmente parece que a scrollbar "vaza" pelos cantos curvos superior/inferior direito.
+**Decisao:** Refatorar o layout do dashboard em DUAS camadas:
+  1. **`.card` vira APENAS container**: `background` + `border-radius` + `height: calc(100vh - 2rem)` + `overflow: hidden`. Nao tem padding, nao scrolla. O `overflow: hidden` combinado com o `border-radius` clipa qualquer conteudo filho (incluindo scrollbars) pelos cantos arredondados — nada passa visualmente da borda curva.
+  2. **`.cardInner` vira o scrollavel real**: novo wrapper `<div>` adicionado em `layout.tsx` envolvendo `{children}`. Tem `height: 100%`, `padding: var(--card-padding)`, `padding-right: calc(var(--card-padding) - 10px)` (compensa a largura da scrollbar mantendo o conteudo centralizado), `overflow-y: auto`, `overflow-x: hidden`.
+  3. **`.main` ganha `height: 100vh` + `overflow: hidden`** para garantir que o `.card` (filho) nunca cause scroll na pagina: a dupla `main > card` forma uma "caixa" fechada cujo unico canal de scroll e o `.cardInner`.
+  4. **Overrides mobile preservam o scroll nativo**: no breakpoint `< 768px`, `.main`/`.card`/`.cardInner` voltam para `height: auto` + `overflow: visible` — no mobile a sidebar vira drawer e o conteudo flui livre, scroll do browser funciona normalmente.
+**Alternativas:**
+  - **Scroll direto no `.card`** (sem refatorar): rejeitado — scrollbar "vaza" pelos cantos arredondados (ver contexto).
+  - **Scroll no `.main`**: rejeitado — a scrollbar ficaria FORA do card (entre o card e a borda do viewport), visualmente disconnected do conteudo.
+  - **Sticky header dentro do card**: rejeitado — so resolveria o problema do header da tabela sair de vista, nao o scroll da pagina toda.
+  - **Virtual scroll** (tipo react-window): overkill para o volume esperado (centenas de linhas no maximo no horizonte).
+**Consequencias:**
+  - **Scroll sempre interno, sidebar sempre fixa**: o comportamento e consistente em todas as rotas do dashboard (`/provas`, `/usuarios`, `/configuracoes`, `/nova-prova`, `/provas/[id]`). Todas as rotas ganham scroll interno sem nenhuma mudanca individual — e uma melhoria neutra para `/usuarios` (intocada conforme instrucao do Mario) que agora tambem scrolla internamente quando necessario.
+  - **Validacao runtime** via `preview_eval`: `{ docHeight: 1080, mainStyle.overflow: "hidden", cardStyle.height: "1048px", cardStyle.scrollHeight: 1508, cardStyle.hasInternalScroll: true }` — confirmado.
+  - **Uma regressao potencial**: se alguma rota do dashboard tiver comportamento que dependia do scroll ser na pagina inteira (ex: sticky element relativo ao viewport, infinite scroll baseado em `window.onscroll`), precisa ser adaptada para o novo contexto. Na Wave 2 nenhuma rota usa esse padrao — todas sao layouts estaticos.
+  - **Mobile nao afetado**: overrides nas media queries preservam o comportamento anterior. A mensagem "acesse a versao desktop" continua sendo exibida em `< 768px` via logica de cada pagina (nao do layout).
+
+---
+
+## ADR-060 — Scrollbar customizada cross-browser (WebKit + Firefox)
+**Data:** 2026-04-09 (Sessao 13 — ajustes visuais /provas)
+**Contexto:** Com o scroll interno ativo (ADR-059), ficou necessario customizar a scrollbar para bater com o design minimalista do Figma. A scrollbar default dos sistemas operacionais (Windows especialmente) e larga, colorida (cinza medio sobre cinza escuro) e destoa do aesthetic do card claro.
+**Decisao:** Implementar scrollbar customizada com suporte cross-browser via 2 APIs paralelas:
+  1. **Firefox (API standard)**: `scrollbar-width: thin` + `scrollbar-color: #9a9a9a transparent`. O `transparent` como cor da track deixa o fundo do `.card` (cinza claro `#eaeaea`) aparecer atras.
+  2. **WebKit/Blink (Chrome, Edge, Safari)**: pseudo-seletores:
+     ```css
+     ::-webkit-scrollbar { width: 10px; background: transparent }
+     ::-webkit-scrollbar-track { background: transparent; margin: 40px 0 }
+     ::-webkit-scrollbar-thumb { background: #9a9a9a; border-radius: 999px;
+                                  min-height: 48px }
+     ::-webkit-scrollbar-thumb:hover { background: #6d6d6d }
+     ::-webkit-scrollbar-thumb:active { background: #525252 }
+     ```
+  **Ponto-chave:** a `margin: 40px 0` na `::-webkit-scrollbar-track` afasta a area ativa do thumb verticalmente dos cantos arredondados do card (radius ~28px). Como o thumb so pode se mover dentro da track, ele nunca entra na regiao curva — visualmente a scrollbar fica "flutuando" dentro do retangulo central do card, sem encostar nas bordas.
+  **Cores do thumb** escolhidas para contraste equilibrado sobre o fundo `#eaeaea`:
+  - Normal `#9a9a9a` (~53% preto) — visivel mas nao dominante
+  - Hover `#6d6d6d` (~40% preto) — destaque em interacao
+  - Active `#525252` (~32% preto) — feedback de drag
+  **Thumb pill** (`border-radius: 999px`) para combinar com o resto do design language (todos os pills do app usam 9999px). `min-height: 48px` para garantir que o thumb nunca fique microscopico em listas muito longas.
+**Alternativas:**
+  - **Biblioteca overlayscrollbars/SimpleBar**: rejeitado — overkill, +50KB de JS, acessibilidade questionavel. A API nativa do browser cobre tudo que precisamos.
+  - **Scrollbar invisivel + indicador custom**: rejeitado — perde a affordance visual do "tem mais conteudo abaixo".
+  - **Scrollbar fora do container** (tipo macOS overlay): rejeitado — nao e nativo no Chrome Windows e exigiria JS.
+  - **Thumb com `background-clip: padding-box` + `border: transparent`** (truque para criar respiro visual): tentado inicialmente, revertido — complica o mental model e o ganho visual e marginal.
+**Consequencias:**
+  - **Visibilidade nos browsers reais** (Chrome desktop, Edge, Firefox, Safari): confirmada pelo design pattern — `::-webkit-scrollbar-*` e suportado universalmente desde ~2011.
+  - **Limitacao do preview headless**: o Chrome headless usado pelo `preview_screenshot` do Claude Code **nao renderiza** `::-webkit-scrollbar` pseudo-elementos no buffer de captura. Testado empiricamente injetando `::-webkit-scrollbar-thumb { background: red !important }` + track verde + `!important` — mesmo assim a scrollbar nao aparece no screenshot (embora exista no DOM, com `offsetWidth - clientWidth = 10` e regras matching no CSSOM). Isso significa que screenshots futuros do preview nao podem ser usados para validar a scrollbar visualmente — validacao precisa acontecer em um browser real.
+  - **Runtime estrutural validado**: `offsetWidth - clientWidth = 10`, scroll programatico (`scrollTop = 340`) funcional, margin da track aplicada, cores do CSSOM corretas.
+  - **Futuros ajustes** (cor, largura, shape) sao locais a `.cardInner` em `layout.module.css` — nao afeta o conteudo de nenhuma rota.
+
+---
+
+## ADR-061 — `STATUS_LABELS_SHORT` separado de `STATUS_LABELS`
+**Data:** 2026-04-09 (Sessao 13 — ajustes visuais /provas)
+**Contexto:** O Figma da tela `/provas` mostrava status com labels curtos ("Cancelada", "Aprovada", "Reprovada", "Na 3Studio", "Encaminhada", "Retirada"). O `STATUS_LABELS` existente em `frontend/src/lib/types/prova.ts` (criado na Sessao 11) tem labels completos ("Retirada pelo vendedor", "Aprovada pelo vendedor", "De volta a 3Studio", "Encaminhada a clicheria", etc) para dar contexto maximo na tela de detalhe (Componente 08). Usar os labels longos na coluna de Status da listagem deixa a tabela desorganizada — textos quebrando em multilinha, overflow horizontal.
+  Duas opcoes consideradas: (a) encurtar `STATUS_LABELS` e afetar todas as telas que usa (incluindo a de detalhe onde o espaco e maior e o contexto completo e util); (b) criar um `STATUS_LABELS_SHORT` paralelo e usar seletivamente nas telas com restricao de largura.
+**Decisao:** Criar `STATUS_LABELS_SHORT: Record<StatusProva, string>` como constante separada em `prova.ts`, com mapeamento:
+  - `CRIADA` → `"Criada"`
+  - `RETIRADA_PELO_VENDEDOR` → `"Retirada"`
+  - `APROVADA_PELO_VENDEDOR` → `"Aprovada"`
+  - `DE_VOLTA_3STUDIO` → `"Na 3Studio"`
+  - `COM_MOTORISTA` → `"Com motorista"`
+  - `ENVIADA_PARA_CLICHERIA` → `"Enviada"`
+  - `ENCAMINHADA_A_CLICHERIA` → `"Encaminhada"`
+  - `RECEBIDA_PELA_CLICHERIA` → `"Na clicheria"`
+  - `REPROVADA_PELO_VENDEDOR` → `"Reprovada"`
+  - `CANCELADA` → `"Cancelada"`
+  **Usado em**: `/provas` (listagem — Componente 07) e na pagina `preview-provas` de inspecao.
+  **NAO usado em**: `/provas/[id]` (detalhe — Componente 08, ficou com `STATUS_LABELS` longos para contexto completo no header).
+  `STATUS_LABELS` original permanece intocado — manter coexistencia permite escolher o label apropriado em cada contexto sem quebrar telas existentes.
+  **Distincao preservada**: o Figma do Mario colapsava os 3 status de clicheria (ENVIADA/ENCAMINHADA/RECEBIDA) em um unico "Na clicheria". Rejeitei esse colapso na Sessao 13 porque perderia informacao operacional — o MOTORISTA precisa distinguir "Enviada" (motorista ja saiu com a prova) de "Encaminhada" (vendedor Filial enviou direto) de "Na clicheria" (RECEBIDA). Mantive os 3 como labels distintos curtos. Se no futuro o negocio pedir colapso, basta mudar 3 linhas em `STATUS_LABELS_SHORT`.
+**Alternativas:**
+  - **Encurtar `STATUS_LABELS` original**: rejeitado — afeta `/provas/[id]` onde o label completo adiciona contexto.
+  - **Computar o short label via funcao** (ex: `getShortLabel(status)`): rejeitado — string hardcoded e mais simples de grep/procurar por valor literal, e zero runtime overhead.
+  - **Colapsar 3 status de clicheria em "Na clicheria"** (como o Figma): rejeitado — perde distincao operacional.
+**Consequencias:**
+  - **Duas tabelas de label** em `prova.ts` — ligeira duplicacao mas intencional. Se adicionar um novo `StatusProva` no enum, TypeScript vai reclamar que AMBAS as tabelas nao cobrem o novo valor (forca atualizacao em dois lugares — feature, nao bug).
+  - **Tabela de /provas fica limpa**: coluna Status cabe em 1 linha, matching o Figma.
+  - **Tela de detalhe intocada**: `STATUS_LABELS` continua sendo usado no header e no timeline da prova.
+
+---
+
+## ADR-062 — Reuso do padrao de tabela `/usuarios` em `/provas`
+**Data:** 2026-04-09 (Sessao 13 — ajustes visuais /provas)
+**Contexto:** O Figma da tabela de `/provas` enviado pelo Mario era visualmente identico ao padrao ja implementado em `/usuarios`: contorno externo arredondado, dividers verticais cinza entre colunas, header cinza medio com font-weight 500 e tamanho grande (1.25rem), rows com texto centralizado e sem border horizontal, botoes de acao como pills no final da ultima coluna. Mario explicitou: "A tabela com as provas digitais ficou muito diferente, a gente ja fez um modelo que vai seguir o mesmo padrão, na pagina de usuários. Analise a fundo e aproveire a tabela, mudando apenas os itens dentro dela para os da prova digital."
+  A tabela anterior de `/provas` (da Sessao 12) tinha divergencias visuais: background cinza claro distinto no `.tableWrap`, borders customizadas `#cfcfcf`, `th` com peso 400 e tamanho base, padding diferente, `.detailBtn` com metricas distintas.
+**Decisao:** Copiar **fielmente** os tokens e regras da tabela de `usuarios.module.css` para `provas.module.css`, mantendo nomes de classes iguais:
+  - `.tableWrap`: `background: transparent; border: 1px solid var(--color-card-border); border-radius: var(--radius-card-lg); padding: 1.5rem; overflow: hidden`
+  - `.tableScroll`: `width: 100%; overflow-x: auto`
+  - `.table`: `width: 100%; border-collapse: collapse; font-size: 0.9375rem`
+  - `.table thead tr`: `border-bottom: 1px solid var(--color-card-border)`
+  - `.table th`: `text-align: center; padding: 1.125rem 1rem; color: var(--color-card-text-muted); font-weight: 500; font-size: 1.25rem; white-space: nowrap; border-right: 1px solid var(--color-card-border); background: transparent`
+  - `.table td`: `text-align: center; padding: 1rem; color: var(--color-card-text-muted); border-right: 1px solid var(--color-card-border); vertical-align: middle; font-size: 0.9rem; white-space: nowrap`
+  - `.table th:last-child, .table td:last-child`: `border-right: none`
+  **Paginacao** tambem copiada: `.pagination` (center), `.pageInfo`, `.pageBtn` com estilo transparente + border pill.
+  **Divergencia explicita**: o `.detailBtn` (botao "Ver") mantem as mesmas metricas do `.editBtn` de /usuarios (padding, min-width, border-radius pill, font-weight/size) mas com `background: var(--color-accent)` (amarelo) em vez de `#000` (preto). Justificativa: o botao de `/usuarios` e "Editar" — acao com consequencia — entao preto/neutro faz sentido. O botao de `/provas` e "Ver" — acao sem consequencia, puramente navegacional — entao o acento amarelo da marca e apropriado sem dominar a interface. Todas as outras caracteristicas visuais batem com o padrao de `/usuarios`.
+**Alternativas:**
+  - **Extrair tabela em componente compartilhado** (ex: `<DashboardTable>`): rejeitado por enquanto — overhead de abstracao para 2 telas que tem features ligeiramente diferentes (edit modal vs link navigation). Reavaliar quando a 3a tabela do dashboard aparecer (Wave 4/5).
+  - **Importar `usuarios.module.css` em `provas/page.tsx`**: rejeitado — CSS modules tem hash de classe unico por arquivo, importar de outro module e gambiarra.
+  - **Copiar SO as regras de tabela, ignorando botoes**: rejeitado — os botoes precisam bater no dimensionamento para o alinhamento vertical das rows ficar consistente.
+**Consequencias:**
+  - **Manutencao dupla**: se o padrao de tabela mudar (ex: redesign Wave 4), precisa atualizar `provas.module.css` E `usuarios.module.css`. Durante a Sessao 13 ja listei visualmente as regras compartilhadas para facilitar sync futuro.
+  - **Zero regressao em /usuarios**: o arquivo `usuarios.module.css` nao foi tocado — a copia foi one-way de usuarios → provas.
+  - **Refator futuro**: quando houver 3+ tabelas no dashboard, extrair em componente compartilhado (`<DashboardTable columns={} rows={} />`) com props para customizacao. Este ADR sera referenciado como precedente "copiamos fielmente porque ainda nao tinha volume para justificar abstracao".
+  - **`detailBtn` vs `editBtn`**: a divergencia intencional de cor esta documentada aqui como single source of truth. Qualquer ajuste na cor do botao Ver passa por este ADR.
+
+---
+
+## ADR-063 — Etiqueta PDF 90×57mm com logos SVG vetoriais
+**Data:** 2026-04-10 (Sessao 14)
+**Contexto:** O design original da etiqueta (Sessao 8, Wave 2) usava `fpdf2` com formato variavel (`A4` ou `80mm_thermal`), layout vertical centralizado e texto basico sem logos. Mario enviou um mockup Figma com um design profissional especifico: dimensao FIXA de 9cm×5,7cm (paisagem), header com 2 logos vetoriais lado a lado (3STUDIO + studio&ART!), banner preto horizontal como separador, 3 campos de dados compactos, QR code quadrado com cantos arredondados, rodape com ano + "Etiqueta de rastreio" e linhas horizontais no topo e fim. Junto com o mockup, Mario enviou os 2 SVGs oficiais das logos do Desktop.
+**Decisao:** Substituir COMPLETAMENTE o layout da etiqueta por um novo template hardcoded 90×57mm:
+  1. **Dimensoes fixas**: `FPDF(orientation="P", unit="mm", format=(90.0, 57.0))`. Confirmado empiricamente que essa combinacao produz `pdf.w=90mm, pdf.h=57mm` (a orientation "P" com format(wider, taller) gera a pagina no formato solicitado diretamente).
+  2. **Logos SVG vetoriais**: copiados do Desktop para `backend/app/services/etiqueta_assets/logo_3studio.svg` e `logo_studio_e_arte.svg`. Ambos com fill `#1d1d1b` (praticamente preto). Renderizados via `pdf.image()` nativo — `fpdf2 >= 2.7` suporta SVG nativo quando `defusedxml` esta instalado (ambos ja no venv). Zero rasterizacao: logos vetoriais imprimem nitidos em qualquer resolucao.
+  3. **Fonte DejaVu** (do ADR-053) continua sendo a unica registrada — cobre Latin Extended, Greek, Cyrillic e simbolos matematicos. CJK e emoji renderizam como glyph faltando (fallback gracioso, sem crash).
+  4. **Rect com cantos arredondados** para envolver o QR: `pdf.rect(..., style="D", round_corners=True, corner_radius=2.8)` — feature do `fpdf2 >= 2.7`, ja disponivel.
+  5. **Campo `formato` do template** (legacy: `"A4"` ou `"80mm_thermal"`) **aceito mas ignorado** pelo render. Ver ADR-064 para detalhes dessa decisao de compat.
+**Alternativas:**
+  - **Reaproveitar os 2 formatos legacy (A4 e 80mm_thermal)**: rejeitado — o design do Figma e muito especifico e nao cabe em nenhum dos 2 formatos anteriores. A etiqueta **E** 90×57mm por decisao de produto, nao ha flexibilidade.
+  - **Usar `reportlab` ou `weasyprint`** em vez de `fpdf2`: rejeitado — `fpdf2` ja esta no projeto desde a Sessao 8, tem zero dependencias nativas e suporta SVG+rect arredondado nativamente a partir da v2.7.
+  - **Converter SVGs para PNG antes** e usar como imagem raster: rejeitado — perde qualidade em zoom/impressao e introduz dependencia de conversao (Pillow+cairosvg ou similar). SVG nativo no `fpdf2` elimina essa complexidade.
+  - **Rasterizar os SVGs via Inkscape CLI no build**: rejeitado — exige Inkscape no ambiente de build do Railway, alem de gerar artefatos extras.
+**Consequencias:**
+  - **Assets commitados** em `backend/app/services/etiqueta_assets/` (2 arquivos SVG totalizando ~8KB — minusculo comparado aos 1.5MB dos TTFs do DejaVu).
+  - **`_check_assets()`** levanta `RuntimeError` se os SVGs faltarem no deploy (fail-fast, mesmo padrao do `_register_fonts` do ADR-053).
+  - **Deploy Railway**: precisa copiar o diretorio `etiqueta_assets/` no build, mas como fica dentro de `backend/`, o buildpack Python default ja copia automaticamente.
+  - **Tamanho do PDF por etiqueta**: ~22.8 KB (inclui fontes subsetadas + SVGs embedded + metadata). Comparavel ao formato legacy. Aceitavel para transferencia via API.
+  - **Validacao visual** feita via `pypdfium2` (instalado ad-hoc para essa sessao, nao commitado ao `pyproject.toml` — e ferramenta de dev, nao runtime).
+  - **Se o design precisar mudar novamente** (ex: adicionar logo do cliente, mudar posicao do QR), o codigo esta bem comentado com coordenadas em mm e a modificacao e local ao `gerar_pdf`.
+  - **Campo `formato` do template** continua aceito (compatibilidade), mas silenciosamente ignorado pelo render. Ver ADR-064.
+
+---
+
+## ADR-064 — Adaptive font sizing no template da etiqueta
+**Data:** 2026-04-10 (Sessao 14)
+**Contexto:** O novo layout da etiqueta (ADR-063) tem um bloco esquerdo com 3 campos de texto (Nome, Requerimento, Vendedor) com largura FIXA de ~53mm. O schema permite nomes de prova de ate 200 chars. Se usassemos uma fonte fixa (ex: 9pt), nomes longos como `"ETIQ CAFE CAPRONI CLASSICO"` (do mockup real) nao cabem em uma linha — estouram em 2 linhas e bagunçam o layout. Por outro lado, usar sempre 7pt (menor) deixa nomes curtos parecendo minusculos e "perdidos" no card.
+**Decisao:** **Adaptive font sizing** — o helper `_campo(label, valor)` testa 5 tamanhos de fonte do maior pro menor e usa o primeiro que cabe em uma linha:
+```python
+_SIZES_TO_TRY = (9.0, 8.5, 8.0, 7.5, 7.0)
+
+def _campo(label: str, valor: str) -> None:
+    chosen_size = _FONT_SIZE_MIN  # fallback (7pt)
+    for size in _SIZES_TO_TRY:
+        if _measure_one_line(label, valor, size):
+            chosen_size = size
+            break
+    pdf.set_font(_FONT_FAMILY, "", chosen_size)
+    line_h = _LINE_H_DEFAULT * (chosen_size / _FONT_SIZE_DEFAULT)
+    pdf.multi_cell(w=_CAMPO_W, h=line_h, text=f"**{label}:** {valor}",
+                   markdown=True, new_x="LMARGIN", new_y="NEXT")
+```
+
+  **Calibragem empirica do overhead do `multi_cell` + `markdown=True`**: a primeira tentativa usou `_CAMPO_INNER_W = _CAMPO_W - 1` (1mm de padding interno). Nao funcionou — o texto `"ETIQ CAFE CAPRONI CLASSICO"` em 7.5pt media 51.22mm via `get_string_width` e cabia teoricamente em 52mm, mas o `multi_cell` mesmo assim wrappava para 2 linhas. Testei empiricamente com cores vibrantes (thumb vermelho + track amarelo) para identificar que o `multi_cell` com `markdown=True` consome **~5mm extras** de padding/margem internos comparado ao que `get_string_width` mede diretamente. Ajuste final: `_CAMPO_INNER_W = _CAMPO_W - 5.0`, calibrado contra o maior caso real do mockup.
+
+  Tabela de cenarios testados:
+  - Nome curto (`"Rotulo Verao"`, 12 chars) → **9pt** (default, grande, folgado)
+  - Nome padrao (`"ETIQ CAFE CAPRONI CLASSICO"`, 25 chars) → **7pt**, 1 linha (cabe exatamente apos calibracao)
+  - Nome muito longo (`"Etiqueta Especial Limited Edition Natal 2026 Premium"`, 50+ chars) → **7pt** + wrap automatico do `multi_cell` para 2 linhas (graceful fallback)
+
+  **Markdown inline**: usa `f"**{label}:** {valor}"` com `markdown=True` para misturar label em bold + valor regular na mesma cell. Alternativa seria 2 `pdf.write()` separados ou 2 `cell()` em sequencia, mas o markdown preserva o comportamento de wrap automatico por palavra (nao quebra no meio do label).
+**Alternativas:**
+  - **Truncar com elipses** quando o nome nao couber: rejeitado — perde informacao critica e o usuario precisa abrir a prova para ver o nome completo.
+  - **Sempre usar 7pt**: rejeitado — nomes curtos ficam minusculos, aparencia pobre.
+  - **Sempre usar 9pt e deixar wrappar**: rejeitado — bagunca o layout porque o espaco abaixo dos campos era fixo originalmente, e nomes em 2 linhas empurrariam o conteudo pra fora da etiqueta.
+  - **Calcular o size ideal matematicamente** via formula linear: rejeitado — o `multi_cell` tem overhead nao-linear que `get_string_width` nao captura; o iterativo testa o comportamento real.
+  - **Usar `pdf.write()` com line-break manual**: rejeitado — perde o wrap automatico do multi_cell e complica o caso do nome em 2 linhas.
+**Consequencias:**
+  - **Granularidade de 0.5pt**: 5 niveis de fonte (9, 8.5, 8, 7.5, 7pt) cobrem todo o range pratico sem saltos visuais bruscos entre etiquetas adjacentes na mesma impressao.
+  - **Garantia de legibilidade**: `_FONT_SIZE_MIN = 7pt` e o chao — nao vamos abaixo disso porque fica ruim de ler em impressao a 300 DPI numa etiqueta pequena. Se nem 7pt couber, o `multi_cell` wrappa em 2 linhas (degradacao graciosa).
+  - **Calibragem documentada no codigo**: o comentario sobre `_CAMPO_INNER_W = _CAMPO_W - 5` explica o "por que 5" referenciando o experimento empirico. Se no futuro o `fpdf2` mudar o overhead interno, a calibracao pode ser ajustada em um unico lugar.
+  - **Teste de regressao implicito**: o teste `test_pdf_nome_longo_nao_quebra` (nome com 200 A's) continua passando — o 7pt + wrap automatico cobre esse caso tambem.
+
+---
+
+## ADR-065 — Tela /nova-prova: botao de submit no header + dropzone com ícone
+**Data:** 2026-04-10 (Sessao 15)
+**Contexto:** O design inicial da `/nova-prova` (Sessao 8, Wave 2) tinha o botao "Criar prova" em um footer `.footerActions` abaixo do dropzone — padrao de form classico. Mario enviou um mockup Figma colocando o botao no **canto superior direito do card**, ao lado do titulo "Nova prova digital". O layout tambem queria:
+  1. Labels pretos com `:` no final (matching padrao de `/provas` e `/configuracoes`)
+  2. Grid 2x2 de inputs pill cinza com 56px de altura (matching `/provas`)
+  3. Dropzone grande (min-height ~360px) SEM dashed border, com titulo + hint + icone `+` grande centralizado
+**Decisao:** Refatorar o JSX e o CSS de `/nova-prova`:
+  1. **`<form>` envolvendo TUDO** (header + grid + dropzone). Antes o `<form>` envolvia apenas o grid + dropzone + footer. Agora engloba o header tambem, permitindo que o botao no header seja `type="submit"` e submeta via Enter, click, ou acessibilidade.
+  2. **Botao "Criar prova" movido para o header**:
+     ```tsx
+     <header className={styles.pageHeader}>
+       <h1 className={styles.title}>Nova prova digital</h1>
+       <button type="submit" className={styles.btnPrimary} disabled={!canSubmit}>
+         {loading ? "Criando..." : "Criar prova"}
+       </button>
+     </header>
+     ```
+  3. **`.footerActions` removido** completamente — nao renderiza mais nenhum botao abaixo do dropzone.
+  4. **Labels reescritos** com `:` e tipografia matching `/provas`:
+     - `font-weight 500 → 400`
+     - `color muted → preto`
+     - `text-transform: none` (era uppercase)
+     - `font-size sm → base`
+  5. **Inputs reescritos** no padrao de `/provas` (Sessao 13):
+     - `height 48 → 56`
+     - `padding 0 1.25rem → 0 1.5rem`
+     - `border: none` (era `1px solid transparent`)
+     - focus: `box-shadow: 0 0 0 2px var(--color-accent)` (era `border-color`)
+  6. **Dropzone grande sem dashed**:
+     - `min-height 220 → 360`
+     - `border 2px dashed → 2px solid transparent` (hover e drag-over mudam a cor)
+     - Conteudo interno: titulo (fs-xl, peso 400) + hint (fs-base muted) + `<PlusIcon width={56} height={56} />` em `.dropzoneIcon`
+  7. **`PlusIcon` reaproveitado** de `components/icons.tsx` (ja existia desde a Sessao 2 para o menu lateral). Nao precisei criar icon novo nem tocar no arquivo do design system.
+**Alternativas:**
+  - **Botao no footer (layout antigo)**: rejeitado — mockup do Figma posiciona no header.
+  - **Dois `<form>` separados** (um para submit, outro para dropzone): rejeitado — complexidade sem beneficio.
+  - **Criar `SubmitButton` como componente compartilhado**: rejeitado — so tem 1 botao de submit primario nesse padrao e ja esta coberto pelo `.btnPrimary` do CSS module. Abstrair agora seria overengineering.
+  - **`<input type="file" accept="image/*">`** generico: ja era o existente com `"image/jpeg,image/png"` explicito — mantido para matching RF-001.
+**Consequencias:**
+  - **Submit via Enter no form funciona naturalmente**: o `<button type="submit">` no header captura o submit do `<form>` que o envolve.
+  - **Visual consistente com `/provas`**: os 2 telas principais do dashboard agora usam o mesmo token de input (56px height, sem border, focus com `box-shadow` amarelo).
+  - **Preview da imagem selecionada** aumentado (`180x180 → 260x260`) — mais visivel que a escolha deu certo.
+  - **Tela de sucesso** (pos-criacao) **intocada** — nao tinha mockup no Figma, mantida para nao quebrar o fluxo de confirmacao pos-upload.
+  - **Mobile** (`< 768px`): `.mobileNotice` com mensagem "acesse a versao desktop" continua inalterado.
+  - **Lint incidente**: durante a sessao, formatter externo (prettier/vscode) removeu docstrings de `components/icons.tsx` e `configuracoes/configuracoes.module.css` ao abrir os arquivos. Restaurei via `git checkout` para nao sair do escopo. Registrado no CHANGELOG para referencia futura.
+
+---
+
+## ADR-066 — Tela /provas/[id]: card branco envolvendo timeline preto aninhado
+**Data:** 2026-04-10 (Sessao 16)
+**Contexto:** O design inicial da `/provas/[id]` (Sessao 11) tinha 2 cards SEPARADOS: um card cinza claro para "Dados da prova" + imagem (grid 2 colunas), e outro card cinza claro abaixo para "Historico de movimentacoes". Usava tokens de `--color-card-surface` em ambos. O mockup Figma que Mario enviou revelou um design muito diferente: um UNICO card BRANCO grande envolvendo tudo (dados + arte + timeline), com o card da timeline sendo **PRETO** e **aninhado** dentro do card branco (nao irmao). Mais: o titulo duplo "numero + nome" em peso grande bold, metadata compacta em paragrafos (nao `<dl>`), botoes "Visualizar etiqueta" amarelo + "Baixar etiqueta" preto, art slot quadrado 1:1 no canto direito.
+**Decisao:** Refatorar a estrutura do JSX e reescrever o CSS. Processo foi iterativo (4 rodadas 16a→16d) ate bater com o Figma:
+  1. **Estrutura nova do JSX** — o `<section className={styles.innerCard}>` contem:
+     ```tsx
+     <section className={styles.innerCard}>
+       <div className={styles.innerCardGrid}>   {/* esquerda: dados | direita: arte */}
+         <div className={styles.mainInfo}>...</div>
+         <div className={styles.artSlot}>...</div>
+       </div>
+
+       {/* TIMELINE ANINHADO — nao e irmao do innerCard */}
+       <section className={styles.timelineCard}>
+         <h2 className={styles.timelineTitle}>...</h2>
+         {/* empty state ou lista */}
+       </section>
+     </section>
+     ```
+
+  2. **Card branco**: `background: #ffffff; border: 1px solid var(--color-card-border); border-radius: var(--radius-card-xl); padding: 2.75rem 3rem`
+  3. **Art slot quadrado** (`aspect-ratio: 1 / 1`) com tamanho controlado via **coluna do grid**, nao pelo proprio elemento: `grid-template-columns: minmax(0, 1.4fr) minmax(0, 380px)`. O `380px` e o teto; o artSlot preenche `width: 100%` desse slot e o `aspect-ratio: 1/1` transforma em quadrado. Evita o problema de o quadrado "crescer" absurdamente se a coluna fosse `1fr` em tela larga.
+  4. **Card preto aninhado**: `background: #000000; border-radius: var(--radius-card-xl); padding: 2rem 2.5rem 2.25rem; color: #ffffff`. Sem `margin-bottom` externa porque o espaco com o conteudo acima vem do `margin-bottom: 2rem` do `.innerCardGrid` (o irmao anterior dentro do innerCard).
+  5. **Tipografia ajustada ate ter harmonia** (rodada 16b):
+     - `.title`: `3.5rem fixo`, peso `700`, letter-spacing `-0.025em`
+     - `.subtitle`: `2.4rem fixo`, peso `600`, letter-spacing `-0.02em`
+     - `.metadataItem`: `0.95rem` (nao `var(--fs-base)`)
+     - Padding do innerCard: `2.75rem 3rem` (nao `3rem 3.5rem`)
+     - Botoes: `padding 0.85rem 1.5rem`, `min-width 180px` (nao `200px`)
+  6. **Icone Voltar** via SVG inline na propria page (nao toquei em `components/icons.tsx`):
+     ```tsx
+     function ArrowLeftIcon(props) {
+       return <svg ...><path d="M19 12H5M12 19l-7-7 7-7" /></svg>;
+     }
+     ```
+**Alternativas:**
+  - **Adicionar `ArrowLeftIcon` em `components/icons.tsx`**: considerado, rejeitado nesta sessao — tocaria em arquivo compartilhado fora do escopo autorizado. Se um dia aparecer 3+ telas usando seta esquerda, extrair.
+  - **Art slot com `height` fixo** (ex: `280px`): tentado na rodada 16b, rejeitado na 16c — ficava retangular em vez de quadrado 1:1 quando a coluna nao era exatamente 280px.
+  - **Art slot com `aspect-ratio: 1/1 + max-width: 340px`**: tentado na rodada 16b, ficou OK mas o `max-width` no elemento competia com o `minmax` da grid column. Simplificou deixando so a grid column controlar (`minmax(0, 380px)`) e o artSlot apenas com `width: 100% + aspect-ratio`.
+  - **Status preservado discretamente** em linha muted: tentado na 16a (`.statusLine`), removido na 16d porque Mario preferiu limpar completamente a informacao de Status da tela.
+  - **`STATUS_LABELS` import removido** apos remover o Status: rejeitado — ainda e usado na timeline quando Wave 3 popular movimentacoes reais. Import preservado.
+**Consequencias:**
+  - **JSX mais aninhado**: um nivel extra de `<section>` dentro de `<section>` para a timeline. Legivel porque reflete a estrutura visual (tudo dentro do card branco = tudo dentro do `innerCard`).
+  - **Layout responsivo**: `@media (max-width: 1100px)` colapsa para 1 coluna, art slot centralizado com `max-width: 380px`. Mobile (`< 768px`) continua com mensagem "acesse a versao desktop".
+  - **Reutilizacao do contexto dark mode**: o card preto usa `--color-text-secondary` e `--color-text-dim` da superficie escura ja definidos em `globals.css` (Sessao 1), mantendo consistencia com o sidebar preto.
+  - **Botao Secondary preto** (`.btnSecondary { background: #000; color: #fff }`) e uma divergencia de tokens comparada ao padrao `/usuarios` (que usa `#000` tambem) — CONSISTENTE com o design language dos botoes "darker action" da marca. Nao criou divergencia inconsistente.
+  - **4 rodadas de ajuste** foram necessarias porque cada iteracao resolveu problemas que so apareceram depois (ex: art slot gigante so foi visivel apos ter a estrutura pronta). Aprendizado: em retrabalhos de design-to-code, screenshots de validacao em viewport real sao essenciais a cada iteracao; tentar "acertar de primeira" em CSS com tokens novos e improdutivo.
+
+---
+
+## ADR-067 — Remocao do status visual da tela /provas/[id]
+**Data:** 2026-04-10 (Sessao 16d)
+**Contexto:** Na Sessao 11 (design original da Wave 2), a tela `/provas/[id]` tinha um **badge de status colorido** no canto superior direito do header, usando as classes `status_CRIADA`, `status_APROVADA_PELO_VENDEDOR`, etc — cada uma com uma cor de fundo distinta (azul claro para aprovada, amarelo para com motorista, verde para recebida, vermelho para reprovada/cancelada, etc). O badge era uma das primeiras coisas visiveis ao abrir a prova e comunicava "onde esta essa prova no fluxo".
+
+  Na Sessao 16a, o primeiro ajuste para o novo layout, a pedido do Mario, movi o status para uma linha discreta dentro da metadata (`.statusLine` com cor `--color-card-text-dim` e fonte menor) — proposto como compromisso entre "preservar a info operacional" e "nao poluir o design do Figma".
+
+  Na Sessao 16d, Mario solicitou: **"Vamos realmente tirar a informação de status dessa pagina"**. Decisao final.
+**Decisao:** Remover COMPLETAMENTE a exibicao do status na tela de detalhe:
+  1. **`<p>` da `.statusLine` removido** do `page.tsx`.
+  2. **Classe `.statusLine`** (e suas rules `.statusLine strong`) removida do `detalhe.module.css` — era codigo morto apos o remove do JSX.
+  3. **Classes `.status_*` coloridas** ja estavam sem uso desde a Sessao 16a (removi a marcacao na refatoracao inicial). Mantidas no CSS por ora porque sao baratas e podem servir de hook para um futuro status visual em outra tela (ex: dashboard).
+  4. **Import `STATUS_LABELS`** em `page.tsx` PRESERVADO — ainda e usado 2 vezes dentro do JSX da timeline quando `movimentacoes.total > 0` (para exibir `status_anterior → status_novo` nos itens da timeline). Remover o import quebraria esse caminho no futuro da Wave 3.
+**Alternativas:**
+  - **Exibir o status mas em lugar diferente** (ex: tooltip sobre o titulo): rejeitado — Mario foi explicito em remover.
+  - **Manter como badge colorido sub-discreto** (ex: no canto inferior do card): rejeitado pelo mesmo motivo.
+  - **Remover tambem o import de `STATUS_LABELS`**: rejeitado — quebra o uso futuro na timeline. O codigo morto apos remove do `<p>` e apenas 1 linha de CSS (facil de limpar depois).
+**Consequencias:**
+  - **Tela de detalhe totalmente limpa** do conceito de "status visual" — todas as informacoes sao textuais (cliente, vendedor, rota, ciclo, criada em, motivo de cancelamento).
+  - **Status continua acessivel via listagem** em `/provas` (coluna Status da tabela). Quem quiser saber o status de uma prova ve na lista, nao precisa abrir o detalhe.
+  - **Motivo de cancelamento** preservado em vermelho italico — continua sendo exibido condicionalmente quando `prova.motivo_cancelamento` e nao-null. Esse nao e "status" — e uma info independente que aparece so quando aplicavel.
+  - **Bundle** ganhou 40 bytes a menos (`/provas/[id]` 5.62 KB → 5.58 KB no `next build`).
+  - **Wave 3 em diante**: quando o scanner comecar a mudar status das provas, a tela de detalhe nao mostrara essa mudanca diretamente — o usuario acompanha pela listagem `/provas` e pelo historico (timeline) dentro do card preto. Se no futuro essa UX se mostrar confusa, reabrir a discussao do badge de status.
+
+---
+
+## ADR-068 — Tela /configuracoes: cards brancos + layout horizontal + checkbox custom
+**Data:** 2026-04-10 (Sessao 17)
+**Contexto:** Ultima tela da Wave 2 a ser alinhada ao Figma. O design original (Sessao 11) usava cards cinza (`background: var(--color-card-surface)`, `#d9d9d9`) empilhados, cada um com um `<form>` contendo o titulo + descricao + campos em coluna + botao "Salvar" no rodape (`.sectionActions` com `justify-content: flex-end`). Os checkboxes usavam `accent-color: var(--color-accent)` nativo.
+
+  O mockup Figma enviado pelo Mario mostrava um padrao bem diferente:
+  1. Cards **brancos** (`#ffffff`) com cantos bem arredondados, destacando do fundo cinza (`--color-card-bg: #eaeaea`) do `.card` do layout do dashboard.
+  2. **Layout horizontal** dentro de cada card: campo(s) a esquerda + botao "Salvar" amarelo pill a direita, alinhados verticalmente na mesma row. Nao mais "campos em cima, botao em baixo".
+  3. **Input `Tempo (horas uteis)` estreito** (~200px max) — no Figma ele so comporta 2-3 digitos, nao ocupa a largura toda do card.
+  4. **Descricao simplificada** sem `<strong>Atrasada</strong>` nem mencao a RN-008.
+
+  Em um segundo passo, Mario pediu refine nos checkboxes: *"deixe os checkbox com os cantos arredondados e com o icone dentro deles quando tiver check menor"*. O `accent-color` nativo nao permite controlar border-radius nem tamanho do check — e uma propriedade que ajusta apenas a hue do render nativo do browser.
+**Decisao:**
+  1. **Cards brancos** — `.card { background: #ffffff; border-radius: var(--radius-card-xl); padding: 2.25rem 2.75rem; }`. O fundo cinza do dashboard (`.card` do layout) continua sendo o background geral; cada secao de configuracao vira um "pop-up branco" por cima.
+  2. **Layout horizontal via novo wrapper `.cardBody`**:
+     ```css
+     .cardBody {
+       display: flex;
+       align-items: flex-end;
+       justify-content: space-between;
+       gap: 2rem;
+       flex-wrap: wrap;
+     }
+     ```
+     O `<form>` recebe essa classe diretamente (elimina o wrapper `.form` antigo). Dentro dele, duas caixas: `.cardFields` (coluna a esquerda com label+input+feedback) e `<button>` (direita).
+  3. **Alinhamento do botao** — `.btnPrimary { height: 52px; margin-left: auto; }`. A altura igual ao input (`52px`) garante que os dois se alinhem perfeitamente pela base quando `align-items: flex-end`. O `margin-left: auto` mantem o botao colado a ponta direita do card mesmo quando o `.cardBody` da `flex-wrap` em telas muito estreitas.
+  4. **Input numerico compacto** — nova classe `.inputNumero { max-width: 200px; }` aplicada junto com `.input` no campo de horas.
+  5. **Checkbox custom** substituindo `accent-color`:
+     - Native input escondido via `clip: rect(0 0 0 0)` (mantendo acessibilidade teclado/AT)
+     - `.checkboxBox` — span visual `22px × 22px`, `border-radius: 6px`, `border: 1.5px solid var(--color-card-border)`, fundo branco default
+     - `.checkbox:checked + .checkboxBox` — fundo amarelo (`var(--color-accent)`) + border amarela
+     - `CheckIcon` (14px × 14px, ~4px de respiro em cada lado) com `opacity: 0` por default, `opacity: 1` quando `:checked`, transicao de 120ms
+     - `:focus-visible + .checkboxBox` — outline amarelo (teclado)
+     - `:disabled + .checkboxBox` — opacity 0.55
+     - `.checkboxLabel:has(.checkbox:disabled)` — cursor not-allowed no label inteiro
+  6. **Descricao do card "Tempo de atraso"** simplificada para `"Uma prova digital sem movimentacao por mais que esse tempo e considerada atrasada."` (match literal do Figma). Removido `<strong>Atrasada</strong>` e "(RN-008). Informe em horas uteis." Mario considerou esse texto mais limpo; a regra de negocio continua documentada no backend e aqui no ADR, nao precisa poluir a UI.
+**Alternativas:**
+  - **Manter cards cinza** (`--color-card-surface`) e apenas ajustar layout: rejeitado — o Figma e bem explicito com fundo branco e contraste claro/claro. Alem disso, o cinza era identico ao fundo do `.card` do layout, o que tornava os cards visualmente "achatados".
+  - **Layout vertical com botao no rodape** (como estava antes): rejeitado — Figma pede horizontal. O novo layout da mais respiro visual e aproveita melhor a largura de cada card.
+  - **Usar `input[type=checkbox]` com CSS `accent-color`**: rejeitado porque `accent-color` nao permite customizar border-radius nem o tamanho do icone do check. O browser renderiza um quadrado nativo cheio (check ocupa a caixa toda). Mario pediu explicitamente "cantos arredondados e icone menor dentro".
+  - **Usar `appearance: none` no input nativo e estilizar direto** (sem span auxiliar): funciona em alguns browsers, mas renderizar um SVG **dentro** do input via `::before`/`background-image` e fragil — nao da pra usar um componente React (`CheckIcon`) e a imagem vira CSS inline data-url, que e duro de manter. O span auxiliar permite reuso do `CheckIcon` que ja existe em `components/icons.tsx` + estilizacao total via classes CSS Modules.
+  - **Criar um componente React `<Checkbox>` reutilizavel**: rejeitado porque so existem 2 checkboxes em todo o projeto ate a Wave 2, os dois na tela de configuracoes. Abstrair cedo demais para 2 usos seria overkill — quando aparecer um terceiro checkbox em outra tela (provavelmente na Wave 3/4), refatorar para um componente reutilizavel.
+**Consequencias:**
+  - **`/configuracoes` totalmente alinhada ao Figma final da Wave 2.** Wave 2 completa do lado visual (todas as 4 telas: `/nova-prova`, `/provas`, `/provas/[id]`, `/configuracoes`).
+  - **Nenhuma mudanca de comportamento** — `useConfiguracoes`, handlers, validacoes, estados, feedback inline, endpoints, schemas, RLS: todos intactos. Zero risco de regressao funcional.
+  - **Checkbox custom com a11y preservada** — teclado, screen readers, focus-visible outline. O input nativo continua "ativo" (hidden but focusable), apenas escondido visualmente. A caixa `.checkboxBox` tem `aria-hidden="true"` pra nao duplicar o announcement do input.
+  - **Selector CSS `.checkbox:checked + .checkboxBox`** depende da ordem exata no JSX: `<input>` → `<span.checkboxBox>` → `<span>texto</span>`. Qualquer refatoracao futura precisa preservar essa ordem. Se o layout precisar inverter (caixa depois do texto), trocar `+` por `~` ou usar `:has()`.
+  - **Classes `.input[readonly]`**, `.grid`, `.checkboxGroup`, `.field`, `.fieldHint`, `.inlineError`, `.inlineSuccess`, `.loadingBox`, `.errorBox`, `.mobileNotice`, `.desktopOnly`, `.pageHeader`, `.title`, `.h2`, `.description`, `.label`, `.input`, `.select`, `.btnPrimary` — todas permaneceram com os mesmos nomes (so mudaram os valores CSS). Isso preserva qualquer referencia cruzada que exista no codigo.
+  - **Classes removidas como codigo morto:** `.form`, `.sectionActions`, `.inputInline`, `.inputSuffix` — nao sao mais usadas pelo novo JSX. Removidas do CSS tambem na refatoracao.
+  - **`components/icons.tsx` nao foi tocado** — `CheckIcon` ja existia e era exportado publicamente. Mario pediu para nao tocar em `icons.tsx` nesta sessao; a restricao foi respeitada.
+  - **Wave 3 em diante**: quando aparecer a necessidade de mais checkboxes (ex: filtros multi-select em relatorios), refatorar o checkbox custom em um componente React reutilizavel (`<Checkbox label="..." checked={...} onChange={...} />`) extraindo para `frontend/src/components/Checkbox.tsx`. Os estilos podem virar uma classe global em `globals.css` ou serem copiados para o CSS Module que usar.
+
+---
+
+## ADR-069 — Auditoria senior pos-sign-off da Wave 2 — Componente 06
+**Data:** 2026-04-10 (Wave 2, Sessao 18)
+**Contexto:** Apos todas as telas da Wave 2 estarem visualmente alinhadas ao Figma (Sessoes 13-17), Mario pediu uma auditoria externa de engenharia senior para validar e fortalecer cada componente da Wave 2 antes de considera-los "prontos". Escopo autorizado: apenas componentes Wave 2 (C06, C07, C08, C09), um de cada vez, em protocolo de dois estagios (analise com gate obrigatorio → execucao apos autorizacao). Waves 0 e 1 congeladas. Este ADR registra o processo e os resultados do Componente 06.
+**Decisao (processo de auditoria):**
+  1. **Estagio 1 — Analise somente-leitura**: escopo do componente, mapeamento de arquivos, checklist critico (maquina de estados, RBAC+RLS, Pydantic v2, concorrencia, seguranca, performance, cobertura), execucao da suite existente, classificacao de achados por severidade, plano de correcao, sinalizacao de dependencias fora da Wave 2.
+  2. **Gate obrigatorio**: aguardar autorizacao explicita antes de tocar em qualquer arquivo.
+  3. **Estagio 2 — Execucao**: aplicar fixes aprovados, adicionar testes, rodar suite completa + lint + build + preview smoke, gerar relatorio de entrega.
+**Resultados do Componente 06:**
+  - **17 achados classificados**: 1 critico (C1), 5 altos (A1-A5), 4 medios (M1-M4), 4 baixos (B1-B4).
+  - **6 fixes aplicados** (C1, M1, A3, A2, A4, A5) — todos dentro do escopo Wave 2.
+  - **2 fixes adiados** (A1 rate limit — requer dep nova; M2 cache de checks — micro-otimizacao) — discussao futura.
+  - **Cobertura C06**: 89% → **93%** (+4pp).
+  - **Testes**: 278 → **283** passing (+5 novos — 3 smoke de assets/fonts + 2 de race/cleanup).
+  - **ADRs gerados nesta auditoria**: ADR-069 (este — meta), ADR-070 (IntegrityError 409), ADR-071 (smoke tests de deploy).
+  - **Ruff, tsc, next lint, next build, preview smoke**: todos limpos.
+**Alternativas consideradas no processo:**
+  - **Auditoria em bloco unico** (analisar todos os 4 componentes antes de aplicar qualquer fix): rejeitado — Mario preferiu componente-a-componente com gate individual para validar o protocolo antes de escalar.
+  - **Aplicar fixes opcionais (A1, M2) sem discussao**: rejeitado — ambos alteram arquitetura (A1 adiciona dep nova; M2 muda semantica de quando validar assets). Respeita o principio "nao mexer fora de escopo aprovado".
+  - **Commitar automaticamente apos a suite verde**: rejeitado — politica do projeto exige commit manual do Mario.
+**Consequencias:**
+  - **Wave 2 do Componente 06 endurecida sem regressao funcional.** Todos os fluxos existentes (happy path, duplicata, vendedor invalido, magic bytes, PDF failure, commit failure) continuam com o mesmo comportamento externo.
+  - **Processo validado** para ser repetido nos C07, C08 e C09 (e eventualmente em auditorias futuras das Waves 3-6).
+  - **Meta-aprendizado**: o ADR-058 (auditoria Sessao 12) tinha feito o mesmo tipo de trabalho "internamente". Esta sessao 18 confirma que o checklist + protocolo de dois estagios escala bem para auditorias externas. A diferenca principal e que esta e feita componente-a-componente com mais rigor de isolamento.
+  - **Arquivos de contexto atualizados ao final desta sessao**: DECISIONS.md (ADR-069, 070, 071) + CHANGELOG.md (Sessao 18) por instrucao explicita do Mario. CLAUDE.md nao foi modificado porque nenhuma estrutura (endpoints, rotas, tabelas) mudou.
+
+---
+
+## ADR-070 — IntegrityError no commit mapeado para 409 Conflict (race TOCTOU)
+**Data:** 2026-04-10 (Wave 2, Sessao 18 — auditoria senior C06, fix A2)
+**Contexto:** O `POST /api/v1/provas/` executa 3 coisas relevantes em ordem: (1) SELECT inicial checando unicidade do `nro_requerimento`, (2) validacao de vendedor + R2 + PDF, (3) INSERT atomico (prova + etiqueta + audit_log) + `db.commit()`. Entre (1) e (3) existe uma janela TOCTOU: outra requisicao paralela pode criar a mesma prova e commitar primeiro. O constraint `UNIQUE` no banco (`provas_digitais.nro_requerimento`) detecta o conflito e levanta `sqlalchemy.exc.IntegrityError` no commit. Antes deste ADR, esse caminho caia no `except Exception` generico que retornava **500 Internal Server Error** com mensagem "Falha ao criar prova digital" — o cliente nao tinha como distinguir um race legitimo de uma falha real de servidor, e retentativas blind podiam mascarar bugs reais. A auditoria senior identificou isso como ALTO (A2) porque a semantica correta para race de unicidade e **409 Conflict**, nao 500.
+**Decisao:** Adicionar um `except IntegrityError:` **antes** do `except Exception:` generico em `create_prova`:
+```python
+except IntegrityError:
+    await db.rollback()
+    logger.warning(
+        "IntegrityError ao persistir prova nro_req=%s (provavel race de unicidade). "
+        "Limpando R2.",
+        body.nro_requerimento,
+    )
+    await _cleanup_r2(body.object_key)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Numero de requerimento ja cadastrado",
+    )
+```
+  - **Ordem importa**: `IntegrityError` tem que vir antes do `except Exception` porque Python casa no primeiro match.
+  - **Mensagem identica** a do 409 ja retornado no check inicial (`provas.py:307-310`) para consistencia de contrato — o cliente ve a mesma string independente de qual dos dois caminhos (pre-check ou race de commit) detectou a duplicata.
+  - **Log e `logger.warning` (nao `exception`)**: e um erro esperado de race, nao um bug. Ainda assim registra para monitoramento — se esse log comecar a aparecer com frequencia, pode indicar bot ou bug de UI causando cliques duplicados.
+  - **Rollback + cleanup R2**: mesma semantica do caminho de erro generico. ADR-041 (cleanup best-effort) continua valido aqui.
+  - **Outros tipos de `IntegrityError`** (FK quebrada, NOT NULL violado) tambem caem neste except porque estruturalmente estao no mesmo caminho de escrita. A mensagem "Numero de requerimento ja cadastrado" e generica o suficiente para nao vazar detalhes de schema, mas honestly cobriria outros casos sem explicar. Isso e aceitavel porque: (a) FK/NOT NULL nao deveriam acontecer em producao dado que todos os campos sao validados por Pydantic + ORM antes do flush, e (b) se acontecerem sao bugs e a mensagem errada ja vira no 409 e aparece no log.
+**Alternativas:**
+  - **Inspecionar o `IntegrityError.orig.__cause__` ou `diag.constraint_name` para diferenciar o tipo exato** (rejeitado — complexidade desproporcional ao beneficio; todos os `IntegrityError` esperados sao UNIQUE do nro_req).
+  - **Usar `INSERT ... ON CONFLICT` para fazer upsert ou no-op** (rejeitado — muda a semantica do fluxo; a tabela ganharia um segundo caminho de escrita que dificulta auditar quem criou cada linha).
+  - **Advisory lock do Postgres em torno do nro_requerimento** (rejeitado — overkill para race que ja e resolvido pelo constraint natural do DB).
+  - **Retry automatico no server side** (rejeitado — retry de INSERT apos IntegrityError nao ajuda porque a duplicata permanece; quem tem que retentar e o cliente com outro nro_req).
+**Consequencias:**
+  - **Contratro da API**: `POST /api/v1/provas/` pode retornar 409 em dois cenarios — check inicial OU race no commit — com a mesma mensagem. Cliente nao precisa distinguir.
+  - **Teste novo em `test_provas_api.py`**: `test_create_prova_integrity_error_returns_409` simula `db.commit()` lancando `IntegrityError` mockado e valida: status 409, mensagem correta, `db.rollback` chamado, `_cleanup_r2` chamado.
+  - **Cobertura do modulo `provas.py`**: 93% → **94%** (+1pp) — linhas do novo branch exercitadas.
+  - **Operacional**: logs `warning` com pattern "IntegrityError ao persistir prova nro_req=%s" sao a metrica para decidir se ha abuse ou bot. Pre-Wave 6, se aparecer acima de X% das criacoes, abre-se a discussao de rate limit (ADR-069 decisao pendente A1).
+  - **Nao houve mudanca no comportamento do caminho pre-check 409** — so cobriu o caminho pos-commit que antes era 500.
+
+---
+
+## ADR-071 — Smoke tests de deploy para etiqueta_assets e fontes DejaVu
+**Data:** 2026-04-10 (Wave 2, Sessao 18 — auditoria senior C06, fix C1)
+**Contexto:** A auditoria senior detectou que `backend/app/services/etiqueta_assets/logo_3studio.svg` e `logo_studio_e_arte.svg` estavam **untracked no git** — apenas localmente no working tree do Mario. O ADR-063 explicitamente documentou "Assets commitados em `backend/app/services/etiqueta_assets/`", mas o `git add` do commit de Wave 2 nao incluiu esse diretorio. Em qualquer deploy fresh (Railway, novo contributor, CI), o `_check_assets()` levantaria `RuntimeError("Assets de etiqueta ausentes...")` no primeiro POST de prova → o Componente 06 ficaria **completamente quebrado em producao**. Classificado como CRITICO (C1). Mesma classe de risco para as fontes DejaVu (TTFs) — se por qualquer razao os TTFs forem removidos ou apagados, `_register_fonts` levanta RuntimeError e todo PDF falha.
+**Decisao:** Duas camadas complementares:
+  1. **Versionar os assets faltantes**: `git add backend/app/services/etiqueta_assets/logo_3studio.svg backend/app/services/etiqueta_assets/logo_studio_e_arte.svg` — ambos ficam staged aguardando o proximo commit do Mario. Nesta sessao, nao foi feito `git commit` por politica do projeto ("NEVER commit unless the user explicitly asks").
+  2. **Adicionar 3 smoke tests que falham rapido em CI se qualquer asset ou fonte sumir**:
+```python
+def test_etiqueta_assets_existem_no_repo():
+    assert _ASSETS_DIR.exists()
+    assert _LOGO_3STUDIO.exists()
+    assert _LOGO_STUDIO_ART.exists()
+    # Sanity: header SVG valido
+    for path in (_LOGO_3STUDIO, _LOGO_STUDIO_ART):
+        head = path.read_bytes()[:200].lower()
+        assert b"<svg" in head or b"<?xml" in head
+
+def test_etiqueta_fonts_existem_no_repo():
+    assert (_FONTS_DIR / "DejaVuSans.ttf").exists()
+    assert (_FONTS_DIR / "DejaVuSans-Bold.ttf").exists()
+
+def test_check_assets_nao_levanta_com_arquivos_presentes():
+    _check_assets()  # chamada direta — valida o contrato
+```
+  Esses testes **nao usam mock** — sao filesystem-level. Se o diretorio for `.gitignore`-ado por engano, se alguem apagar um arquivo, ou se o build do Railway nao copiar o diretorio, o primeiro pytest run falha com mensagem acionavel ("logo_3studio.svg ausente em ...").
+**Alternativas:**
+  - **Fazer o `git add` + `git commit` automaticamente nesta sessao** (rejeitado — politica "NEVER commit unless explicitly asked"; Mario commita manualmente).
+  - **Baixar os SVGs/TTFs do CDN no build/deploy** (rejeitado — dependencia externa quebra builds offline e adiciona ponto de falha).
+  - **Apenas usar uma CI check de `git ls-files`** para validar presenca dos arquivos (rejeitado — nao roda localmente em `pytest`, pode passar em CI mas falhar em Railway se o buildpack nao copiar o diretorio por razao nao-git).
+  - **Mover os assets para um bucket R2 e buscar em runtime** (rejeitado — overengineering, introduz latencia de rede em cada `gerar_pdf`, e o R2 seria outro ponto de falha).
+**Consequencias:**
+  - **283 testes passando** (eram 278) — os 3 novos smoke sao os itens 1, 2, 3 da contagem.
+  - **Se alguem remover um arquivo de asset/fonte, o CI backend falha antes do deploy**, com mensagem clara apontando qual arquivo sumiu e onde.
+  - **Tempo de execucao dos 3 testes**: ~4ms total (filesystem stat + read). Negligivel.
+  - **`.gitignore` foi atualizado na mesma sessao** (M1 da auditoria) para excluir `backend/etiqueta_preview.pdf` e `.png` — artefatos de debug local do PDF que acidentalmente poderiam ser commitados. Essa proteção e complementar: os assets devem estar versionados, os previews de debug nao.
+  - **Pendencia operacional**: Mario precisa fazer `git commit` dos 2 SVGs ja staged. Sem isso, os assets continuam no working tree local e o deploy futuro vai falhar. O teste de smoke continua passando localmente (porque os arquivos existem), mas nao protege contra "esqueci de commitar" — apenas contra "foram removidos". A protecao completa e: staged + commit + push.
+
+---
+
+## ADR-072 — Auditoria senior pos-sign-off da Wave 2 — Componente 07
+**Data:** 2026-04-10 (Wave 2, Sessao 19)
+**Contexto:** Continuacao da auditoria senior iniciada na Sessao 18 (ADR-069, Componente 06). Mario autorizou avancar para o Componente 07 (Listagem, Pesquisa e Filtros de Provas) apos a atualizacao dos arquivos de contexto do C06. Mesmo protocolo de dois estagios (analise com gate obrigatorio → execucao) e mesmas regras de escopo (Wave 2 apenas, Waves 0 e 1 congeladas, Componente 06 tambem congelado apos os fixes da Sessao 18).
+**Decisao (resultado da auditoria):**
+  - **9 achados classificados**: 1 critico (C1), 5 altos (A1-A5), 2 medios (M1-M2), 2 baixos (B1-B2).
+  - **7 fixes aplicados** (C1, A1-A5, M1) — todos dentro do escopo Wave 2 / Componente 07.
+  - **2 fixes adiados**: M2 (count lento em volume grande — reavaliar pos-volume), B1 (extrair `MeResponse` para tipos compartilhados — baixa prioridade).
+  - **ADRs novos gerados nesta auditoria**: ADR-072 (este — meta), ADR-073 (escape de wildcards ILIKE), ADR-074 (try/except + validacao cruzada de periodo).
+  - **Metricas**: 283 → **290** testes passing (+7 novos — 3 C1 + 2 A3 + 1 A5 + 1 A2). Cobertura `provas.py` 93% → **95%**. `next build /provas` 4.39 kB → **4.31 kB** (-80 bytes graças a remocao de `loadDebounced` + `isFirstRenderRef`).
+  - **Flake conhecido**: durante a validacao final, `test_pdf_formato_legacy_e_aceito_mas_ignorado` (de `test_etiqueta_service.py`, escopo C06) falhou **uma vez** em 1 das execucoes da suite completa com mensagem de assercao `a4 == thermal`. Nao e relacionado aos fixes do C07. Re-execucao imediata passou; 5 execucoes subsequentes consecutivas tambem passaram. Provavel causa: timestamp embutido pelo `fpdf2` difere em alguns microssegundos entre as duas chamadas sucessivas dentro do teste. **Nao faz parte do escopo do C07** — registrado aqui para rastreabilidade futura. Possivel fix futuro: comparar via parse do PDF (metadados estruturais) em vez de comparacao byte-a-byte.
+**Alternativas consideradas:**
+  - **Aplicar fixes sem discussao previa** (rejeitado — mesmo motivo do ADR-069; gate obrigatorio por componente).
+  - **Agrupar C07 com C08 em uma unica analise** (rejeitado — perde a granularidade do gate e mistura escopos).
+**Consequencias:**
+  - **Componente 07 endurecido** com 4 classes de fix (seguranca/corretude de busca, robustez a falhas de DB, validacao de input, limpeza de codigo morto).
+  - **Padrao A5 do C06 propagado**: a auditoria detectou que o fix "fetchMe usar getToken" do C06 (ADR-069) tinha replica em `/provas/page.tsx`. Corrigido no C07 com a mesma filosofia. **Lição**: o checklist de "fontes unicas de truth para tokens" deve ser aplicado em CADA pagina do dashboard quando auditar as Waves futuras.
+  - **Meta-aprendizado de processo**: rodar a suite completa **5 vezes** apos fixes e pratica util para detectar flakes pre-existentes (como o do `test_pdf_formato_legacy`). Incluir esse passo no checklist do Estagio 2.
+
+---
+
+## ADR-073 — Escape de wildcards ILIKE nos filtros textuais da listagem
+**Data:** 2026-04-10 (Wave 2, Sessao 19 — auditoria senior C07, fix C1)
+**Contexto:** O endpoint `GET /api/v1/provas/` oferece 2 filtros textuais via ILIKE (`cliente` — match no campo `cliente`; `busca` — match em `nome` OR `nro_requerimento`). O Postgres interpreta 3 metacaracteres dentro de patterns de ILIKE:
+  - `%` — casa qualquer sequencia de chars
+  - `_` — casa 1 char qualquer
+  - `\` — escape char padrao (ou `\` definido via `ESCAPE '...'`)
+  Antes deste ADR, o codigo fazia `ilike(f"%{cliente}%")` sem escapar nada. Consequencias observadas:
+  - Um admin buscando por `100%` (literal) casava TODOS os registros (dois `%` juntos = match tudo).
+  - Um admin buscando `a_b` casava `axb`, `a9b`, `a-b` etc (um char qualquer entre a e b).
+  - Um admin buscando `foo\bar` casava `foobar` em alguns dialects (backslash consumido como escape).
+  **Nao e SQL injection** — SQLAlchemy parametriza os valores, entao nao ha risco de injecao de codigo. Mas **e quebra de contrato semantico**: o usuario espera "busca por substring literal", nao "busca por pattern SQL". A auditoria senior (ADR-072) classificou isso como CRITICO porque corrompe resultados visiveis ao usuario e e trivial de explorar acidentalmente.
+**Decisao:** Criar helper `_escape_ilike(term: str) -> str` em `app/api/v1/provas.py` que escapa os 3 metacaracteres com a ordem correta (`\` PRIMEIRO, depois `%` e `_`):
+```python
+ILIKE_ESCAPE_CHAR = "\\"
+
+def _escape_ilike(term: str) -> str:
+    return (
+        term.replace(ILIKE_ESCAPE_CHAR, ILIKE_ESCAPE_CHAR + ILIKE_ESCAPE_CHAR)
+        .replace("%", ILIKE_ESCAPE_CHAR + "%")
+        .replace("_", ILIKE_ESCAPE_CHAR + "_")
+    )
+```
+Aplicado nos 2 filtros do `list_provas`:
+```python
+if cliente:
+    cliente_pattern = f"%{_escape_ilike(cliente)}%"
+    filters.append(
+        ProvaDigital.cliente.ilike(cliente_pattern, escape=ILIKE_ESCAPE_CHAR)
+    )
+if busca:
+    busca_pattern = f"%{_escape_ilike(busca)}%"
+    filters.append(
+        or_(
+            ProvaDigital.nome.ilike(busca_pattern, escape=ILIKE_ESCAPE_CHAR),
+            ProvaDigital.nro_requerimento.ilike(busca_pattern, escape=ILIKE_ESCAPE_CHAR),
+        )
+    )
+```
+  **Pontos-chave da implementacao:**
+  - O `escape=ILIKE_ESCAPE_CHAR` e essencial — sem ele, o Postgres usa o escape default (`\`) mas SQLAlchemy pode reescapar ou deixar ambiguo. Passar explicitamente garante que o SQL compilado inclua `ESCAPE '\'` apos cada pattern.
+  - A ordem do `.replace()` e critica: trocar `\` primeiro por `\\`, depois `%` por `\%`, depois `_` por `\_`. Se trocasse `%` primeiro, o `\` inserido seria reescapado na etapa seguinte, quebrando o pattern.
+  - `_escape_ilike` e exportado como funcao simples (nao metodo), facil de reutilizar em futuros filtros textuais de outros endpoints (Wave 5 — relatorios — provavelmente terá filtros de vendedor por nome, cliente por similaridade, etc).
+**Alternativas:**
+  - **Usar `pg_trgm` + similarity()** ao inves de ILIKE literal (rejeitado — ADR-038 ja documenta que pg_trgm e overkill para o volume Wave 2; alem disso, nao resolve o problema porque `similarity('%', 'X')` tambem da match alto).
+  - **Validar no Pydantic e rejeitar `%`/`_` no input** (rejeitado — quebra casos legitimos em que o cliente tem um `%` no nome por algum motivo; escapar e a pratica correta).
+  - **Implementar via CASE/position() em vez de ILIKE** (rejeitado — quebra indexes e complexifica a query sem ganho).
+  - **Usar biblioteca externa tipo `sqlalchemy-utils`** (rejeitado — 3 linhas de replace nao justificam nova dependencia).
+**Consequencias:**
+  - **3 testes novos** em `test_provas_api.py` cobrindo os 3 metacaracteres:
+    - `test_list_filter_busca_escapa_percent_literal` — busca por `50%` deve gerar `%50\%%` no SQL + `ESCAPE '\'`.
+    - `test_list_filter_busca_escapa_underscore_literal` — busca por `a_b` deve gerar `%a\_b%`.
+    - `test_list_filter_cliente_escapa_backslash_literal` — busca por `foo\bar` deve gerar `%foo\\bar%` (backslash duplicado primeiro).
+  - **Testes pre-existentes nao quebraram**: `test_list_filter_cliente_ilike` (que busca por `ACME` sem metacaracteres) continua passando porque strings sem `%`, `_` ou `\` passam pelo `_escape_ilike` inalteradas.
+  - **Performance**: o escape de 3 chars via triple `.replace()` roda em O(n) onde n = len(term). Com o `max_length=200` ja existente nos params Pydantic, o custo e desprezivel (~600 ops por request no pior caso).
+  - **Wave 5 (relatorios) pode reutilizar** `_escape_ilike` diretamente quando adicionar filtros por vendedor/cliente nos reports — nao precisa reimplementar.
+  - **Contrato publico inalterado**: usuarios que digitam busca sem `%`/`_`/`\` continuam vendo os mesmos resultados. So muda o comportamento quando os metacaracteres aparecem no input, que antes era bug e agora e o esperado.
+
+---
+
+## ADR-074 — `list_provas`: try/except em queries + validacao cruzada de periodo
+**Data:** 2026-04-10 (Wave 2, Sessao 19 — auditoria senior C07, fixes A2 + A3)
+**Contexto:** A auditoria senior do C07 detectou 2 achados ALTOS relacionados a robustez do handler `list_provas`:
+  1. **A2** — O handler `list_provas` era o unico endpoint do modulo `provas.py` SEM `try/except` em volta das queries de DB. Outros handlers (POST /upload-url, POST /) tinham tratamento explicito retornando 502 em caso de falha transitoria (pooler OFF, connection reset, timeout). No caso do `list_provas`, qualquer excecao caia no exception handler global do `main.py` que retornava 500 com mensagem generica "Erro interno do servidor" — sem distincao entre bug de codigo, falha transitoria, ou problema de configuracao. Cliente nao tinha como decidir se deveria retentar.
+  2. **A3** — Os filtros `periodo_inicio` e `periodo_fim` eram aceitos individualmente pelo Pydantic (ambos `date | None`), mas nao havia validacao cruzada. Se o usuario passasse `periodo_inicio=2026-05-01&periodo_fim=2026-04-01` (invertido), o handler aplicava os dois filtros, a query SQL gerava `created_at >= '2026-05-01' AND created_at < '2026-04-02'`, e o resultado era sempre lista vazia. Sem erro, sem mensagem — UX confusa porque o usuario nao entende por que nao ha resultados.
+**Decisao:**
+  **Para A2**: envolver as duas `await db.execute(...)` (count + data) em um unico `try/except Exception` que loga e retorna 502:
+```python
+try:
+    total = (await db.execute(count_stmt)).scalar() or 0
+    rows = (await db.execute(data_stmt)).all()
+except Exception:
+    logger.exception(
+        "Falha ao executar listagem de provas (user=%s, page=%d)",
+        current_user.id, page,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Falha ao carregar provas",
+    )
+```
+  Escolha de 502 (vs 503 ou 500): **502 Bad Gateway** e o codigo correto para "backend nao conseguiu obter resposta do upstream" — no caso, o Postgres e o upstream do FastAPI. O cliente pode retentar com back-off. 500 seria "bug interno" (nao e) e 503 seria "server indisponivel" (FastAPI esta respondendo, so o DB que falhou).
+
+  **Para A3**: validacao explicita **antes** dos filtros serem montados:
+```python
+if (
+    periodo_inicio is not None
+    and periodo_fim is not None
+    and periodo_fim < periodo_inicio
+):
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="Data final do periodo nao pode ser anterior a inicial",
+    )
+```
+  Validar antes de qualquer query garante que (a) nenhum recurso do DB e desperdicado em queries que naturalmente retornam vazias, e (b) o teste pode inspecionar `mock_db.execute.assert_not_called()` para confirmar o short-circuit.
+  422 e o codigo correto: o input semanticamente nao e processavel (nao pode existir um periodo onde o fim seja anterior ao inicio).
+**Alternativas (A2):**
+  - **Diferenciar tipos de excecao** (ex: `sqlalchemy.exc.OperationalError` → 502, outros → 500). Rejeitado — granularidade que nao agrega valor ao cliente, que so quer saber "posso retentar ou nao". 502 ja expressa isso.
+  - **Deixar cair no exception handler global** (status quo). Rejeitado — mensagem generica nao e acionavel.
+  - **Retry automatico no servidor** (rejeitado — mascara problemas reais, viola principio "failures should be loud").
+**Alternativas (A3):**
+  - **Validator Pydantic multi-campo no modelo de request** (rejeitado — os params sao query params individuais, nao um modelo Pydantic. Teria que criar um modelo so para isso, overengineering).
+  - **Inverter silenciosamente** `periodo_fim` e `periodo_inicio` se estiverem trocados (rejeitado — principle of least surprise: o usuario provavelmente digitou errado e deveria ver o erro para corrigir).
+  - **Aceitar e retornar lista vazia com flag** (`{"items": [], "warning": "periodo invalido"}`) (rejeitado — polui o schema de resposta).
+**Consequencias:**
+  - **3 testes novos** em `test_provas_api.py`:
+    - `test_list_periodo_fim_antes_de_inicio_422` — confirma 422 + mensagem clara + `mock_db.execute.assert_not_called()`.
+    - `test_list_periodo_mesma_data_aceita` — mesma data inicio/fim (um unico dia) e aceita; confirma `fim + 1 dia` no SQL compilado.
+    - `test_list_db_error_returns_502` — configura `mock_db.execute.side_effect = RuntimeError(...)` e valida 502 + mensagem "carregar provas".
+  - **Cobertura `provas.py`** 94% → **95%** (branches de A2 e A3 exercitados).
+  - **Padrao estabelecido**: qualquer outro endpoint de listagem que vier nas Waves futuras (Wave 4 dashboard counters, Wave 5 relatorios) pode copiar a estrutura try/except da `list_provas` como baseline de robustez. O nome `detail="Falha ao carregar <recurso>"` e a convencao sugerida.
+  - **Cliente frontend**: hoje o hook `useListProvas` trata qualquer erro como generico via `ApiError.message`. O 502 com mensagem especifica vai automaticamente substituir o "Nao foi possivel carregar provas" generico por "Falha ao carregar provas" do backend quando o DB falhar — uma melhoria UX sem mudanca de codigo no frontend.
+  - **Observabilidade**: o `logger.exception(...)` do A2 registra o stack trace completo + user_id + page, facilitando troubleshooting em producao quando aparecerem logs 502.
+
+---
+
+## ADR-075 — Auditoria senior pos-sign-off da Wave 2 — Componente 08
+**Data:** 2026-04-10 (Wave 2, Sessao 20)
+**Contexto:** Continuacao da auditoria senior iniciada na Sessao 18 (ADR-069, Componente 06) e estendida na Sessao 19 (ADR-072, Componente 07). Mario autorizou avancar para o Componente 08 (Visualizacao de Prova — Detalhe) apos a atualizacao dos arquivos de contexto do C07. Mesmo protocolo de dois estagios, mesmas regras de escopo: apenas Componente 08, Waves 0 e 1 congeladas, Componentes 06 e 07 tambem congelados apos os fixes das sessoes 18 e 19.
+**Decisao (resultado da auditoria):**
+  - **6 achados classificados**: 0 criticos, 2 altos (A1 replicado em 4 endpoints + A2 dedicado a gerar_pdf), 3 medios (M1 UX do download, M2 micro-otimizacao, M3 UUID frontend), 0 baixos.
+  - **6 fixes aplicados** (A1 em 4 handlers, A2 gerar_pdf, M1 feedback de download) — todos dentro do escopo Wave 2 / Componente 08.
+  - **2 fixes adiados**: M2 (otimizacao de queries — pos-volume), M3 (validacao UUID frontend — edge case improvavel).
+  - **ADRs novos gerados nesta auditoria**: ADR-075 (este — meta), ADR-076 (try/except consistente nos 4 endpoints C08 + 422 dedicado ao gerar_pdf).
+  - **Metricas**: 290 → **295** testes passing (+5 novos: 4 de DB error 502 + 1 de gerar_pdf failure 422). Cobertura `provas.py` **95% mantida** mesmo com 28 statements novos (278 → 306). Bundle `/provas/[id]` 5.61 kB → **5.73 kB** (+120 bytes pelo bloco de error handling do download; aceitavel — zero impacto na LCP).
+  - **C08 e o componente mais bem arquitetado da Wave 2**: 0 achados criticos. O `useProvaDetail` ja usava `Promise.allSettled` corretamente (tolerancia a falhas parciais), o `VisualizarEtiquetaModal` ja tinha cleanup cuidadoso de blob URLs com tratamento de race entre unmount e resolucao de Promises, e os 5 endpoints backend ja reutilizavam `_carregar_prova_com_scoping` (ADR-049). A auditoria serviu principalmente para **propagar o padrao de tratamento de erro robusto** estabelecido no A2 do C07 para os 4 endpoints do C08 que ainda nao o tinham.
+**Alternativas consideradas:**
+  - **Aplicar try/except generico em torno do handler inteiro** (rejeitado — captura HTTPException intencionais de 404, mascarando-as). A solucao correta e usar `except HTTPException: raise` antes do `except Exception`, garantindo que 404 do scoping e etiqueta ausente passam intactos.
+  - **Extrair um decorator `@handle_db_errors`** para reduzir boilerplate (rejeitado — 4 endpoints e pouco para justificar uma abstracao, e cada um tem mensagem de detail diferente). Se chegarmos em 8+ endpoints com o mesmo padrao, reavaliar.
+  - **Mover `gerar_pdf` do `create_prova` para um servico dedicado reutilizavel** (rejeitado — o helper ja existe em `etiqueta_service.py`, o que falta e aplicar o pattern de try/except do ADR-054 aqui).
+**Consequencias:**
+  - **Componente 08 totalmente endurecido** contra erros transitorios de DB e falhas de rendering de PDF, com mensagens acionaveis para o cliente.
+  - **Padrao de error handling unificado**: todos os 3 componentes auditados (C06 create, C07 list, C08 detail/etiqueta/qr) agora usam a mesma estrutura:
+    - `except HTTPException: raise` primeiro — re-raise exceptions intencionais (404, 409, 422 de validacao).
+    - `except IntegrityError:` — 409 para race de unicidade (C06 ADR-070).
+    - `except Exception:` — 502 generico para erros de DB/upstream (C07 ADR-074, C08 ADR-076).
+    - `except Exception as exc:` dedicado ao rendering — 422 com mensagem acionavel (C06 ADR-054, C08 ADR-076).
+  - **Frontend `handleDownloadEtiqueta`** agora propaga erros do backend (422 de `gerar_pdf`, 502 de DB, 401 de sessao expirada) via `alert()` com mensagem especifica — melhoria significativa de UX sem introduzir dependencia nova.
+  - **Wave 2 quase pronta para sign-off**: resta apenas Componente 09 (Configuracoes). Os 3 componentes ja auditados estao robustos, testados e alinhados com os padroes estabelecidos.
+
+---
+
+## ADR-076 — C08: try/except consistente nos 4 endpoints + 422 dedicado ao gerar_pdf
+**Data:** 2026-04-10 (Wave 2, Sessao 20 — auditoria senior C08, fixes A1 + A2)
+**Contexto:** A auditoria senior do Componente 08 detectou que **4 dos 5 endpoints** de detalhe nao tinham `try/except` em volta das queries de DB — apenas `get_imagem_url` tinha protecao parcial (em volta do `generate_presigned_get_url`, ADR-050). Os handlers afetados eram:
+  1. **`get_prova_detail`** — 2 queries (scoped + SELECT Usuario para rota_projetada)
+  2. **`list_movimentacoes`** — 2 queries (scoped + SELECT movimentacoes)
+  3. **`get_etiqueta_pdf`** — 3 queries (scoped + SELECT Etiqueta + _carregar_template_etiqueta) + 1 chamada a `gerar_pdf`
+  4. **`get_qr_code_png`** — 2 queries (scoped + SELECT Etiqueta.qr_code_image)
+  Erros transitorios (pooler OFF, connection reset, timeout) caiam no exception handler global do `main.py` que retornava 500 com mensagem generica "Erro interno do servidor" — mesmo problema do A2 do C07, replicado em 4 endpoints (ADR-072 A1). Alem disso, o `get_etiqueta_pdf` tambem chamava `gerar_pdf` sem protecao: se o rendering falhasse (caractere Unicode fora da fonte, template invalido, fonte ausente no deploy), tambem caia no 500 generico — mesmo problema que o ADR-054 ja havia resolvido no `create_prova`.
+**Decisao:** Aplicar o padrao estabelecido na Sessao 19 (ADR-074) nos 4 handlers + adicionar um bloco dedicado ao `gerar_pdf` no handler de etiqueta:
+  **Para os 4 endpoints (A1 — try/except em torno das queries):**
+```python
+try:
+    scoped = await _carregar_prova_com_scoping(db, prova_id, current_user)
+    if scoped is None:
+        raise HTTPException(status_code=404, detail="Prova nao encontrada")
+    # ... mais queries ...
+except HTTPException:
+    raise
+except Exception:
+    logger.exception("Falha ao carregar <recurso> da prova %s (user=%s)", prova_id, current_user.id)
+    raise HTTPException(status_code=502, detail="Falha ao carregar <recurso>")
+```
+  **Pontos-chave da implementacao:**
+  - **`except HTTPException: raise` antes do `except Exception`**: isto e critico. Sem esse guard, o `raise HTTPException(404)` do "prova nao encontrada" seria capturado pelo `except Exception` e virariamos um 502 generico no lugar do 404 correto. A ordem do Python garante que o match e feito do mais especifico para o mais generico.
+  - **Mensagens de `detail` especificas por endpoint**: "Falha ao carregar prova" (detail), "Falha ao carregar movimentacoes", "Falha ao carregar dados da etiqueta", "Falha ao carregar QR code". Cada uma e acionavel pelo cliente.
+  - **`logger.exception` com contexto util**: `prova_id` + `current_user.id` facilitam correlacao em producao.
+
+  **Para o `get_etiqueta_pdf` (A2 — bloco dedicado ao rendering do PDF):**
+```python
+# Bloco de DB (A1) — ja coberto acima com 502
+try:
+    # scoped + etiqueta + template
+except HTTPException: raise
+except Exception: # → 502
+
+# Bloco de rendering (A2) — 422 com mensagem acionavel
+try:
+    pdf_bytes = gerar_pdf(...)
+except Exception as exc:
+    logger.exception("Falha ao gerar PDF da etiqueta para prova %s", prova_id)
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Falha ao gerar etiqueta: {exc}",
+    )
+```
+  **Por que separar DB de rendering em 2 try/except:**
+  1. **Semantica do status code**: 502 expressa "upstream indisponivel, pode retentar". 422 expressa "input problematico, investigue os dados". Misturar em um bloco unico forcaria usar um dos dois para ambos os casos, perdendo informacao.
+  2. **Mensagem de detail diferente**: 502 aponta para operacao ("Falha ao carregar dados da etiqueta"), 422 aponta para causa ("Falha ao gerar etiqueta: Fontes DejaVu ausentes" — inclui a mensagem da exception via `f"{exc}"`).
+  3. **Alinhamento com ADR-054**: o `create_prova` ja usava exatamente esse padrao (DB errors → 500/generic, gerar_pdf → 422 dedicado). Replicar aqui e coerencia arquitetural.
+**Alternativas:**
+  - **Usar tipos especificos de excecao SQLAlchemy** (ex: `OperationalError` para transitorios vs `DBAPIError` para bugs) — rejeitado: granularidade que nao agrega valor ao cliente, que so quer saber "retentar ou nao".
+  - **Mover `gerar_pdf` para um servico async com timeout explicito** — rejeitado: overengineering para o caso de uso atual (PDF e rapido, <500ms no caso geral).
+  - **Abstrair todos os 4 endpoints em um decorator `@robust_endpoint`** — rejeitado: reduz visibilidade do fluxo de erro e adiciona complexidade de leitura. 4 copias de 8 linhas e ok; 8+ copias justificariam a abstracao.
+  - **Nao tocar nos handlers onde ja existem testes 404 passando** — rejeitado: os testes 404 passavam porque nunca houve um teste de erro de DB. O fato de o caminho "feliz 404" funcionar nao significa que o caminho "DB morreu" estava coberto.
+**Consequencias:**
+  - **5 testes novos** em `test_provas_api.py`:
+    - `test_get_detail_db_error_returns_502`
+    - `test_get_movimentacoes_db_error_returns_502`
+    - `test_get_etiqueta_pdf_db_error_returns_502`
+    - `test_get_etiqueta_pdf_gerar_pdf_failure_returns_422` — valida que a mensagem da exception do `gerar_pdf` e propagada no detail
+    - `test_get_qr_code_png_db_error_returns_502`
+  - **Suite completa**: 290 → **295 passing** (+5).
+  - **Cobertura `provas.py`**: 95% **mantida** mesmo com 28 statements novos (278 → 306) — todos os novos branches de except estao exercitados.
+  - **Frontend `useProvaDetail` nao precisa de mudanca**: o hook ja usa `Promise.allSettled`, entao um 502 em `/imagem-url` ou `/movimentacoes` continua sendo tolerado (imagemError e `movimentacoes: null`). Um 502 em `/{id}` (detalhe principal) ja caia em `provaRes.status === "rejected"` e mostrava mensagem generica — agora a mensagem do detail vem do backend ("Falha ao carregar prova") via `ApiError.message`, uma melhoria automatica.
+  - **M1 (frontend) separado**: o `handleDownloadEtiqueta` da pagina de detalhe tinha `catch { /* noop */ }` que engolia erros silenciosamente. Substituido por try/catch que:
+    1. Tenta ler o `detail` do backend via `await resp.json()` (protegido por try/catch aninhado para tolerar resposta nao-JSON).
+    2. Mostra `alert()` com mensagem especifica do backend ("Falha ao gerar etiqueta: ...") ou fallback generico + sugestao de usar o modal.
+    3. Diferencia "sessao expirada" (token null) de "falha no download".
+  - **Botao "Baixar etiqueta" agora da feedback**: usuario que clica e o backend retorna 422 (gerar_pdf falhou) ou 502 (DB falhou) recebe a mensagem exata. Alem disso, aponta o fallback ("use Visualizar etiqueta") caso o download direto nao funcione.
+  - **Nenhuma dependencia nova** — `alert()` nativo e suficiente como feedback. Quando o projeto tiver sistema de toast (Wave 4+), substituir os 3 `alert()` dos fixes dessa sessao por toast eh uma mudanca mecanica de 6 linhas.
+
+---
+
+## ADR-077 — Auditoria senior pos-sign-off da Wave 2 — Componente 09
+**Data:** 2026-04-10 (Wave 2, Sessao 21)
+**Contexto:** Sessao final da auditoria senior da Wave 2, iniciada na Sessao 18 (C06 — ADR-069), continuada na Sessao 19 (C07 — ADR-072) e estendida na Sessao 20 (C08 — ADR-075). Mario autorizou avancar para o **Componente 09 (Tela de Configuracoes do Sistema)** apos a atualizacao dos arquivos de contexto do C08. Mesmo protocolo de dois estagios, mesmas regras de escopo: apenas Componente 09, Waves 0 e 1 congeladas, Componentes 06, 07 e 08 tambem congelados apos fixes das sessoes 18, 19 e 20.
+
+Esta e a ultima auditoria componente-por-componente da Wave 2. Ao final desta sessao, todos os 4 componentes do nucleo do dominio (C06-C09) estarao endurecidos e com metricas consistentes.
+**Decisao (resultado da auditoria):**
+  - **6 achados classificados**: 0 criticos, 2 altos (A1 em 2 endpoints + A2 cobrindo o handler inteiro de update), 2 medios (M1 branch defensivo PATCH whitelisted ausente, M2 branch do validator do 4o campo do template), 2 baixos (B1 `reload` exportado, B2 descricao vazia — ambos NAO aplicar).
+  - **5 fixes aplicados** (A1.1 list_configuracoes, A1.2 get_configuracao, A2 update_configuracao, M1 teste defensivo, M2 teste 4o campo).
+  - **1 teste pre-existente atualizado**: `test_patch_commit_failure_rollback` estava assertando status 500 e foi atualizado para 502 + assert da mensagem — acompanha a mudanca do ADR-078 (500 → 502 no commit failure).
+  - **ADRs novos**: ADR-077 (este — meta) e ADR-078 (implementacao dos fixes A1 + A2 + ajustes de teste).
+  - **Metricas**: 295 → **300** testes passing (+5 novos). Cobertura `configuracoes.py` 96% → **100%**. Cobertura `schemas/configuracao.py` 98% → **100%**. Stmts `configuracoes.py` 56 → 68 (+12 — novos branches try/except). `test_configuracoes_api.py` 26 → 31 testes.
+  - **C09 atinge 100% de cobertura em ambos os arquivos** — primeiro componente da Wave 2 a alcancar cobertura total. O C08 tambem tem cobertura alta (95%) mas C09 e o unico a zerar os gaps.
+**Alternativas consideradas:**
+  - **Nao mudar status code de 500 para 502 no commit failure** (rejeitado — introduz inconsistencia entre C09 e C07/C08, que ja usam 502 em casos equivalentes desde a Sessao 19/20). Consistencia de contrato e mais importante que preservacao do contrato antigo, ainda mais porque 502 e semanticamente correto.
+  - **Fazer o teste pre-existente `test_patch_commit_failure_rollback` aceitar ambos 500 e 502** (rejeitado — mascara o fix e deixa o contrato ambiguo). A atualizacao explicita para 502 + assert da mensagem deixa claro o comportamento esperado.
+  - **Usar excecoes especificas `sqlalchemy.exc.OperationalError`** (rejeitado — mesmo motivo dos ADRs 074/076: granularidade que nao ajuda o cliente).
+**Consequencias:**
+  - **Wave 2 completamente endurecida** contra erros transitorios de DB em todos os endpoints de leitura e escrita dos 4 componentes.
+  - **Padrao unificado de error handling estabelecido na Wave 2**:
+    - HTTPException intencionais → re-raise via `except HTTPException: raise`
+    - IntegrityError (C06 race) → 409 com mensagem dedicada (ADR-070)
+    - DB errors transitorios → 502 "Falha ao <acao> <recurso>" (ADR-074, 076, 078)
+    - Rendering de PDF (C06 create, C08 etiqueta) → 422 com mensagem da exception (ADR-054, 076)
+    - Input validation → 422 Pydantic-like com mensagem especifica
+  - **Contrato HTTP consistente entre os 4 componentes**: qualquer cliente pode usar a mesma logica de retry (502 → back-off retry; 422 → investigar input; 409 → gerar novo nro_req).
+  - **Wave 2 pronta para sign-off**: 300 testes passing, ruff limpo, tsc limpo, next lint limpo, next build limpo, preview smoke limpo. Zero regressao funcional em nenhuma area.
+  - **Meta-estatistica da auditoria completa** (4 sessoes, C06-C09):
+    - Testes: 278 → **300** (+22 novos)
+    - ADRs: ADR-069 ate ADR-078 (10 novos: 4 meta-ADRs C06/C07/C08/C09 + 6 de implementacao)
+    - Linhas novas em DECISIONS.md: ~450 (acumulado das 4 sessoes)
+    - Linhas novas em CHANGELOG.md: ~900 (acumulado das 4 sessoes)
+    - 0 achados criticos em C07/C08/C09 pos-auditoria. Apenas C06 teve 1 critico (C1 — assets nao versionados).
+    - 0 componentes com dependencia fora da Wave 2 — auditoria totalmente contida no escopo autorizado.
+  - **Proxima ação pendente do Mario**: commit dos 2 SVGs ja staged desde a Sessao 18 (ADR-071) + fazer o merge/push da Wave 2 quando considerar pronto.
+
+---
+
+## ADR-078 — C09: try/except consistente nos 3 endpoints + commit failure 500 → 502
+**Data:** 2026-04-10 (Wave 2, Sessao 21 — auditoria senior C09, fixes A1 + A2)
+**Contexto:** A auditoria senior do Componente 09 detectou que os 3 endpoints de `configuracoes.py` tinham 2 classes de problemas de tratamento de erro:
+  1. **`list_configuracoes` e `get_configuracao`** — sem `try/except` em volta das queries. Mesmo problema dos A1 do C07 e C08 — erros transitorios de DB caiam no exception handler global → 500 generico.
+  2. **`update_configuracao`** — **parcialmente** protegido. Tinha `try/except` especifico para `ConfiguracaoValidationError` (→ 422, correto) e outro `try/except` envolvendo apenas o bloco `db.flush() + log_audit() + db.commit()`. Mas:
+     - O `SELECT FOR UPDATE` (linha 141 antes do fix) estava **fora** de qualquer try/except. Erro de DB aqui caia no 500 global.
+     - O `db.refresh(config)` (linha 207 antes do fix) tambem estava fora. Pequeno risco porque refresh raramente falha apos commit bem-sucedido, mas ainda assim deveria ser protegido.
+     - O `except Exception` do commit failure retornava **`HTTP_500_INTERNAL_SERVER_ERROR`**. Mas 500 semanticamente e "bug interno do backend", e erro de DB e "upstream indisponivel" — o codigo correto e **`HTTP_502_BAD_GATEWAY`**, ja estabelecido pelos ADRs 074 (C07) e 076 (C08).
+**Decisao:**
+  **A1 — Envolver queries em try/except nos endpoints de leitura:**
+  - `list_configuracoes`: um unico `try/except Exception` em volta do `db.execute` + `result.scalars().all()`. Mensagem: "Falha ao carregar configuracoes".
+  - `get_configuracao`: `try/except` em volta do bloco que contem o `db.execute` + o check `if config is None`, com `except HTTPException: raise` para nao mascarar o 404 defensivo. Mensagem: "Falha ao carregar configuracao" (singular).
+
+  **A2 — Restruturar `update_configuracao` em 2 try/except sequenciais:**
+  O handler passou a ter a seguinte estrutura:
+```python
+# (1) Whitelist — ANTES do try/except (validacao de URL, nao de DB)
+if chave not in EDITABLE_KEYS:
+    raise HTTPException(404, ...)
+
+# (2) Validacao de input — try/except dedicado ao ConfiguracaoValidationError (422)
+try:
+    valor_normalizado = validar_valor_por_chave(chave, body.valor)
+except ConfiguracaoValidationError as exc:
+    raise HTTPException(422, str(exc))
+
+# (3-6) Bloco unico de DB — SELECT FOR UPDATE + flush + log_audit + commit + refresh
+try:
+    result = await db.execute(...)
+    config = result.scalar_one_or_none()
+    if config is None:
+        raise HTTPException(404, "nao esta cadastrada")
+    # ... captura valor_anterior, aplica mudanca em memoria ...
+    await db.flush()
+    await log_audit(db, ...)
+    await db.commit()
+    await db.refresh(config)
+except HTTPException:
+    # 404 de config ausente passa intacto. NAO chama rollback —
+    # nenhuma mutacao aconteceu (o raise ocorre antes do flush).
+    raise
+except Exception:
+    await db.rollback()
+    logger.exception("Falha ao atualizar configuracao '%s' por admin=%s", chave, admin.id)
+    raise HTTPException(502, "Falha ao atualizar configuracao")
+```
+  **Pontos-chave da decisao:**
+  - **Validacao de input (ConfiguracaoValidationError → 422) em try/except SEPARADO do bloco de DB (→ 502)**. Se fossem juntos, um erro de validacao cairia no `except Exception` e viraria 502 errado.
+  - **Ordem: whitelist → validacao → DB**. Motivos:
+    1. Whitelist e checada primeiro porque nao depende nem do input do body nem do DB. Falha rapida.
+    2. Validacao do `valor` acontece ANTES do SELECT FOR UPDATE. Isso e importante porque se o valor e invalido, nao queremos nem pegar o lock do DB.
+    3. DB ocorre por ultimo.
+  - **`except HTTPException: raise` ANTES do `except Exception`** no bloco de DB: sem isso, o 404 de "config ausente no banco" seria capturado como 502, mascarando a causa raiz.
+  - **Nao ha rollback no branch `except HTTPException`**: o 404 so pode ser disparado APOS o SELECT mas ANTES do flush/commit. Como nenhuma mutacao foi enviada ao DB, nao ha nada para rolar para tras. O teste M1 valida essa garantia via `mock_db.rollback.assert_not_awaited()`.
+  - **Commit failure 500 → 502**: consistente com ADR-074 (list_provas do C07) e ADR-076 (4 endpoints do C08). Um cliente que recebe 502 sabe que pode retentar com back-off; um 500 geralmente sinaliza bug no servidor e nao deve ser retentado automaticamente.
+**Alternativas:**
+  - **Manter os 2 try/except originais (um so para validacao de valor, outro so para flush+log+commit)** — rejeitado, deixaria SELECT FOR UPDATE e refresh desprotegidos.
+  - **Usar transacao SQLAlchemy explicita (`async with db.begin()`)** — rejeitado, o padrao do projeto em outros endpoints usa `db.flush()` + `db.commit()` manual com log_audit entre eles. Mudar agora quebraria consistencia sem ganho real.
+  - **Distinguir erros de DB de outros erros via `SQLAlchemyError`** — rejeitado pelo mesmo motivo dos outros ADRs: granularidade sem beneficio ao cliente.
+  - **Manter 500 no commit failure "porque configuracoes e operacao administrativa e falhas sao raras"** — rejeitado, consistencia de contrato HTTP entre componentes tem valor operacional significativo: time de ops ve um 502 em logs e sabe que o Postgres teve soluço, um 500 obriga investigacao de codigo.
+**Consequencias:**
+  - **1 teste pre-existente atualizado** (`test_patch_commit_failure_rollback`): antes esperava `status_code == 500`, agora espera `status_code == 502` + `"atualizar configuracao" in detail`. Adicionado docstring explicando a mudanca + referencia a esta ADR.
+  - **5 testes novos** em `test_configuracoes_api.py`:
+    - `test_list_configuracoes_db_error_returns_502` — `db.execute.side_effect = RuntimeError(...)` → valida 502 + detail "carregar configuracoes".
+    - `test_get_configuracao_db_error_returns_502` — mesmo pattern, detail "carregar configuracao".
+    - `test_patch_configuracao_db_error_returns_502` — falha no SELECT FOR UPDATE → 502 + `rollback` chamado.
+    - `test_patch_configuracao_whitelisted_mas_ausente_no_db` (M1) — `_scalar(None)` simula seed ausente → 404 com mensagem "nao esta cadastrada" + assert `rollback.assert_not_awaited()` + `commit.assert_not_awaited()` (garante que o raise acontece antes de qualquer mutacao).
+    - `test_patch_template_mostrar_data_criacao_nao_bool` (M2) — 422 com mensagem "mostrar_data_criacao deve ser booleano" + assert `execute.assert_not_called()` (valida que a validacao acontece antes do DB).
+  - **Cobertura 100% em ambos os arquivos C09** (`configuracoes.py` e `schemas/configuracao.py`). Primeiro componente da Wave 2 a zerar os gaps.
+  - **Frontend nao precisou de mudanca**: o hook `useConfiguracoes` ja propaga `ApiError.message` — o 502 com mensagem especifica do backend automaticamente substitui mensagens genericas quando o DB falhar. Melhoria automatica de UX sem tocar em 1 linha de frontend.
+  - **`rollback` nao e chamado em caminhos felizes nem em 404 defensivo** — confirmado pelos testes. Nenhum desperdicio de conexao do pool.

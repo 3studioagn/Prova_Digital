@@ -1,7 +1,16 @@
 /*
- * Pagina Configuracoes — reutiliza tokens de `globals.css`.
- * Estrutura: 2 cards empilhados, cada um com seu form independente.
- * Mobile: aviso "acesse a versao desktop" (mesmo padrao de /usuarios).
+ * Pagina Configuracoes — alinhada ao Figma da Wave 2 (Sessao 17).
+ *
+ * Design-alvo:
+ *   - Titulo grande preto (match /provas e /nova-prova)
+ *   - Cards BRANCOS empilhados, cantos bem arredondados
+ *   - Dentro de cada card: titulo h2 + descricao em cinza, depois uma row
+ *     horizontal com campo(s) a esquerda e botao "Salvar" amarelo pill
+ *     a direita, alinhados verticalmente (flex-end/center)
+ *   - Inputs em cinza claro pill (mesmo token de /nova-prova)
+ *
+ * Mobile: aviso "acesse a versao desktop" (mesmo padrao de /usuarios,
+ * /nova-prova, /provas).
  */
 
 /* ── Mobile-only notice / desktop wrapper ─────────────────────────── */
@@ -17,198 +26,244 @@
 /* ── Header ───────────────────────────────────────────────────────── */
 
 .pageHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 3rem;
-  flex-wrap: wrap;
+  margin-bottom: 2.5rem;
 }
 
 .title {
-  font-size: var(--fs-display);
-  font-weight: 400;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 500;
   line-height: 1.05;
   color: var(--color-card-text);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
-.h2 {
-  font-size: var(--fs-h2);
-  font-weight: 500;
-  color: var(--color-card-text);
-  margin-bottom: 0.5rem;
-}
-
-.description {
-  font-size: var(--fs-base);
-  color: var(--color-card-text-muted);
-  margin-bottom: 1.75rem;
-  line-height: 1.5;
-}
-
-.description strong {
-  color: var(--color-card-text);
-  font-weight: 500;
-}
-
-/* ── Cards ────────────────────────────────────────────────────────── */
+/* ── Cards brancos ────────────────────────────────────────────────── *
+ * O fundo do dashboard (.card do layout) ja e cinza claro (#eaeaea).
+ * Cada secao aqui e um card BRANCO "pop-up" para destacar do fundo.
+ */
 
 .card {
-  padding: 2rem 2.25rem;
-  background: var(--color-card-surface);
-  border: 1px solid var(--color-card-border);
-  border-radius: var(--radius-card-lg);
-  margin-bottom: 2rem;
+  padding: 2.25rem 2.75rem;
+  background: #ffffff;
+  border-radius: var(--radius-card-xl);
+  margin-bottom: 1.25rem;
 }
 
 .card:last-child {
   margin-bottom: 0;
 }
 
-/* ── Estado de loading / erro ─────────────────────────────────────── */
-
-.loadingBox {
-  padding: 2rem;
-  text-align: center;
-  color: var(--color-card-text-muted);
-  font-size: var(--fs-base);
-}
-
-.errorBox {
-  padding: 1rem 1.25rem;
-  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
-  border: 1px solid var(--color-danger);
-  border-radius: var(--radius-card-lg);
+.h2 {
+  font-size: 1.875rem;
+  font-weight: 400;
   color: var(--color-card-text);
-  font-size: var(--fs-base);
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.35rem;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
 }
 
-/* ── Forms ────────────────────────────────────────────────────────── */
+.description {
+  font-size: var(--fs-base);
+  color: var(--color-card-text-muted);
+  margin-bottom: 2rem;
+  line-height: 1.4;
+  max-width: 620px;
+}
 
-.form {
+/* ── Body do card: flex row (fields + botao Salvar) ───────────────── *
+ * O botao fica alinhado a ponta direita do card. Em telas menores,
+ * faz wrap e o botao vai para baixo, alinhado a direita via margin-
+ * left auto no .btnPrimary dentro do wrap.
+ */
+
+.cardBody {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.cardFields {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1.25rem;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.25rem 2rem;
-}
+/* ── Field (label + input) ────────────────────────────────────────── */
 
 .field {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  min-width: 0;
 }
 
 .label {
-  font-size: var(--fs-sm);
-  font-weight: 500;
+  font-size: var(--fs-xs);
+  font-weight: 400;
   color: var(--color-card-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .fieldHint {
   font-size: var(--fs-xs);
   color: var(--color-card-text-muted);
   font-style: italic;
+  margin-top: 0.125rem;
 }
 
 .input,
 .select {
-  height: 48px;
-  padding: 0 1.25rem;
-  background: #fff;
-  border: 1px solid var(--color-card-border);
+  width: 100%;
+  height: 52px;
+  padding: 0 1.5rem;
+  background: var(--color-card-surface);
+  border: none;
   border-radius: var(--radius-pill);
   font-family: inherit;
   font-size: var(--fs-base);
   color: var(--color-card-text);
-  transition: border-color 0.15s ease;
+  transition: box-shadow 0.15s ease;
+}
+
+.input::placeholder {
+  color: var(--color-card-text-muted);
 }
 
 .input:focus,
 .select:focus {
   outline: none;
-  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent);
 }
 
 .input:disabled,
 .select:disabled {
   opacity: 0.6;
-  background: var(--color-card-surface-alt, #d7d7d7);
   cursor: not-allowed;
 }
 
 .input[readonly] {
-  background: var(--color-card-surface-alt, #d7d7d7);
+  background: color-mix(in srgb, var(--color-card-surface) 70%, #ffffff);
   cursor: not-allowed;
   color: var(--color-card-text-muted);
 }
 
 .select {
   appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1l5 5 5-5' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9' fill='none'><path d='M1 1l6 6 6-6' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
-  background-position: right 1.25rem center;
-  padding-right: 2.75rem;
+  background-position: right 1.5rem center;
+  padding-right: 3rem;
   cursor: pointer;
 }
 
-.inputInline {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
+/* Input numerico mais compacto (tempo de atraso) */
+.inputNumero {
+  max-width: 200px;
 }
 
-.inputInline .input {
-  max-width: 160px;
+/* Grid 2 colunas para template (nome + formato) */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem 2rem;
+  max-width: 720px;
 }
 
-.inputSuffix {
-  font-size: var(--fs-sm);
-  color: var(--color-card-text-muted);
-}
-
-/* ── Checkbox custom ──────────────────────────────────────────────── */
+/* ── Checkbox custom ──────────────────────────────────────────────── *
+ * Native input escondido (visually) + span visual com cantos arredondados.
+ * Quando :checked, o span ganha fundo amarelo e o SVG do CheckIcon fica
+ * visivel (tamanho menor que a caixa para dar respiro interno).
+ */
 
 .checkboxGroup {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+  padding-top: 0.25rem;
 }
 
 .checkboxLabel {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.75rem;
   cursor: pointer;
   color: var(--color-card-text);
   font-size: var(--fs-base);
+  user-select: none;
 }
 
+/* Esconde o input nativo mas mantem ele acessivel p/ teclado e AT */
 .checkbox {
-  width: 18px;
-  height: 18px;
-  accent-color: var(--color-accent);
-  cursor: pointer;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.checkbox:disabled {
-  cursor: not-allowed;
+/* Caixa visual */
+.checkboxBox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1.5px solid var(--color-card-border);
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+/* Icone dentro da caixa — menor que a caixa para ter respiro */
+.checkboxBox svg {
+  width: 14px;
+  height: 14px;
+  color: var(--color-card-text);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+/* Estado :checked — caixa amarela + icone visivel */
+.checkbox:checked + .checkboxBox {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.checkbox:checked + .checkboxBox svg {
+  opacity: 1;
+}
+
+/* Focus visivel para acessibilidade (teclado) */
+.checkbox:focus-visible + .checkboxBox {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Disabled */
+.checkbox:disabled + .checkboxBox {
   opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.checkboxLabel:has(.checkbox:disabled) {
+  cursor: not-allowed;
 }
 
 /* ── Feedback inline ─────────────────────────────────────────────── */
 
 .inlineError {
-  padding: 0.75rem 1rem;
-  background: color-mix(in srgb, var(--color-danger) 15%, transparent);
+  padding: 0.625rem 1rem;
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
   border-left: 3px solid var(--color-danger);
   border-radius: 0.5rem;
   font-size: var(--fs-sm);
@@ -216,7 +271,7 @@
 }
 
 .inlineSuccess {
-  padding: 0.75rem 1rem;
+  padding: 0.625rem 1rem;
   background: color-mix(in srgb, var(--color-accent) 18%, transparent);
   border-left: 3px solid var(--color-accent);
   border-radius: 0.5rem;
@@ -224,37 +279,58 @@
   color: var(--color-card-text);
 }
 
-/* ── Botoes ──────────────────────────────────────────────────────── */
-
-.sectionActions {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 0.5rem;
-}
+/* ── Botao Salvar (amarelo pill, alinhado verticalmente com input) ─ */
 
 .btnPrimary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.875rem 2.5rem;
+  height: 52px;
+  padding: 0 3rem;
   background: var(--color-accent);
   color: var(--color-card-text);
   border: none;
   border-radius: var(--radius-pill);
   font-family: inherit;
-  font-size: var(--fs-base);
+  font-size: 1.0625rem;
   font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+  /* Quando o card .cardBody faz wrap (tela estreita), o botao vai
+     para baixo dos fields, alinhado a direita. */
+  margin-left: auto;
 }
 
 .btnPrimary:hover:not(:disabled) {
-  opacity: 0.9;
+  background: var(--color-accent-hover);
 }
 
 .btnPrimary:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* ── Estado de loading / erro global ──────────────────────────────── */
+
+.loadingBox {
+  padding: 3rem;
+  text-align: center;
+  color: var(--color-card-text-muted);
+  font-size: var(--fs-base);
+  background: #ffffff;
+  border-radius: var(--radius-card-xl);
+}
+
+.errorBox {
+  padding: 1.25rem 1.5rem;
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-card-xl);
+  color: var(--color-card-text);
+  font-size: var(--fs-base);
+  margin-bottom: 1.5rem;
 }
 
 /* ── Mobile ──────────────────────────────────────────────────────── */
@@ -280,8 +356,11 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+  .card {
+    padding: 1.75rem 1.75rem;
   }
 }

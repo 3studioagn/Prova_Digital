@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from botocore.exceptions import ClientError
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import get_admin_user, get_current_user
 from app.db.models import (
@@ -520,6 +521,94 @@ async def test_create_prova_pdf_generation_failure_rollsback_before_commit(
     mock_delete.assert_awaited_once()
 
 
+async def test_create_prova_integrity_error_returns_409(
+    admin_user, vendedor_matriz, mock_db
+):
+    """A2 (auditoria Wave 2) — race TOCTOU: dois admins criam a mesma
+    prova simultaneamente. O check inicial de unicidade passa em ambos,
+    mas o UNIQUE constraint no banco rejeita o segundo no commit.
+
+    Comportamento esperado:
+      - Mapear IntegrityError para 409 Conflict (nao 500).
+      - Mensagem deve deixar claro que o nro_requerimento ja existe.
+      - db.rollback e _cleanup_r2 sao chamados, mesma semantica do
+        caminho de erro generico.
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = [
+        _scalar(None),  # check inicial passou (race: o outro admin ainda nao commitou)
+        _scalar(vendedor_matriz),
+        _scalar(DEFAULT_TEMPLATE),
+    ]
+    # O commit levanta IntegrityError (constraint UNIQUE violado pelo outro admin).
+    mock_db.commit.side_effect = IntegrityError(
+        statement="INSERT ...",
+        params={},
+        orig=Exception("duplicate key value violates unique constraint"),
+    )
+
+    with patch(
+        "app.api.v1.provas.r2_signed.head_object",
+        new=AsyncMock(return_value={"ContentLength": 1024}),
+    ), patch(
+        "app.api.v1.provas.r2_signed.get_object_head_bytes",
+        new=AsyncMock(return_value=FAKE_JPEG_HEAD),
+    ), patch("app.api.v1.provas.r2_delete", new=AsyncMock()) as mock_delete:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(
+                f"{PREFIX}/",
+                json={
+                    "nome": "Race",
+                    "nro_requerimento": "REQ-RACE",
+                    "cliente": "C",
+                    "vendedor_id": str(vendedor_matriz.id),
+                    "object_key": "provas/2026/04/race/arte.jpg",
+                },
+            )
+    assert resp.status_code == 409
+    assert "ja cadastrado" in resp.json()["detail"]
+    mock_db.rollback.assert_awaited()
+    mock_delete.assert_awaited_once()
+
+
+async def test_create_prova_cleanup_r2_failure_does_not_mask_original_error(
+    admin_user, vendedor_matriz, mock_db
+):
+    """A4 (auditoria Wave 2) — quando o proprio cleanup R2 falha (ex: R2
+    temporariamente indisponivel), o log "orfao possivel" e emitido mas o
+    erro original do request deve prevalecer. O cliente nao pode receber
+    um erro diferente por causa do cleanup.
+
+    Usa-se o caminho de duplicata (409) como gatilho simples para exercitar
+    _cleanup_r2: o behavior deve ser identico se o cleanup passar ou falhar.
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.return_value = _scalar(uuid.uuid4())  # ja existe
+
+    # r2_delete levanta — o handler loga mas mantem o 409 original.
+    with patch(
+        "app.api.v1.provas.r2_delete",
+        new=AsyncMock(side_effect=RuntimeError("R2 temporariamente indisponivel")),
+    ) as mock_delete:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(
+                f"{PREFIX}/",
+                json={
+                    "nome": "Dup",
+                    "nro_requerimento": "REQ-DUP-CLEAN",
+                    "cliente": "C",
+                    "vendedor_id": str(vendedor_matriz.id),
+                    "object_key": "provas/2026/04/dupclean/arte.jpg",
+                },
+            )
+
+    # Status code do erro original (409 — duplicata) — NAO muda por causa do cleanup falho.
+    assert resp.status_code == 409
+    assert "ja cadastrado" in resp.json()["detail"]
+    # _cleanup_r2 foi tentado e o mock confirma a chamada.
+    mock_delete.assert_awaited_once()
+
+
 async def test_create_prova_requires_admin(regular_user, mock_db):
     _setup(mock_db, user=regular_user)
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
@@ -745,6 +834,121 @@ async def test_list_filter_busca_nome_ou_nro(admin_user, mock_db):
     assert "OR" in sql.upper()  # busca em nome OU nro_requerimento
 
 
+# ─── C1 (auditoria Wave 2 — Sessao 19) — escape de wildcards ILIKE ────
+#
+# O ILIKE do Postgres interpreta `%`, `_` e `\` como metacaracteres. Antes
+# do fix, um admin que digitasse esses chars no filtro `busca` ou `cliente`
+# tinha resultados corrompidos (ex: `%` casava tudo). A solucao e escapar
+# cada um com `\` e passar `escape="\\"` no `.ilike()`.
+#
+# Os testes abaixo inspecionam o SQL compilado para garantir que:
+#   1. O SQL contem o char literal escapado com `\\`
+#   2. Uma clausula `ESCAPE '\'` aparece no output compilado
+
+
+async def test_list_filter_busca_escapa_percent_literal(admin_user, mock_db):
+    """Busca por `50%` deve encontrar o literal `50%`, nao `50<qualquer coisa>`."""
+    _setup(mock_db, admin=admin_user)
+    _capture_list_stmts(mock_db, count=0, rows=[])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/?busca=50%25")  # 50% URL-encoded
+
+    assert resp.status_code == 200
+    sql = _compiled_sql(mock_db._captured_stmts[0])
+    # O pattern escapado tem o `%` literal precedido por `\\`.
+    # SQLAlchemy compila isso para a forma `'%50\%%'` com ESCAPE '\'.
+    assert "50" in sql
+    assert "ESCAPE" in sql.upper()
+    # Confirma que o `%` do input foi escapado — o literal `\%` aparece
+    # entre os delimitadores de pattern.
+    assert r"\%" in sql
+
+
+async def test_list_filter_busca_escapa_underscore_literal(admin_user, mock_db):
+    """Busca por `a_b` nao pode casar `axb` (wildcard single-char)."""
+    _setup(mock_db, admin=admin_user)
+    _capture_list_stmts(mock_db, count=0, rows=[])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/?busca=a_b")
+
+    assert resp.status_code == 200
+    sql = _compiled_sql(mock_db._captured_stmts[0])
+    assert "ESCAPE" in sql.upper()
+    assert r"\_" in sql  # underscore escapado
+
+
+async def test_list_filter_cliente_escapa_backslash_literal(admin_user, mock_db):
+    """Busca por `foo\\bar` nao pode quebrar o escape char do SQL."""
+    _setup(mock_db, admin=admin_user)
+    _capture_list_stmts(mock_db, count=0, rows=[])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/?cliente=foo%5Cbar")  # foo\bar URL-encoded
+
+    assert resp.status_code == 200
+    sql = _compiled_sql(mock_db._captured_stmts[0])
+    assert "ESCAPE" in sql.upper()
+    # O `\` literal do input vira `\\` no pattern (escapado primeiro) para
+    # nao interferir nos escapes de `%` e `_`.
+    assert r"\\" in sql
+
+
+# ─── A3 (auditoria Wave 2 — Sessao 19) — validacao cruzada de periodo ─
+
+
+async def test_list_periodo_fim_antes_de_inicio_422(admin_user, mock_db):
+    """Periodos invertidos devem retornar 422 em vez de lista vazia silenciosa."""
+    _setup(mock_db, admin=admin_user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(
+            f"{PREFIX}/?periodo_inicio=2026-05-01&periodo_fim=2026-04-01"
+        )
+
+    assert resp.status_code == 422
+    assert "anterior" in resp.json()["detail"].lower()
+    # A validacao deve acontecer ANTES de qualquer query — garantimos que
+    # o mock de DB nao foi chamado.
+    mock_db.execute.assert_not_called()
+
+
+async def test_list_periodo_mesma_data_aceita(admin_user, mock_db):
+    """Periodo inicio == fim (um unico dia) deve ser aceito."""
+    _setup(mock_db, admin=admin_user)
+    _capture_list_stmts(mock_db, count=0, rows=[])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(
+            f"{PREFIX}/?periodo_inicio=2026-04-10&periodo_fim=2026-04-10"
+        )
+
+    assert resp.status_code == 200
+    sql = _compiled_sql(mock_db._captured_stmts[0])
+    assert "2026-04-10" in sql
+    # fim inclusivo -> fim + 1 dia
+    assert "2026-04-11" in sql
+
+
+# ─── A2 (auditoria Wave 2 — Sessao 19) — try/except em list_provas ────
+
+
+async def test_list_db_error_returns_502(admin_user, mock_db):
+    """Erro transitorio no DB (timeout, connection reset) deve retornar
+    502 com mensagem acionavel em vez de 500 generico do handler global.
+    """
+    _setup(mock_db, admin=admin_user)
+    # O count_stmt e a primeira execute — falhamos logo no count.
+    mock_db.execute.side_effect = RuntimeError("connection reset by peer")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/")
+
+    assert resp.status_code == 502
+    assert "carregar provas" in resp.json()["detail"].lower()
+
+
 async def test_list_combined_filters(admin_user, mock_db):
     _setup(mock_db, admin=admin_user)
     _capture_list_stmts(mock_db, count=0, rows=[])
@@ -865,6 +1069,36 @@ async def test_list_admin_sem_scope(admin_user, mock_db):
     # Admin deve ter apenas um count simples — sem nenhuma das clausulas de scoping
     assert "vendedor_id =" not in sql
     assert "'COM_MOTORISTA'" not in sql
+
+
+async def test_list_studio_sem_admin_ve_zero(mock_db):
+    """A5 (auditoria Wave 2) — branch defensivo de `_scoping_filter`.
+
+    A combinacao STUDIO + is_admin=false nao deveria existir pos-ADR-018,
+    mas `_scoping_filter` tem um `return func.false()` como defesa em
+    profundidade: se por qualquer razao um STUDIO nao-admin for criado
+    (bug de migration, SQL direto, etc), ele NAO pode ver nenhuma prova.
+
+    Este teste blinda esse branch contra regressao futura. Se alguem
+    remover o `func.false()` ou trocar por `None` (sem filtro), o teste
+    falha imediatamente.
+    """
+    studio_nao_admin = make_user(
+        setor=SetorEnum.STUDIO, localizacao=None, is_admin=False
+    )
+    _setup(mock_db, user=studio_nao_admin)
+    _capture_list_stmts(mock_db, count=0, rows=[])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/")
+
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0
+    # O SQL compilado deve conter a clausula constante `false` emitida
+    # pelo `func.false()`. A forma exata depende do dialect do Postgres
+    # (SQLAlchemy pode serializar como `false` ou `false`).
+    sql = _compiled_sql(mock_db._captured_stmts[0]).lower()
+    assert "false" in sql
 
 
 # ─── Validacao de query params ───────────────────────────────────────
@@ -1260,3 +1494,105 @@ async def test_get_qr_code_png_etiqueta_ausente_404(
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
         resp = await ac.get(f"{PREFIX}/{prova.id}/qr-code.png")
     assert resp.status_code == 404
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# A1 + A2 (auditoria Wave 2 — Sessao 20) — robustez dos endpoints do C08
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Os 5 testes abaixo cobrem os fixes da auditoria senior do Componente 08:
+#   A1 — try/except em 4 endpoints (detail, movimentacoes, etiqueta.pdf,
+#        qr-code.png) que antes nao tinham protecao contra erros transitorios
+#        de DB. Mapeiam para 502 em vez de 500 generico.
+#   A2 — try/except dedicado ao `gerar_pdf` no handler de etiqueta.pdf,
+#        separando falhas de rendering (422) de falhas de DB (502). Mesma
+#        filosofia do ADR-054 (create_prova).
+
+
+async def test_get_detail_db_error_returns_502(admin_user, mock_db):
+    """A1 — erro transitorio no DB do `get_prova_detail` retorna 502."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = RuntimeError("connection reset by peer")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/{uuid.uuid4()}")
+
+    assert resp.status_code == 502
+    assert "carregar prova" in resp.json()["detail"].lower()
+
+
+async def test_get_movimentacoes_db_error_returns_502(admin_user, mock_db):
+    """A1 — erro transitorio no DB do `list_movimentacoes` retorna 502."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = RuntimeError("pooler not reachable")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/{uuid.uuid4()}/movimentacoes")
+
+    assert resp.status_code == 502
+    assert "movimentacoes" in resp.json()["detail"].lower()
+
+
+async def test_get_etiqueta_pdf_db_error_returns_502(admin_user, mock_db):
+    """A1 — erro transitorio no DB durante carga da etiqueta retorna 502."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = RuntimeError("db timeout")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/{uuid.uuid4()}/etiqueta.pdf")
+
+    assert resp.status_code == 502
+    assert "carregar dados da etiqueta" in resp.json()["detail"].lower()
+
+
+async def test_get_etiqueta_pdf_gerar_pdf_failure_returns_422(
+    admin_user, vendedor_matriz, mock_db
+):
+    """A2 — falha de rendering em `gerar_pdf` retorna 422 com mensagem
+    acionavel, separado do caminho 502 de erro de DB.
+
+    Setup: todas as queries de DB retornam com sucesso (scoped, etiqueta,
+    template). Mockamos `gerar_pdf` para lancar RuntimeError. O handler
+    deve capturar no bloco dedicado ao rendering e retornar 422.
+    """
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(vendedor_id=vendedor_matriz.id, nro_requerimento="REQ-PDF-ERR")
+    etiqueta = Etiqueta(
+        id=uuid.uuid4(),
+        prova_id=prova.id,
+        nome_prova=prova.nome,
+        nro_requerimento=prova.nro_requerimento,
+        vendedor_nome=vendedor_matriz.nome,
+        qr_code_image=qrcode_service.gerar_imagem_qr("3SD|REQ-PDF-ERR|aaaaaaaaaaaaaaaa"),
+        created_at=datetime.now(timezone.utc),
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+        _scalar(etiqueta),
+        _scalar(DEFAULT_TEMPLATE),
+    ]
+
+    with patch(
+        "app.api.v1.provas.gerar_pdf",
+        side_effect=RuntimeError("Fontes DejaVu ausentes"),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.get(f"{PREFIX}/{prova.id}/etiqueta.pdf")
+
+    assert resp.status_code == 422
+    detail = resp.json()["detail"].lower()
+    assert "gerar etiqueta" in detail
+    assert "dejavu" in detail  # propaga mensagem da exception
+
+
+async def test_get_qr_code_png_db_error_returns_502(admin_user, mock_db):
+    """A1 — erro transitorio no DB do `get_qr_code_png` retorna 502."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = RuntimeError("connection lost")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/{uuid.uuid4()}/qr-code.png")
+
+    assert resp.status_code == 502
+    assert "qr code" in resp.json()["detail"].lower()

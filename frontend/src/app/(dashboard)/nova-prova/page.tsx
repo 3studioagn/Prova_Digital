@@ -13,6 +13,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useCreateProva } from "@/hooks/useCreateProva";
+import { PlusIcon } from "@/components/icons";
 import {
   ALLOWED_IMAGE_TYPES,
   MAX_UPLOAD_BYTES,
@@ -54,6 +55,12 @@ export default function NovaProvaPage() {
 
   // Token provider — re-busca a sessao do Supabase a cada chamada para
   // garantir access_token atual (o middleware refresca em background).
+  //
+  // Fonte UNICA de truth para o access token nesta pagina: tanto o
+  // fetch de vendedores (logo abaixo) quanto o useCreateProva usam este
+  // callback. Evita divergencia entre duas chamadas a getSession() que
+  // poderiam pegar tokens diferentes em caso de refresh concorrente.
+  // (A5 da auditoria Wave 2.)
   const getToken = useCallback(async () => {
     const supabase = createClient();
     const { data } = await supabase.auth.getSession();
@@ -69,12 +76,12 @@ export default function NovaProvaPage() {
       setVendedoresLoading(true);
       setVendedoresError(null);
       try {
-        const supabase = createClient();
-        const { data: sess } = await supabase.auth.getSession();
-        const token = sess.session?.access_token;
+        const token = await getToken();
         if (!token) {
-          setVendedoresError("Sessao expirada.");
-          setVendedoresLoading(false);
+          if (!controller.signal.aborted) {
+            setVendedoresError("Sessao expirada.");
+            setVendedoresLoading(false);
+          }
           return;
         }
         const resp = await apiFetch<UsuarioListResponse>(
@@ -99,7 +106,7 @@ export default function NovaProvaPage() {
     }
     fetchVendedores();
     return () => controller.abort();
-  }, []);
+  }, [getToken]);
 
   // Revoga object URLs antigos quando o arquivo muda (evitar leak).
   useEffect(() => {
@@ -319,20 +326,30 @@ export default function NovaProvaPage() {
         <p>Para acessar esse recurso, acesse a versao desktop.</p>
       </div>
       <div className={styles.desktopOnly}>
-        <header className={styles.pageHeader}>
-          <h1 className={styles.title}>Nova prova digital</h1>
-        </header>
-
+        {/* Form wrapper envolve TUDO (header + grid + dropzone) porque o
+            botao "Criar prova" esta no header mas precisa submitar o form. */}
         <form className={styles.form} onSubmit={handleSubmit} noValidate>
+          <header className={styles.pageHeader}>
+            <h1 className={styles.title}>Nova prova digital</h1>
+            <button
+              type="submit"
+              className={styles.btnPrimary}
+              disabled={!canSubmit}
+            >
+              {loading ? "Criando..." : "Criar prova"}
+            </button>
+          </header>
+
           <div className={styles.formGrid}>
             <div className={styles.field}>
               <label htmlFor="nome" className={styles.label}>
-                Nome da prova
+                Nome:
               </label>
               <input
                 id="nome"
                 type="text"
                 className={styles.input}
+                placeholder="Nome da prova"
                 value={form.nome}
                 onChange={(e) => setForm({ ...form, nome: e.target.value })}
                 maxLength={200}
@@ -343,12 +360,13 @@ export default function NovaProvaPage() {
 
             <div className={styles.field}>
               <label htmlFor="nro_requerimento" className={styles.label}>
-                Numero do requerimento
+                Numero do requerimento:
               </label>
               <input
                 id="nro_requerimento"
                 type="text"
                 className={styles.input}
+                placeholder="Ex: REQ-2026-001"
                 value={form.nro_requerimento}
                 onChange={(e) =>
                   setForm({ ...form, nro_requerimento: e.target.value })
@@ -361,12 +379,13 @@ export default function NovaProvaPage() {
 
             <div className={styles.field}>
               <label htmlFor="cliente" className={styles.label}>
-                Cliente
+                Cliente:
               </label>
               <input
                 id="cliente"
                 type="text"
                 className={styles.input}
+                placeholder="Nome do cliente"
                 value={form.cliente}
                 onChange={(e) => setForm({ ...form, cliente: e.target.value })}
                 maxLength={200}
@@ -377,7 +396,7 @@ export default function NovaProvaPage() {
 
             <div className={styles.field}>
               <label htmlFor="vendedor" className={styles.label}>
-                Vendedor responsavel
+                Vendedor:
               </label>
               <select
                 id="vendedor"
@@ -408,68 +427,58 @@ export default function NovaProvaPage() {
             </div>
           </div>
 
-          <div className={styles.field}>
-            <span className={styles.label}>Arte da prova (JPG ou PNG, ate 10 MB)</span>
-            <label
-              htmlFor="arquivo"
-              className={`${styles.dropzone} ${
-                dragOver ? styles.dropzoneActive : ""
-              } ${arquivo ? styles.dropzoneFilled : ""}`}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-            >
-              <input
-                ref={fileInputRef}
-                id="arquivo"
-                type="file"
-                accept="image/jpeg,image/png"
-                className={styles.fileInput}
-                onChange={handleFileInputChange}
-                disabled={loading}
-              />
-              {arquivo && arquivoPreview ? (
-                <div className={styles.previewContainer}>
-                  {/* Preview local usando URL.createObjectURL. Nao requer R2. */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={arquivoPreview}
-                    alt={arquivo.name}
-                    className={styles.previewImg}
-                  />
-                  <div className={styles.previewInfo}>
-                    <strong>{arquivo.name}</strong>
-                    <span>
-                      {arquivo.type.replace("image/", "").toUpperCase()} ·{" "}
-                      {formatBytes(arquivo.size)}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div className={styles.dropzoneEmpty}>
-                  <span className={styles.dropzoneTitle}>
-                    Arraste uma imagem ou clique para selecionar
+          <label
+            htmlFor="arquivo"
+            className={`${styles.dropzone} ${
+              dragOver ? styles.dropzoneActive : ""
+            } ${arquivo ? styles.dropzoneFilled : ""}`}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+          >
+            <input
+              ref={fileInputRef}
+              id="arquivo"
+              type="file"
+              accept="image/jpeg,image/png"
+              className={styles.fileInput}
+              onChange={handleFileInputChange}
+              disabled={loading}
+            />
+            {arquivo && arquivoPreview ? (
+              <div className={styles.previewContainer}>
+                {/* Preview local usando URL.createObjectURL. Nao requer R2. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={arquivoPreview}
+                  alt={arquivo.name}
+                  className={styles.previewImg}
+                />
+                <div className={styles.previewInfo}>
+                  <strong>{arquivo.name}</strong>
+                  <span>
+                    {arquivo.type.replace("image/", "").toUpperCase()} ·{" "}
+                    {formatBytes(arquivo.size)}
                   </span>
-                  <span className={styles.dropzoneHint}>JPG ou PNG, ate 10 MB</span>
                 </div>
-              )}
-            </label>
-            {arquivoError && (
-              <span className={styles.inlineError}>{arquivoError}</span>
+              </div>
+            ) : (
+              <div className={styles.dropzoneEmpty}>
+                <span className={styles.dropzoneTitle}>
+                  Arraste uma imagem ou clique para selecionar
+                </span>
+                <span className={styles.dropzoneHint}>JPG ou PNG</span>
+                <span className={styles.dropzoneIcon} aria-hidden="true">
+                  <PlusIcon width={56} height={56} />
+                </span>
+              </div>
             )}
-          </div>
+          </label>
+          {arquivoError && (
+            <span className={styles.inlineError}>{arquivoError}</span>
+          )}
 
           {error && <div className={styles.errorBox}>{error}</div>}
-
-          <div className={styles.footerActions}>
-            <button
-              type="submit"
-              className={styles.btnPrimary}
-              disabled={!canSubmit}
-            >
-              {loading ? "Criando..." : "Criar prova"}
-            </button>
-          </div>
         </form>
       </div>
     </>

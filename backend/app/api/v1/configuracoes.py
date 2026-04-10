@@ -52,13 +52,27 @@ async def list_configuracoes(
     Retorna apenas as chaves whitelisted (EDITABLE_KEYS). Chaves que
     eventualmente existam no banco mas nao estejam na whitelist sao
     filtradas do response — evita vazamento acidental de config interna.
+
+    A1 (auditoria Wave 2 — Sessao 21): try/except em torno da query
+    mapeia erros transitorios de DB para 502 acionavel em vez de 500
+    generico do handler global. Mesmo padrao do ADR-074 (C07) e
+    ADR-076 (C08).
     """
-    result = await db.execute(
-        select(ConfiguracaoSistema)
-        .where(ConfiguracaoSistema.chave.in_(EDITABLE_KEYS))
-        .order_by(ConfiguracaoSistema.chave)
-    )
-    rows = result.scalars().all()
+    try:
+        result = await db.execute(
+            select(ConfiguracaoSistema)
+            .where(ConfiguracaoSistema.chave.in_(EDITABLE_KEYS))
+            .order_by(ConfiguracaoSistema.chave)
+        )
+        rows = result.scalars().all()
+    except Exception:
+        logger.exception(
+            "Falha ao listar configuracoes (admin=%s)", admin.id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar configuracoes",
+        )
 
     return ConfiguracaoListResponse(
         items=[ConfiguracaoResponse.model_validate(r) for r in rows]
@@ -82,6 +96,10 @@ async def get_configuracao(
       - chave nao esta na whitelist (EDITABLE_KEYS)
       - chave esta na whitelist mas nao existe no banco (bug — migration
         nao foi aplicada ou o seed foi removido manualmente)
+
+    A1 (auditoria Wave 2 — Sessao 21): try/except em torno da query
+    mapeia erros transitorios de DB para 502. HTTPException (404) e
+    re-levantada antes do except Exception para nao ser mascarada.
     """
     if chave not in EDITABLE_KEYS:
         raise HTTPException(
@@ -89,19 +107,30 @@ async def get_configuracao(
             detail=f"Configuracao '{chave}' nao existe ou nao e editavel",
         )
 
-    result = await db.execute(
-        select(ConfiguracaoSistema).where(ConfiguracaoSistema.chave == chave)
-    )
-    config = result.scalar_one_or_none()
-    if config is None:
-        logger.error(
-            "Configuracao whitelisted '%s' nao encontrada no banco. "
-            "Migration 002 pode ter sido revertida.",
-            chave,
+    try:
+        result = await db.execute(
+            select(ConfiguracaoSistema).where(ConfiguracaoSistema.chave == chave)
+        )
+        config = result.scalar_one_or_none()
+        if config is None:
+            logger.error(
+                "Configuracao whitelisted '%s' nao encontrada no banco. "
+                "Migration 002 pode ter sido revertida.",
+                chave,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Configuracao '{chave}' nao esta cadastrada no sistema",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha ao carregar configuracao '%s' (admin=%s)", chave, admin.id
         )
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Configuracao '{chave}' nao esta cadastrada no sistema",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar configuracao",
         )
 
     return ConfiguracaoResponse.model_validate(config)
@@ -128,33 +157,27 @@ async def update_configuracao(
       3. Valida o `valor` via dispatch table (`validar_valor_por_chave`)
       4. Captura valor_anterior e descricao_anterior para o audit log
       5. Aplica UPDATE em memoria, flush, log_audit, commit
-      6. Se qualquer passo apos a validacao falhar, rollback completo
+      6. Refresh para retornar os valores server-side
+
+    A2 (auditoria Wave 2 — Sessao 21): try/except em torno de TODAS as
+    queries de DB (SELECT FOR UPDATE + flush + log_audit + commit +
+    refresh), separado do try/except dedicado a `ConfiguracaoValidationError`
+    (422). Commit failure agora retorna 502 (upstream/DB indisponivel),
+    nao 500 (bug interno) — consistente com ADR-074 (C07) e ADR-076 (C08).
+    HTTPException intencionais (404 whitelist, 404 config ausente, 422
+    validation) sao re-levantadas via `except HTTPException: raise`.
     """
-    # (1) Whitelist
+    # (1) Whitelist — antes do try/except porque e validacao de URL, nao de DB.
     if chave not in EDITABLE_KEYS:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Configuracao '{chave}' nao existe ou nao e editavel",
         )
 
-    # (2) SELECT FOR UPDATE
-    result = await db.execute(
-        select(ConfiguracaoSistema)
-        .where(ConfiguracaoSistema.chave == chave)
-        .with_for_update()
-    )
-    config = result.scalar_one_or_none()
-    if config is None:
-        logger.error(
-            "PATCH de configuracao whitelisted '%s' mas linha ausente no banco",
-            chave,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Configuracao '{chave}' nao esta cadastrada no sistema",
-        )
-
-    # (3) Validacao por chave
+    # (2) Validacao do valor — ANTES de qualquer query, em try/except dedicado
+    # que mapeia ConfiguracaoValidationError para 422. Separado do bloco de
+    # DB porque a classe semantica e diferente (input invalido vs upstream
+    # indisponivel).
     try:
         valor_normalizado = validar_valor_por_chave(chave, body.valor)
     except ConfiguracaoValidationError as exc:
@@ -163,17 +186,38 @@ async def update_configuracao(
             detail=str(exc),
         )
 
-    # (4) Captura estado anterior para audit
-    valor_anterior = config.valor
-    descricao_anterior = config.descricao
-
-    # (5) Aplica mudanca em memoria
-    config.valor = valor_normalizado
-    if body.descricao is not None:
-        config.descricao = body.descricao
-    config.updated_by = admin.id
-
+    # (3-6) Bloco unico de queries de DB. Falha transitoria -> 502.
+    # HTTPException (404 config ausente) e re-levantada antes do except
+    # Exception para nao ser mascarada.
     try:
+        # (3) SELECT FOR UPDATE trava a linha contra concorrencia.
+        result = await db.execute(
+            select(ConfiguracaoSistema)
+            .where(ConfiguracaoSistema.chave == chave)
+            .with_for_update()
+        )
+        config = result.scalar_one_or_none()
+        if config is None:
+            logger.error(
+                "PATCH de configuracao whitelisted '%s' mas linha ausente no banco",
+                chave,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Configuracao '{chave}' nao esta cadastrada no sistema",
+            )
+
+        # (4) Captura estado anterior para audit log.
+        valor_anterior = config.valor
+        descricao_anterior = config.descricao
+
+        # (5) Aplica mudanca em memoria.
+        config.valor = valor_normalizado
+        if body.descricao is not None:
+            config.descricao = body.descricao
+        config.updated_by = admin.id
+
+        # Flush envia o UPDATE sem commitar; o log_audit tambem.
         await db.flush()
 
         await log_audit(
@@ -192,6 +236,13 @@ async def update_configuracao(
         )
 
         await db.commit()
+        await db.refresh(config)
+    except HTTPException:
+        # Re-raise intencional: 404 de config ausente deve passar intacto.
+        # Nao chamamos rollback porque nenhuma mutacao foi aplicada no DB
+        # (o SELECT ... FOR UPDATE apenas leu; o raise acontece antes do
+        # flush).
+        raise
     except Exception:
         await db.rollback()
         logger.exception(
@@ -200,11 +251,9 @@ async def update_configuracao(
             admin.id,
         )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Falha ao atualizar configuracao",
         )
-
-    await db.refresh(config)
 
     logger.info(
         "Configuracao atualizada: chave=%s admin=%s valor_anterior=%r valor_novo=%r",

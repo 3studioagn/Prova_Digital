@@ -218,16 +218,81 @@
   flex: 1;
   margin-left: var(--sidebar-width);
   padding: 1rem;
-  min-height: 100vh;
+  /* Altura fixa do viewport + overflow hidden garante que a pagina nao
+     scrolla: todo scroll (vertical ou horizontal) acontece DENTRO do .card. */
+  height: 100vh;
   background: var(--color-bg);
+  overflow: hidden;
 }
 
 .card {
   background: var(--color-card-bg);
   border-radius: var(--radius-card-xl);
-  padding: var(--card-padding);
-  min-height: calc(100vh - 2rem);
+  /* Altura fixa = viewport menos o padding do .main (1rem em cima + embaixo).
+     O `.card` e o CONTAINER: sem padding, sem scroll; apenas um quadrado
+     arredondado com overflow hidden que clipa o filho .cardInner pelos
+     cantos arredondados. O scroll real acontece no filho. */
+  height: calc(100vh - 2rem);
+  overflow: hidden;
   color: var(--color-card-text);
+}
+
+.cardInner {
+  /* Filho do .card que contem o conteudo real da rota e faz o scroll
+     interno. Por ter padding generoso e scrollbar customizada com track
+     transparente e margem vertical grande, a scrollbar fica visualmente
+     CONTIDA dentro do card — sem passar pelos cantos arredondados.
+
+     Mecanismo de contencao:
+       1. O pai .card tem `overflow: hidden` + `border-radius: 28px`, que
+          clipam QUALQUER elemento filho (incluindo a scrollbar) pelos
+          cantos curvos do card. Nada visual passa da borda arredondada.
+       2. A `margin: 40px 0` no ::-webkit-scrollbar-track forca a area
+          ativa da scrollbar (thumb) a ficar ENTRE y=40px e y=(altura-40px),
+          longe dos cantos arredondados (o card tem raio ~28px nos cantos).
+       3. O `padding-right` reduzido compensa exatamente a largura da
+          scrollbar (10px), mantendo o conteudo centralizado dentro do
+          padding visual do card.
+  */
+  height: 100%;
+  padding: var(--card-padding);
+  padding-right: calc(var(--card-padding) - 10px);
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  /* ── Scrollbar customizada ──────────────────────────────────────────────
+   * Firefox: scrollbar-width + scrollbar-color (thumb track).
+   * WebKit/Blink: pseudo-seletores abaixo. Thumb pill cinza sobre track
+   * transparente — visualmente parece flutuar dentro do card. */
+  scrollbar-width: thin;
+  scrollbar-color: #9a9a9a transparent;
+}
+
+.cardInner::-webkit-scrollbar {
+  width: 10px;
+  background: transparent;
+}
+
+.cardInner::-webkit-scrollbar-track {
+  background: transparent;
+  /* Afasta a area ativa verticalmente dos cantos arredondados do card
+     (radius ~28px). Com 40px de margin, o thumb nunca entra na regiao
+     curva. */
+  margin: 40px 0;
+}
+
+.cardInner::-webkit-scrollbar-thumb {
+  background: #9a9a9a;
+  border-radius: 999px;
+  min-height: 48px;
+}
+
+.cardInner::-webkit-scrollbar-thumb:hover {
+  background: #6d6d6d;
+}
+
+.cardInner::-webkit-scrollbar-thumb:active {
+  background: #525252;
 }
 
 /* ── Mobile helpers (hidden on desktop) ─────────────────────────────────── */
@@ -398,15 +463,28 @@
     z-index: 25;
   }
 
-  /* Main content no mobile */
+  /* Main content no mobile — reverte o height fixo do desktop.
+     No mobile a pagina scrolla normalmente (sem sidebar fixa, o conteudo
+     flui livre e o browser faz scroll natural). */
   .main {
     margin-left: 0;
     padding: 0 1rem 1rem;
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
   }
 
   .card {
-    padding: 1.5rem 1.25rem;
     border-radius: var(--radius-card-lg);
+    height: auto;
     min-height: calc(100vh - 72px - 1rem);
+    overflow: visible;
+  }
+
+  .cardInner {
+    padding: 1.5rem 1.25rem;
+    padding-right: 1.25rem;
+    height: auto;
+    overflow: visible;
   }
 }

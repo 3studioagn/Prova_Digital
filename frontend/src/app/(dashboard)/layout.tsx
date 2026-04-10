@@ -260,7 +260,9 @@ export default function DashboardLayout({
       </aside>
 
       <main className={styles.main}>
-        <div className={styles.card}>{children}</div>
+        <div className={styles.card}>
+          <div className={styles.cardInner}>{children}</div>
+        </div>
       </main>
     </div>
   );

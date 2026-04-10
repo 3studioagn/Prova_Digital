@@ -100,7 +100,7 @@ export interface ProvaListResponse {
   pages: number;
 }
 
-/** Labels pt-BR para cada status — reutilizavel no Componente 08. */
+/** Labels pt-BR completos — usados no detalhe da prova (Componente 08). */
 export const STATUS_LABELS: Record<StatusProva, string> = {
   CRIADA: "Criada",
   RETIRADA_PELO_VENDEDOR: "Retirada pelo vendedor",
@@ -111,6 +111,22 @@ export const STATUS_LABELS: Record<StatusProva, string> = {
   ENCAMINHADA_A_CLICHERIA: "Encaminhada a clicheria",
   RECEBIDA_PELA_CLICHERIA: "Recebida pela clicheria",
   REPROVADA_PELO_VENDEDOR: "Reprovada pelo vendedor",
+  CANCELADA: "Cancelada",
+};
+
+/** Labels pt-BR curtos — usados na listagem (Componente 07), onde a coluna
+ * Status tem espaco limitado e o Figma pede versao abreviada. Preserva a
+ * distintividade de todos os 10 estados. */
+export const STATUS_LABELS_SHORT: Record<StatusProva, string> = {
+  CRIADA: "Criada",
+  RETIRADA_PELO_VENDEDOR: "Retirada",
+  APROVADA_PELO_VENDEDOR: "Aprovada",
+  DE_VOLTA_3STUDIO: "Na 3Studio",
+  COM_MOTORISTA: "Com motorista",
+  ENVIADA_PARA_CLICHERIA: "Enviada",
+  ENCAMINHADA_A_CLICHERIA: "Encaminhada",
+  RECEBIDA_PELA_CLICHERIA: "Na clicheria",
+  REPROVADA_PELO_VENDEDOR: "Reprovada",
   CANCELADA: "Cancelada",
 };
 

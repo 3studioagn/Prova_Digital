@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { ProvaListResponse, Rota, StatusProva } from "@/lib/types/prova";
 
@@ -25,17 +25,26 @@ interface State {
 const INITIAL: State = { loading: true, error: null, data: null };
 
 /**
- * Encapsula GET /api/v1/provas/ com debounce para campos textuais.
+ * Encapsula GET /api/v1/provas/.
  *
  * O estado local do hook nao lida com a URL — a pagina `/provas` usa
- * `useSearchParams` para sincronizar a URL (ADR-Q07.3) e passa os
- * filtros atuais para `load()` a cada mudanca. Campos textuais (busca,
- * cliente) passam pelo debounce interno de 300ms antes de disparar
- * load — selects/dates disparam imediato.
+ * `useSearchParams` para sincronizar a URL e passa os filtros atuais
+ * para `load()` a cada mudanca.
+ *
+ * O debounce para campos textuais (busca, cliente) e feito NA PAGINA
+ * via setTimeout local em handleBuscaChange/handleClienteChange que
+ * atualizam a URL; o useEffect reage a mudanca da URL e chama `load()`.
+ * O hook nao precisa de debounce proprio. (Ate a Sessao 18 este hook
+ * exportava um `loadDebounced` que nunca foi chamado pela pagina — dead
+ * code removido na auditoria Wave 2 Sessao 19, A4.)
+ *
+ * Protecao contra race: `latestReqRef` garante que apenas o resultado
+ * do load() mais recente atualiza o estado, descartando responses
+ * fora-de-ordem se o usuario mudar filtros enquanto uma request esta
+ * em voo.
  */
 export function useListProvas(getToken: () => Promise<string | null>) {
   const [state, setState] = useState<State>(INITIAL);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestReqRef = useRef<number>(0);
 
   const load = useCallback(
@@ -90,27 +99,5 @@ export function useListProvas(getToken: () => Promise<string | null>) {
     [getToken],
   );
 
-  /**
-   * Variante com debounce de 300ms — usar em campos textuais (busca, cliente).
-   * Uma chamada cancela o timer anterior, entao digitos rapidos disparam
-   * apenas 1 request no final.
-   */
-  const loadDebounced = useCallback(
-    (filters: ListProvasFilters) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        load(filters);
-      }, 300);
-    },
-    [load],
-  );
-
-  // Cleanup do timer quando o componente desmonta.
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, []);
-
-  return { ...state, load, loadDebounced };
+  return { ...state, load };
 }

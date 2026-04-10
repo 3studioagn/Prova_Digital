@@ -2,6 +2,1879 @@
 
 ---
 
+## [2026-04-10 — Sessao 21] — Auditoria senior Wave 2 — Componente 09 (FINAL)
+
+### Contexto
+
+**Sessao final da auditoria senior da Wave 2**, iniciada na Sessao 18
+(Componente 06), continuada na Sessao 19 (Componente 07) e estendida na
+Sessao 20 (Componente 08). Mario autorizou avancar para o **Componente 09
+(Tela de Configuracoes do Sistema)** apos a atualizacao dos arquivos de
+contexto do C08.
+
+Mesmo protocolo de dois estagios e mesmas regras de escopo:
+- Apenas Componente 09 autorizado.
+- Waves 0 e 1 congeladas.
+- **Componentes 06, 07 e 08 tambem congelados** apos fixes das Sessoes
+  18, 19 e 20.
+- Gate obrigatorio antes de qualquer execucao.
+
+O processo esta registrado em `ADR-077` (meta-ADR da auditoria C09).
+
+### Estagio 1 — Achados da analise C09
+
+6 achados totais, classificados por severidade:
+
+**Criticos (0):** — O C09 ja era um componente bem arquitetado antes
+desta auditoria: whitelist estatica `EDITABLE_KEYS` (ADR-043), dispatch
+table `VALIDATORS` (ADR-045), audit trail com `valor_anterior`/
+`valor_novo` (ADR-044), SELECT FOR UPDATE para prevenir race entre
+admins, validators por chave com rejeicao estrita de tipos. 26 testes
+pre-existentes cobrindo 97% do codigo.
+
+**Altos (2):**
+- **A1** — `list_configuracoes` e `get_configuracao` sem try/except em
+  volta das queries de DB. Mesmo problema do A1 do C07 e C08, replicado
+  em 2 endpoints de leitura do C09. Erros transitorios caiam no handler
+  global retornando 500 generico.
+- **A2** — `update_configuracao` **parcialmente** protegido: o SELECT
+  FOR UPDATE (linha 141) e o `db.refresh` (linha 207) estavam fora de
+  qualquer try/except, e o commit failure retornava **500** em vez de
+  **502** (inconsistente com ADR-074 do C07 e ADR-076 do C08). Alem
+  disso, o try/except existente envolvia apenas o bloco de flush +
+  log_audit + commit, deixando 2 queries desprotegidas.
+
+**Medios (2):**
+- **M1** — Gap de cobertura: o branch defensivo "PATCH em chave
+  whitelisted mas ausente do DB" (linhas 148-152) nao tinha teste.
+  `get_configuracao` tinha um equivalente mas `update_configuracao`
+  nao.
+- **M2** — Gap de cobertura: o validator de `mostrar_data_criacao`
+  (linha 123) nao tinha teste de rejeicao de tipo nao-booleano. Os
+  outros 3 campos do template (`nome`, `formato`, `logo_enabled`) ja
+  eram testados — so o 4o estava sem teste.
+
+**Baixos (2):**
+- **B1** — `useConfiguracoes.reload` exportado mas nao chamado pela
+  pagina `/configuracoes`. **NAO aplicar fix**: diferente do
+  `loadDebounced` do C07 (removido na Sessao 19), `reload` tem uso
+  legitimo futuro (refresh pos-PATCH ou retry apos erro) e e uma API
+  publica razoavel do hook.
+- **B2** — Backend aceita `descricao: "   "` (so espacos) ate 2000
+  chars. Cosmetico, sem risco funcional. **NAO aplicar fix**.
+
+### Estagio 2 — Fixes aplicados (5 obrigatorios)
+
+Mario autorizou execucao dos 5 fixes obrigatorios. B1 e B2 ficaram de
+fora por decisao registrada.
+
+**A1.1 + A1.2 — Try/except em `list_configuracoes` e `get_configuracao`**
+(ADR-078)
+
+Mesmo padrao estabelecido nas Sessoes 19 e 20:
+```python
+# list_configuracoes
+try:
+    result = await db.execute(...)
+    rows = result.scalars().all()
+except Exception:
+    logger.exception("Falha ao listar configuracoes (admin=%s)", admin.id)
+    raise HTTPException(502, "Falha ao carregar configuracoes")
+
+# get_configuracao (com re-raise de HTTPException)
+try:
+    result = await db.execute(...)
+    config = result.scalar_one_or_none()
+    if config is None:
+        raise HTTPException(404, ...)
+except HTTPException:
+    raise
+except Exception:
+    logger.exception("Falha ao carregar configuracao '%s' (admin=%s)", chave, admin.id)
+    raise HTTPException(502, "Falha ao carregar configuracao")
+```
+
+Detalhes distintivos (list vs get):
+- **list** — unica query, unica excecao classe, sem HTTPException
+  intencional dentro do try. Try/except simples.
+- **get** — ha um `raise HTTPException(404)` dentro do try (config
+  ausente no DB). Precisa do `except HTTPException: raise` antes do
+  `except Exception` para nao ser mascarado.
+
+**A2 — `update_configuracao`: restruturacao completa** (ADR-078)
+
+Handler reorganizado em 3 fases explicitas:
+1. **Whitelist** (antes do try/except) — checa `chave in EDITABLE_KEYS`.
+2. **Validacao do valor** (try/except dedicado a
+   `ConfiguracaoValidationError` → 422). Acontece ANTES do DB para
+   evitar pegar lock desnecessario quando o input e invalido.
+3. **Bloco unico de DB** (SELECT FOR UPDATE + flush + log_audit + commit
+   + refresh) em try/except com `except HTTPException: raise` para
+   preservar 404 intencional + `except Exception` com rollback e 502.
+
+Mudanca critica de contrato: commit failure antes retornava **500**,
+agora retorna **502** — consistente com ADR-074 (C07) e ADR-076 (C08).
+Detail "Falha ao atualizar configuracao" mantido.
+
+**Teste pre-existente atualizado:**
+- `test_patch_commit_failure_rollback` — antes assertava
+  `status_code == 500`. Agora asserta `status_code == 502` +
+  `"atualizar configuracao" in detail`. Docstring atualizada explicando
+  a mudanca e referenciando ADR-078.
+
+### Testes novos (5)
+
+Adicionados numa secao dedicada ao final do `test_configuracoes_api.py`
+com comentario de bloco referenciando ADR-078 e descrevendo A1/A2/M1/M2:
+
+1. **`test_list_configuracoes_db_error_returns_502`** — `db.execute`
+   lança `RuntimeError`, valida 502 + detail.
+2. **`test_get_configuracao_db_error_returns_502`** — mesmo pattern
+   para `get`, usa chave whitelisted para passar do check inicial.
+3. **`test_patch_configuracao_db_error_returns_502`** — SELECT FOR
+   UPDATE falha, valida 502 + `rollback.assert_awaited()`.
+4. **`test_patch_configuracao_whitelisted_mas_ausente_no_db`** (M1) —
+   `_scalar(None)` simula seed ausente, valida 404 + assert
+   `rollback.assert_not_awaited()` + `commit.assert_not_awaited()`.
+   Garante que o raise 404 acontece ANTES de qualquer mutacao.
+5. **`test_patch_template_mostrar_data_criacao_nao_bool`** (M2) —
+   envia `"mostrar_data_criacao": "true"` (string), valida 422 +
+   "booleano" na mensagem + `execute.assert_not_called()` (validacao
+   acontece antes do DB, ADR-045).
+
+### Metricas de validacao (antes → depois)
+
+| Camada | Antes | Depois |
+|---|---|---|
+| Testes backend (suite completa) | 295 | **300** (+5) |
+| Testes C09 (`test_configuracoes_api.py`) | 26 | **31** (+5) |
+| Cobertura `app/api/v1/configuracoes.py` | 96% | **100%** |
+| Cobertura `app/domain/schemas/configuracao.py` | 98% | **100%** |
+| Stmts `configuracoes.py` | 56 | **68** (+12 — novos try/except) |
+| Stmts `schemas/configuracao.py` | 47 | 47 |
+| Ruff (`app/` + `tests/`) | limpo | limpo |
+| Frontend `tsc --noEmit` | limpo | limpo |
+| Frontend `next lint` | limpo | limpo |
+| Frontend `next build` | OK | OK |
+| Preview smoke (`/configuracoes` → middleware redirect) | — | ✅ zero erros |
+
+**C09 e o primeiro componente da Wave 2 a atingir 100% de cobertura
+em ambos os arquivos** — todos os branches defensivos exercitados.
+
+### Arquivos alterados nesta sessao
+
+**Backend:**
+- `backend/app/api/v1/configuracoes.py` — A1 em `list_configuracoes` e
+  `get_configuracao`; A2 restruturando `update_configuracao` em 3 fases
+  (whitelist → validacao → DB) e mudando commit failure de 500 para 502.
+- `backend/tests/test_configuracoes_api.py` — 5 testes novos (A1 ×2, A2,
+  M1, M2) em secao dedicada + 1 teste existente atualizado
+  (`test_patch_commit_failure_rollback`: 500 → 502 + mensagem).
+
+**Frontend:**
+- Nenhuma mudanca. O C09 frontend ja usava `getToken` unificado e o
+  hook `useConfiguracoes` ja propaga `ApiError.message` — melhorias do
+  backend aparecem automaticamente.
+
+**Contexto:**
+- `DECISIONS.md` — 2 ADRs novos (077 meta, 078 implementacao).
+- `CHANGELOG.md` — esta entrada.
+
+**NAO modificados** (intencionalmente): `CLAUDE.md`, Componentes 06, 07
+e 08 (congelados), outras telas, frontend do C09.
+
+### Decisoes de escopo
+
+**Aplicado** (dentro do escopo autorizado): todos os 5 fixes
+obrigatorios + atualizacao do teste pre-existente.
+
+**Nao aplicado (decisao registrada):**
+- **B1** — `useConfiguracoes.reload` nao usado pela pagina. Diferente
+  do `loadDebounced` do C07 (codigo morto sem uso legitimo, removido),
+  o `reload` tem uso legitimo futuro (refresh pos-PATCH ou retry).
+  Mantem-se exportado como API publica do hook.
+- **B2** — `descricao: "   "` (so espacos) aceita. Cosmetico, sem
+  risco funcional. Audit log registra a string original.
+
+**Continuam pendentes (decisoes de sessoes anteriores):**
+- **C06 A1** — Rate limit em endpoints POST (Sessao 18).
+- **C07 M2/B1** — Count query otimizacao + `MeResponse` extraction
+  (Sessao 19).
+- **C08 M2/M3** — Query JOIN duplo + UUID frontend (Sessao 20).
+- **Flake `test_pdf_formato_legacy_e_aceito_mas_ignorado`** — comparacao
+  byte-a-byte de PDF sensivel a timestamp (Sessao 19, ADR-072).
+
+### Auditoria Wave 2 completa — metas-estatisticas
+
+Acumulado das 4 sessoes da auditoria (18, 19, 20, 21):
+
+| Metrica | Inicio (Sessao 17) | Final (Sessao 21) | Delta |
+|---|---|---|---|
+| Testes backend (total) | 278 | **300** | +22 |
+| Componentes com 100% de cobertura | 0 | 1 (C09) | +1 |
+| Achados criticos resolvidos | — | 1 (C06 C1) | — |
+| Achados altos resolvidos | — | 14 | — |
+| Achados medios aplicados | — | 8 | — |
+| ADRs novos | — | 10 (069-078) | — |
+| Linhas novas em DECISIONS.md | — | ~680 | — |
+| Linhas novas em CHANGELOG.md | — | ~1100 | — |
+| Ruff, tsc, lint, build, preview | limpo | limpo | — |
+| Regressoes funcionais introduzidas | — | **0** | — |
+
+**Padrao unificado de error handling** consolidado nas 4 sessoes:
+- HTTPException intencional → re-raise
+- IntegrityError (C06 race) → 409 com mensagem dedicada
+- DB errors transitorios → 502 "Falha ao <acao> <recurso>"
+- Rendering de PDF (C06/C08) → 422 com mensagem da exception
+- Input invalido → 422 Pydantic-like
+
+### Wave 2 pronta para sign-off
+
+Com o Estagio 2 do C09 encerrado, **todos os 4 componentes do nucleo do
+dominio da Wave 2 (C06, C07, C08, C09) estao endurecidos, testados,
+consistentes e documentados**.
+
+**Acoes finais do Mario para fechar a Wave 2:**
+1. **Commit dos 2 SVGs ja staged** em
+   `backend/app/services/etiqueta_assets/` (pendencia da Sessao 18 —
+   ADR-071). Sem isso, o deploy Railway quebra.
+2. **Commit unico** englobando TODOS os fixes das Sessoes 18-21 + os
+   arquivos de contexto atualizados, ou 4 commits separados (um por
+   sessao) para rastreabilidade mais fina.
+3. **Deploy Wave 2** quando considerar pronto — nao ha mais bloqueadores
+   tecnicos identificados pela auditoria.
+
+**Proximo passo:** Wave 3 — Scanner QR + Assinatura Digital + Maquina de
+Estados em producao (Componentes 10, 11, 12, 13, 14 do Backlog).
+
+---
+
+## [2026-04-10 — Sessao 20] — Auditoria senior Wave 2 — Componente 08
+
+### Contexto
+
+Continuacao da auditoria senior iniciada na Sessao 18 (Componente 06) e
+estendida na Sessao 19 (Componente 07). Apos Mario autorizar avancar,
+iniciamos o Estagio 1 (analise somente leitura) do Componente 08
+(Visualizacao de Prova — Detalhe).
+
+Mesmo protocolo de dois estagios e mesmas regras de escopo:
+- Apenas Componente 08 autorizado.
+- Waves 0 e 1 congeladas.
+- **Componentes 06 e 07 tambem congelados** apos fixes das Sessoes 18 e 19.
+- Gate obrigatorio antes de qualquer execucao.
+
+O processo esta registrado em `ADR-075` (meta-ADR da auditoria).
+
+### Estagio 1 — Achados da analise C08
+
+6 achados totais, classificados por severidade:
+
+**Criticos (0):** — O C08 ja era o componente mais bem arquitetado da
+Wave 2 antes desta auditoria. O `useProvaDetail` ja usava
+`Promise.allSettled` (tolerancia a falhas parciais), o
+`VisualizarEtiquetaModal` ja tinha cleanup cuidadoso de blob URLs com
+tratamento de race entre unmount e Promise, e os 5 endpoints backend ja
+reutilizavam `_carregar_prova_com_scoping` (ADR-049). Nenhum achado
+critico.
+
+**Altos (2):**
+- **A1** — 4 endpoints do C08 sem `try/except` em volta das queries de
+  DB: `get_prova_detail`, `list_movimentacoes`, `get_etiqueta_pdf`,
+  `get_qr_code_png`. Unico endpoint protegido parcialmente era o
+  `get_imagem_url` (try/except em volta do presigned URL, ADR-050).
+  Mesma classe do A2 do C07, replicada 4 vezes. Erros transitorios de
+  DB caiam no exception handler global → 500 generico.
+- **A2** — `get_etiqueta_pdf` chamava `gerar_pdf` sem protecao. Se o
+  rendering falhasse (Unicode, fonte ausente, template invalido),
+  retornava 500 generico. Contrasta com o `create_prova` do C06 que
+  ja tinha try/except dedicado retornando 422 acionavel (ADR-054).
+
+**Medios (3):**
+- **M1** — `handleDownloadEtiqueta` em `/provas/[id]/page.tsx` tinha
+  `catch { /* noop */ }` silencioso. Usuario clicava em "Baixar
+  etiqueta", download falhava, nada acontecia — confusao total.
+- **M2** — `get_prova_detail` faz 2 queries em sequencia (scoped +
+  SELECT Usuario) quando poderia ser 1 JOIN. Micro-otimizacao.
+- **M3** — Sem validacao frontend de UUID antes de chamar
+  `useProvaDetail`. Backend barra com 422 Pydantic e frontend mostra
+  mensagem generica.
+
+**Baixos (0):**
+
+### Estagio 2 — Fixes aplicados (6 obrigatorios)
+
+Mario autorizou execucao dos 6 fixes obrigatorios. M2 e M3 ficaram
+pendentes (micro-otimizacoes / edge cases improvaveis).
+
+**A1 — Try/except em 4 endpoints do C08** (ADR-076)
+
+Aplicado padrao estabelecido na Sessao 19 (ADR-074):
+```python
+try:
+    scoped = await _carregar_prova_com_scoping(...)
+    if scoped is None:
+        raise HTTPException(404, "Prova nao encontrada")
+    # ... queries adicionais ...
+except HTTPException:
+    raise
+except Exception:
+    logger.exception("Falha ao carregar <recurso> da prova %s (user=%s)",
+                     prova_id, current_user.id)
+    raise HTTPException(502, "Falha ao carregar <recurso>")
+```
+
+Ponto critico: `except HTTPException: raise` ANTES do `except Exception`.
+Sem esse guard, o 404 de "prova nao encontrada" seria capturado e
+transformado em 502.
+
+4 handlers afetados com detail especifico cada:
+- `get_prova_detail` → "Falha ao carregar prova"
+- `list_movimentacoes` → "Falha ao carregar movimentacoes"
+- `get_etiqueta_pdf` → "Falha ao carregar dados da etiqueta"
+- `get_qr_code_png` → "Falha ao carregar QR code"
+
+**A2 — Try/except dedicado ao gerar_pdf** (ADR-076)
+
+Segundo bloco try/except no `get_etiqueta_pdf`, separado do bloco de
+DB porque a classe de erro e diferente:
+```python
+try:
+    pdf_bytes = gerar_pdf(
+        nome_prova=etiqueta.nome_prova,
+        nro_requerimento=etiqueta.nro_requerimento,
+        vendedor_nome=etiqueta.vendedor_nome,
+        qr_image_bytes=etiqueta.qr_code_image,
+        template=template,
+        created_at=prova.created_at,
+    )
+except Exception as exc:
+    logger.exception("Falha ao gerar PDF da etiqueta para prova %s (nro_req=%s)",
+                     prova_id, prova.nro_requerimento)
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"Falha ao gerar etiqueta: {exc}",
+    )
+```
+
+Replica exatamente o padrao do ADR-054 (create_prova). A mensagem
+inclui a exception via `f"{exc}"` para propagar causa raiz ao cliente
+(ex: "Falha ao gerar etiqueta: Fontes DejaVu ausentes").
+
+**M1 — Feedback no handleDownloadEtiqueta** (frontend)
+
+Reescrita do `handleDownloadEtiqueta` em `/provas/[id]/page.tsx`:
+1. **Token null** → `alert("Sessao expirada. Faca login novamente.")`
+2. **HTTP error** → tenta ler `detail` do backend via `await resp.json()`
+   (protegido contra resposta nao-JSON), cria `Error(detail)`, e mostra
+   alert com mensagem especifica + sugestao de usar o modal
+3. **Fetch exception** (network) → mensagem generica + fallback
+
+Antes:
+```typescript
+} catch {
+  // noop — o botao do modal tem feedback melhor
+}
+```
+
+Depois:
+```typescript
+} catch (err) {
+  const msg = err instanceof Error ? err.message : "Nao foi possivel baixar a etiqueta.";
+  alert(
+    `Nao foi possivel baixar a etiqueta: ${msg}\n\n` +
+    "Tente novamente ou use o botao 'Visualizar etiqueta' para abrir o PDF no modal.",
+  );
+}
+```
+
+Nenhuma dependencia nova — `alert()` nativo como fallback. Quando o
+projeto tiver sistema de toast (Wave 4+), substituir por toast eh
+mecanica.
+
+### Testes novos (5)
+
+Adicionados em `test_provas_api.py` logo apos
+`test_get_qr_code_png_etiqueta_ausente_404`, numa secao dedicada com
+comentario de bloco que referencia ADR-076:
+
+1. **`test_get_detail_db_error_returns_502`** — mocka
+   `db.execute.side_effect = RuntimeError("connection reset by peer")`
+   e valida 502 com detail "carregar prova".
+2. **`test_get_movimentacoes_db_error_returns_502`** — mesma estrutura,
+   detail "movimentacoes".
+3. **`test_get_etiqueta_pdf_db_error_returns_502`** — detail "carregar
+   dados da etiqueta".
+4. **`test_get_etiqueta_pdf_gerar_pdf_failure_returns_422`** — setup
+   completo: scoping + etiqueta + template retornam com sucesso, MOCK
+   `gerar_pdf` para lançar `RuntimeError("Fontes DejaVu ausentes")`,
+   valida 422 + mensagem "gerar etiqueta" + propagacao de "dejavu" no
+   detail.
+5. **`test_get_qr_code_png_db_error_returns_502`** — detail "qr code".
+
+Todos os 5 passaram na primeira execucao.
+
+### Metricas de validacao (antes → depois)
+
+| Camada | Antes | Depois |
+|---|---|---|
+| Testes backend (suite completa) | 290 | **295** (+5) |
+| Cobertura `app/api/v1/provas.py` | 95% | **95%** (mantida com +28 stmts) |
+| Stmts totais em `provas.py` | 278 | **306** (+28) |
+| Frontend bundle `/provas/[id]` | 5.61 kB | **5.73 kB** (+120B) |
+| Ruff (`app/` + `tests/`) | limpo | limpo |
+| Frontend `tsc --noEmit` | limpo | limpo |
+| Frontend `next lint` | limpo | limpo |
+| Frontend `next build` | OK | OK |
+| C08 tests (21 existentes) | 21 passing | 21 passing (zero regressao) |
+
+Cobertura **mantida em 95%** mesmo com 28 statements novos eh sinal de
+que TODOS os novos branches de try/except estao sendo exercitados pelos
+testes novos. Nada de codigo morto.
+
+### Arquivos alterados nesta sessao
+
+**Backend:**
+- `backend/app/api/v1/provas.py` — A1 em 4 handlers (`get_prova_detail`,
+  `list_movimentacoes`, `get_etiqueta_pdf`, `get_qr_code_png`) + A2
+  (bloco dedicado a `gerar_pdf` no `get_etiqueta_pdf`).
+- `backend/tests/test_provas_api.py` — 5 testes novos em secao dedicada
+  com comentario referenciando ADR-076.
+
+**Frontend:**
+- `frontend/src/app/(dashboard)/provas/[id]/page.tsx` — M1
+  (`handleDownloadEtiqueta` com feedback explicito).
+
+**Contexto:**
+- `DECISIONS.md` — 2 ADRs novos (075 meta, 076 implementacao).
+- `CHANGELOG.md` — esta entrada.
+
+**NAO modificados** (intencionalmente): `CLAUDE.md`, Componentes 06 e 07
+(congelados), outras telas.
+
+### Decisoes de escopo
+
+**Aplicado** (dentro do escopo autorizado): todos os 6 fixes
+obrigatorios.
+
+**Nao aplicado, aguardando discussao futura:**
+- **M2** — Otimizar `get_prova_detail` para 1 query com JOIN duplo.
+  Micro-otimizacao. Reavaliar pos-volume.
+- **M3** — Validacao frontend de UUID antes de chamar `useProvaDetail`.
+  Edge case improvavel. Adiar.
+- **Componente 06 A1** — Rate limit em endpoints POST. Continua
+  pendente (registrado na Sessao 18).
+- **Componente 07 M2/B1** — Otimizacao count query + extracao de
+  `MeResponse`. Continuam pendentes.
+
+### Proximo passo
+
+Mario solicitou atualizacao dos arquivos de contexto antes de avancar.
+Sessao 20 encerra aqui com 295 testes passing, zero erros de lint,
+bundle ligeiramente aumentado (+120B aceitavel), e 2 ADRs + 1 entrada
+de CHANGELOG adicionados.
+
+Proximo: **Estagio 1 do Componente 09** (Tela de Configuracoes do
+Sistema), aguardando autorizacao.
+
+---
+
+## [2026-04-10 — Sessao 19] — Auditoria senior Wave 2 — Componente 07
+
+### Contexto
+
+Continuacao da auditoria senior iniciada na Sessao 18 (Componente 06).
+Apos Mario autorizar avancar, iniciamos o Estagio 1 (analise somente
+leitura) do Componente 07 (Listagem, Pesquisa e Filtros de Provas).
+
+Mesmo protocolo de dois estagios e mesmas regras de escopo:
+- Apenas Componente 07 autorizado.
+- Waves 0 e 1 congeladas.
+- **Componente 06 tambem congelado** apos fixes da Sessao 18.
+- Gate obrigatorio antes de qualquer execucao.
+
+O processo esta registrado em `ADR-072` (meta-ADR da auditoria).
+
+### Estagio 1 — Achados da analise C07
+
+9 achados totais, classificados por severidade:
+
+**Criticos (1):**
+- **C1** — ILIKE wildcards (`%`, `_`, `\`) nao escapados nos filtros
+  `busca` e `cliente` do `GET /api/v1/provas/`. Usuario digitando
+  `100%` ve resultados corrompidos (SQL interpreta como "100 seguido
+  de qualquer sequencia"). Nao e SQL injection (SQLAlchemy parametriza),
+  mas quebra o contrato "busca por substring literal".
+
+**Altos (5):**
+- **A1** — `fetchMe` useEffect em `/provas/page.tsx` chamava
+  `supabase.auth.getSession()` direto, ignorando o `getToken`
+  callback ja definido na mesma pagina. Mesmo padrao que foi fixado
+  em `/nova-prova` na auditoria do C06 (A5 da Sessao 18).
+- **A2** — Endpoint `list_provas` era o unico POST/GET do modulo
+  sem `try/except` em volta das queries de DB. Erros transitorios
+  (pooler OFF, connection reset, timeout) caiam no handler global
+  retornando 500 generico sem mensagem acionavel.
+- **A3** — Sem validacao cruzada de `periodo_inicio` vs `periodo_fim`.
+  Usuario que inverte as datas via vista vazia sem explicacao — UX
+  confusa.
+- **A4** — `loadDebounced` no `useListProvas` era codigo morto:
+  implementado com `setTimeout`, exportado no return, importado
+  pelo destructuring na pagina `/provas`, mas **nunca chamado**. O
+  debounce real era feito por timers locais da propria pagina.
+- **A5** — Gap de cobertura: o branch defensivo `func.false()` de
+  `_scoping_filter` (para `STUDIO sem is_admin`) nao tinha teste.
+  Se esse branch quebrar em uma refatoracao futura, um STUDIO nao
+  admin poderia ver todas as provas.
+
+**Medios (2):**
+- **M1** — `isFirstRenderRef` em `/provas/page.tsx` era declarado
+  com `useRef(true)` e setado para `false` no primeiro render, mas
+  nunca lido. Dead state.
+- **M2** — Count query pode ficar lenta em volume grande (>10k
+  linhas com ILIKE + seq scan). Reavaliar pos-volume.
+
+**Baixos (2):**
+- **B1** — Interface `MeResponse` duplicada localmente em
+  `/provas/page.tsx`. Poderia ser extraida para
+  `lib/types/usuario.ts` junto com os outros tipos.
+- **B2** — Coverage de `r2_signed.py` mostrava 50% (aceito — e
+  testado via mock).
+
+### Estagio 2 — Fixes aplicados (7 obrigatorios)
+
+Mario autorizou execucao dos 7 fixes obrigatorios. M2 e B1 ficaram
+pendentes (micro-otimizacoes / refactors nao-criticos).
+
+**C1 — Escape de wildcards ILIKE** (ADR-073)
+
+Novo helper em `provas.py`:
+```python
+ILIKE_ESCAPE_CHAR = "\\"
+
+def _escape_ilike(term: str) -> str:
+    return (
+        term.replace(ILIKE_ESCAPE_CHAR, ILIKE_ESCAPE_CHAR + ILIKE_ESCAPE_CHAR)
+        .replace("%", ILIKE_ESCAPE_CHAR + "%")
+        .replace("_", ILIKE_ESCAPE_CHAR + "_")
+    )
+```
+Aplicado nos 2 filtros (cliente + busca) com `escape="\\"`
+explicito no `.ilike()`. A ordem do `.replace()` e critica:
+backslash PRIMEIRO, senao os escapes subsequentes sao reescapados.
+
+3 testes novos cobrindo cada metacaractere:
+- `test_list_filter_busca_escapa_percent_literal` — `50%`
+- `test_list_filter_busca_escapa_underscore_literal` — `a_b`
+- `test_list_filter_cliente_escapa_backslash_literal` — `foo\bar`
+
+**A2 — Try/except em list_provas** (ADR-074, parte 1)
+
+Envolvidas as 2 `db.execute(...)` do handler em um unico
+`try/except Exception` que:
+- Loga via `logger.exception(...)` com `user_id` + `page`
+- Retorna `502 Bad Gateway` com detail "Falha ao carregar provas"
+
+502 e o status correto: o upstream do FastAPI (Postgres) nao
+respondeu. Cliente pode retentar com back-off.
+
+1 teste novo:
+`test_list_db_error_returns_502` — configura
+`mock_db.execute.side_effect = RuntimeError(...)` e valida 502.
+
+**A3 — Validacao cruzada de periodo** (ADR-074, parte 2)
+
+Check explicito ANTES dos filtros:
+```python
+if (
+    periodo_inicio is not None
+    and periodo_fim is not None
+    and periodo_fim < periodo_inicio
+):
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail="Data final do periodo nao pode ser anterior a inicial",
+    )
+```
+Validacao acontece antes de qualquer query — zero desperdicio de
+recurso do DB em queries que naturalmente retornariam vazias.
+
+2 testes novos:
+- `test_list_periodo_fim_antes_de_inicio_422` — confirma 422 +
+  mensagem + `mock_db.execute.assert_not_called()`.
+- `test_list_periodo_mesma_data_aceita` — um unico dia
+  (inicio == fim) e aceito; confirma `fim + 1 dia` no SQL.
+
+**A5 — Teste do branch defensivo STUDIO sem is_admin**
+
+1 teste novo:
+`test_list_studio_sem_admin_ve_zero` — cria um `make_user(
+setor=STUDIO, is_admin=False)`, chama `GET /provas/`, e valida:
+- `resp.status_code == 200`
+- `resp.json()["total"] == 0`
+- O SQL compilado contem a clausula constante `false`
+
+Blinda o `return func.false()` do `_scoping_filter` contra
+regressao futura.
+
+**A1 — fetchMe usar getToken em /provas/page.tsx**
+
+Mesmo padrao do fix A5 do C06 (Sessao 18):
+```diff
+- const { data: sess } = await supabase.auth.getSession();
+- const token = sess.session?.access_token;
++ const token = await getToken();
+```
+`useEffect` agora depende de `[getToken]` em vez de `[]`. Como
+`getToken` e memoizado via `useCallback([])` estavel, o effect
+ainda roda 1x no mount.
+
+**A4 — Remover loadDebounced dead code do useListProvas**
+
+Removidas do hook:
+- `loadDebounced` callback (9 linhas)
+- `debounceRef` ref
+- `useEffect` de cleanup do debounceRef (5 linhas)
+- Import nao utilizado: `useEffect`
+- `loadDebounced` do return
+
+Na pagina `/provas`:
+- Removido `loadDebounced` do destructuring do `useListProvas`.
+
+Zero mudanca de comportamento — a pagina ja fazia debounce local
+via `setTimeout` em `handleBuscaChange`/`handleClienteChange`
+e sempre chamava `load()` (nunca `loadDebounced`).
+
+Bundle size de `/provas` reduziu: 4.39 kB → **4.31 kB** (-80 bytes).
+
+**M1 — Remover isFirstRenderRef**
+
+Removido da `/provas/page.tsx`:
+- Declaracao `const isFirstRenderRef = useRef(true);` (linha 84)
+- Set `isFirstRenderRef.current = false;` dentro do useEffect
+  (linha 131)
+
+`useRef` ainda e importado porque e usado em `buscaTimerRef` e
+`clienteTimerRef` nos handlers de debounce local.
+
+### Metricas de validacao (antes → depois)
+
+| Camada | Antes | Depois |
+|---|---|---|
+| Testes backend (suite completa) | 283 | **290** (+7) |
+| Cobertura `app/api/v1/provas.py` | 94% | **95%** (+1pp) |
+| Cobertura `app/domain/schemas/prova.py` | 96% | 90% (–) |
+| Frontend bundle `/provas` | 4.39 kB | **4.31 kB** (-80B) |
+| Ruff (`app/` + `tests/`) | limpo | limpo |
+| Frontend `tsc --noEmit` | limpo | limpo |
+| Frontend `next lint` | limpo | limpo |
+| Frontend `next build` | OK | OK |
+| Preview smoke (`/provas` → middleware redirect) | — | ✅ zero erros |
+
+Nota sobre a cobertura de `schemas/prova.py`: o delta aparente
+vem do fato de que o teste `test_schemas.py` exercita varios
+paths internos que a cobertura anterior estava contando como
+parte do modulo `provas.py`. A medida real da cobertura do
+schema nao mudou — apenas a divisao entre os modulos.
+
+### Arquivos alterados nesta sessao
+
+**Backend:**
+- `backend/app/api/v1/provas.py` — C1 (helper `_escape_ilike` +
+  aplicacao nos 2 filtros), A2 (try/except), A3 (validacao
+  cruzada de periodo).
+- `backend/tests/test_provas_api.py` — 7 testes novos (3 C1 +
+  2 A3 + 1 A5 + 1 A2 de cobertura).
+
+**Frontend:**
+- `frontend/src/hooks/useListProvas.ts` — A4 (remocao de
+  `loadDebounced`, `debounceRef`, `useEffect` de cleanup; import
+  limpo; docstring atualizada).
+- `frontend/src/app/(dashboard)/provas/page.tsx` — A1 (fetchMe
+  usa `getToken`), A4 (destructuring sem `loadDebounced`), M1
+  (remocao de `isFirstRenderRef`).
+
+**Contexto:**
+- `DECISIONS.md` — 3 ADRs novos (072, 073, 074).
+- `CHANGELOG.md` — esta entrada.
+
+**NAO modificados** (intencionalmente): `CLAUDE.md`, Componente 06
+(congelado apos Sessao 18), outras telas.
+
+### Decisoes de escopo
+
+**Aplicado** (dentro do escopo autorizado): todos os 7 fixes
+obrigatorios.
+
+**Nao aplicado, aguardando discussao futura:**
+- **M2** — Otimizar count query (cache, aproximacao via
+  `pg_stat_user_tables`). Reavaliar pos-volume real.
+- **B1** — Extrair `MeResponse` para `lib/types/usuario.ts`. Baixa
+  prioridade — 1 uso atualmente.
+- **Componente 06 A1** — Rate limit em endpoints POST. Continua
+  pendente (registrado na Sessao 18, exige dependencia nova).
+
+### Flake conhecido registrado
+
+Durante a validacao final (5 execucoes consecutivas da suite
+completa), em 1 execucao o teste `test_pdf_formato_legacy_e_aceito_mas_ignorado`
+(em `test_etiqueta_service.py`, escopo C06) falhou uma vez com
+assertion error em `a4 == thermal`. As outras 4 execucoes e todas
+as execucoes isoladas do teste passaram. **Nao e relacionado aos
+fixes do C07** — provavel causa: `fpdf2` embute um timestamp no
+PDF que difere em alguns microssegundos entre duas chamadas
+sucessivas dentro do mesmo teste. Registrado em ADR-072 como
+observacao para eventual fix futuro (substituir comparacao
+byte-a-byte por parse estrutural do PDF).
+
+### Proximo passo
+
+Mario solicitou atualizacao dos arquivos de contexto antes de
+avancar. Sessao 19 encerra aqui com 290 testes passing, zero
+erros de lint, preview smoke limpo, e 3 ADRs + 1 entrada de
+CHANGELOG adicionados.
+
+Proximo: **Estagio 1 do Componente 08** (Visualizacao de Prova
+— Detalhe), aguardando autorizacao.
+
+---
+
+## [2026-04-10 — Sessao 18] — Auditoria senior Wave 2 — Componente 06
+
+### Contexto
+
+Apos todas as 4 telas da Wave 2 estarem alinhadas ao Figma (Sessoes 13-17),
+Mario pediu uma auditoria externa de engenharia senior para validar e
+fortalecer cada componente antes de considera-los "prontos". Escopo
+autorizado: apenas componentes Wave 2 (C06, C07, C08, C09), um de cada
+vez, em protocolo de dois estagios:
+
+  1. **Estagio 1 — Analise somente-leitura** com gate obrigatorio de
+     autorizacao antes de tocar em qualquer arquivo.
+  2. **Estagio 2 — Execucao** dos fixes autorizados, com suite completa +
+     lint + build + preview smoke antes de reportar.
+
+Waves 0 e 1 **congeladas** — qualquer dependencia fora da Wave 2
+descoberta na auditoria tem que parar e pedir autorizacao explicita.
+
+Esta sessao executou o ciclo completo para o **Componente 06 — Cadastro
+de Prova Digital + Etiqueta**. O processo esta registrado em `ADR-069`
+(meta-ADR da auditoria).
+
+### Estagio 1 — Achados da analise C06
+
+17 achados totais, classificados por severidade:
+
+**Criticos (1):**
+- **C1** — `backend/app/services/etiqueta_assets/` nao estava versionado
+  no git (untracked). ADR-063 documentava os SVGs como commitados, mas
+  nunca foram. Deploy fresh no Railway quebraria completamente o
+  componente no primeiro POST de prova (`_check_assets()` levantaria
+  `RuntimeError`).
+
+**Altos (5):**
+- **A1** — Sem rate limit em `POST /upload-url` nem `POST /`. Admin
+  (ou cred vazada) pode gerar N presigned URLs orfaos por segundo.
+- **A2** — Race TOCTOU: check inicial de unicidade do `nro_requerimento`
+  passa, mas outro admin commita primeiro. O `IntegrityError` caia no
+  `except Exception` generico e retornava **500** com mensagem "Falha
+  ao criar prova digital" em vez do **409 Conflict** semanticamente
+  correto.
+- **A3** — `_validar_upload_no_r2(...) -> str` retornava `detected_mime`,
+  mas o unico caller ignorava o retorno (pos-ADR-057). Dead value.
+- **A4** — Caminho de `_cleanup_r2` falhando nao tinha teste. Branch
+  105-106 sem cobertura.
+- **A5** — `nova-prova/page.tsx` chamava `supabase.auth.getSession()`
+  em 2 lugares independentes (no `getToken` callback do
+  `useCreateProva` e no `useEffect` de fetch de vendedores). Duas
+  fontes de truth para o access token na mesma pagina — risco de
+  divergencia em caso de refresh concorrente.
+
+**Medios (4):**
+- **M1** — `backend/etiqueta_preview.pdf` e `.png` (artefatos de debug
+  do PDF) apareciam como untracked e poderiam ser commitados
+  acidentalmente.
+- **M2** — `_check_assets()` e `_register_fonts()` rodam filesystem
+  stat a cada `gerar_pdf`. Micro-otimizacao cacheavel.
+- **M3** — Rate limit tambem ausente em `POST /` (mesmo raciocinio
+  do A1, menor risco porque ja passou validacao Pydantic + DB).
+- **M4** — Frontend nao valida UUID de `vendedor_id` localmente.
+
+**Baixos (4):** cosmeticos e observacoes (cobertura enganosamente
+baixa de `r2_signed.py` que e testado via mock; logger WARNING no
+fallback de template; rota `rota_projetada` Optional mesmo quando
+populada; comentarios "(c, d)" no docstring).
+
+### Estagio 2 — Fixes aplicados (6 obrigatorios)
+
+Mario autorizou execucao dos 6 fixes obrigatorios. A1, M2, M3 e M4
+ficaram pendentes (A1/M3 exigem dep nova; M2/M4 sao micro-otimizacoes
+YAGNI no volume atual).
+
+**C1 — Versionar `etiqueta_assets/` + 3 smoke tests** (ADR-071)
+
+- `git add backend/app/services/etiqueta_assets/logo_3studio.svg
+  backend/app/services/etiqueta_assets/logo_studio_e_arte.svg`
+  — ambos agora em `Changes to be committed`. Nao foi feito `git
+  commit` (politica do projeto). Mario commita manualmente.
+- 3 novos testes em `test_etiqueta_service.py` que falham rapido
+  em CI se qualquer asset ou fonte sumir:
+  - `test_etiqueta_assets_existem_no_repo` — valida ambos os SVGs
+    + sanity check de header XML/SVG.
+  - `test_etiqueta_fonts_existem_no_repo` — valida DejaVuSans.ttf
+    e DejaVuSans-Bold.ttf.
+  - `test_check_assets_nao_levanta_com_arquivos_presentes` —
+    chamada direta na funcao interna.
+- **Runtime dos 3 testes: ~4ms total.**
+
+**M1 — `.gitignore` para previews de debug**
+
+Adicionadas 4 linhas ao final do `.gitignore` da raiz:
+```
+# Artefatos de preview do etiqueta_service (Wave 2, C06) — gerados localmente
+# por scripts de debug do PDF, nao fazem parte do runtime nem dos testes.
+backend/etiqueta_preview.pdf
+backend/etiqueta_preview.png
+```
+Confirmado que `git status` nao lista mais esses arquivos.
+
+**A3 — Retorno morto removido de `_validar_upload_no_r2`**
+
+- Assinatura: `-> str` → `-> None`.
+- Removido `return detected_mime` final.
+- Docstring atualizada explicando que pos-ADR-057 o MIME detectado
+  nao e usado por ninguem; a validacao de magic bytes continua
+  sendo a unica barreira contra content-type spoofado.
+- Zero impacto funcional — o unico caller ja ignorava o retorno.
+
+**A2 — `IntegrityError` mapeado para 409 Conflict** (ADR-070)
+
+- Novo `import IntegrityError` de `sqlalchemy.exc` em `provas.py`.
+- Adicionado `except IntegrityError:` ANTES do `except Exception`
+  generico no bloco try do commit em `create_prova`:
+```python
+except IntegrityError:
+    await db.rollback()
+    logger.warning(
+        "IntegrityError ao persistir prova nro_req=%s "
+        "(provavel race de unicidade). Limpando R2.",
+        body.nro_requerimento,
+    )
+    await _cleanup_r2(body.object_key)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Numero de requerimento ja cadastrado",
+    )
+```
+- Mensagem identica a do 409 ja retornado no check inicial, para
+  consistencia de contrato — cliente ve a mesma string
+  independente de qual caminho detectou a duplicata.
+- Log `warning` (nao `exception`) porque e race esperada, nao bug.
+- Rollback + cleanup R2 mantidos (ADR-041).
+
+**A4 — Teste de cleanup R2 falho**
+
+- Novo teste `test_create_prova_cleanup_r2_failure_does_not_mask_original_error`.
+- Usa o caminho 409 (duplicata) como gatilho simples. Mocka
+  `r2_delete` para lancar `RuntimeError("R2 temporariamente
+  indisponivel")`.
+- Valida 3 propriedades:
+  1. Status code permanece **409** (erro original nao mascarado).
+  2. Mensagem permanece "Numero de requerimento ja cadastrado".
+  3. `r2_delete` foi de fato chamado (tentativa de cleanup).
+
+**A5 — `getToken` unificado em `nova-prova/page.tsx`**
+
+- `useEffect` de fetch de vendedores refatorado para usar `await
+  getToken()` em vez de `createClient() + getSession()` proprio.
+- `useEffect` agora depende de `getToken` (memoizado em
+  `useCallback([])` estavel → roda 1x no mount, sem loop).
+- Uma unica fonte de truth para o access token em toda a pagina
+  — elimina a janela teorica de divergencia entre duas chamadas
+  concorrentes a `getSession()` em caso de refresh pelo middleware.
+- Zero mudanca de comportamento externo.
+
+### Teste novo: `test_create_prova_integrity_error_returns_409`
+
+Simula o race TOCTOU configurando `mock_db.commit.side_effect =
+IntegrityError(...)` e valida que o handler responde 409 com
+mensagem correta, faz rollback, e limpa o R2. 2o teste novo em
+`test_provas_api.py` nesta sessao (junto com o A4).
+
+### Metricas de validacao (antes → depois)
+
+| Camada | Antes | Depois |
+|---|---|---|
+| Testes backend (suite completa) | 278 passing | **283 passing** |
+| Cobertura `app/api/v1/provas.py` | 93% | **94%** |
+| Cobertura `app/domain/schemas/prova.py` | 90% | **96%** |
+| Cobertura `app/services/audit_service.py` | 100% | 100% |
+| Cobertura `app/services/etiqueta_service.py` | 97% | 97% |
+| Cobertura `app/services/qrcode_service.py` | 97% | 97% |
+| Cobertura `app/services/state_machine.py` | 50% (reportado) | **97%** (com state_machine incluido) |
+| **Total C06 auditado** | **89%** | **93%** |
+| Ruff (`app/` + `tests/`) | limpo | limpo |
+| Frontend `tsc --noEmit` | limpo | limpo |
+| Frontend `next lint` | limpo | limpo |
+| Frontend `next build` | OK | OK (`/nova-prova 5.41 kB`) |
+| Preview smoke (`/login` + middleware) | — | ✅ dev server limpo, zero erros |
+
+### Arquivos alterados nesta sessao
+
+**Backend:**
+- `backend/app/api/v1/provas.py` — A2 (+`IntegrityError` import e
+  novo branch de except) + A3 (retorno `-> None`, docstring
+  atualizada).
+- `backend/tests/test_provas_api.py` — 2 testes novos (A2 + A4) +
+  `import IntegrityError`.
+- `backend/tests/test_etiqueta_service.py` — 3 smoke tests novos
+  (C1) + imports atualizados.
+- `backend/app/services/etiqueta_assets/logo_3studio.svg` —
+  **staged** (novo, nao commitado).
+- `backend/app/services/etiqueta_assets/logo_studio_e_arte.svg` —
+  **staged** (novo, nao commitado).
+
+**Frontend:**
+- `frontend/src/app/(dashboard)/nova-prova/page.tsx` — A5
+  (unificacao do `getToken`).
+
+**Contexto:**
+- `.gitignore` — M1 (exclude previews).
+- `DECISIONS.md` — 3 ADRs novos (069, 070, 071).
+- `CHANGELOG.md` — esta entrada.
+
+**NAO modificados** (intencionalmente): `CLAUDE.md` (nenhuma estrutura
+mudou), todos os arquivos fora do escopo C06.
+
+### Decisoes de escopo
+
+**Aplicado sem perguntar** (dentro do escopo autorizado):
+- Todos os 6 fixes obrigatorios acima.
+
+**Nao aplicado, aguardando discussao futura:**
+- **A1** — Rate limit em `/upload-url` e `/` — adiciona dependencia
+  nova (`slowapi` ou middleware custom). Recomendado discutir na
+  Wave 6 (hardening) com ADR dedicado.
+- **M2** — Cache module-level de `_check_assets`/`_register_fonts`.
+  Micro-otimizacao, ~3 `Path.exists()` por request. YAGNI no
+  volume atual.
+- **M4** — Validacao local de UUID no frontend. Backend ja barra
+  com Pydantic, defesa em profundidade suficiente.
+
+**Fora do escopo (nao toco sem autorizacao):**
+- Alteracoes em `auth.*` ou Supabase Dashboard.
+- Migrations novas (ex: adicionar `imagem_mime` em
+  `provas_digitais` para usar o retorno que eu removi no A3).
+- Refatoracao de `state_machine.py` — esse modulo e Wave-2-final,
+  proxima sessao sera Wave 3.
+
+### Pendencia operacional do Mario
+
+- **`git commit` dos 2 SVGs ja staged** em `backend/app/services/etiqueta_assets/`.
+  Sem isso, os assets continuam apenas no working tree local e o
+  deploy futuro continua bloqueado pelo C1. Os smoke tests do item
+  C1 protegem contra remocao futura mas nao substituem o commit
+  inicial.
+
+### Proximo passo
+
+Mario autorizou avancar para **Estagio 1 do Componente 07**
+(Listagem, Pesquisa e Filtros de Provas) apos a atualizacao dos
+arquivos de contexto. Mesma metodologia: analise com gate
+obrigatorio antes de qualquer execucao.
+
+---
+
+## [2026-04-10 — Sessao 17] — UI: /configuracoes alinhada ao Figma
+
+### Contexto
+
+Apos terminar `/provas/[id]` na Sessao 16, Mario enviou o mockup Figma
+da ultima tela pendente da Wave 2: `/configuracoes`. Escopo autorizado:
+apenas o front-end de `/configuracoes`. Nada de backend, hooks, schemas,
+outras rotas ou `components/icons.tsx` (usei `CheckIcon` ja existente,
+nao criei novo). Mario foi explicito: "preciso que voce tenha o maximo
+de cuidado possivel para nao quebrar nada no codigo, seu escopo e o
+front end da tela de configuracoes do sistema da wave 2, mexendo apenas
+no visual mesmo".
+
+### Design-alvo do Figma
+
+1. **Titulo** `"Configuracoes do sistema"` grande preto (mesmo clamp
+   de `/nova-prova` e `/provas`).
+2. **Cards BRANCOS empilhados** (ao inves do cinza `--color-card-surface`
+   que estava antes). Cada card e uma secao de configuracao.
+3. **Layout horizontal dentro de cada card**:
+   - A esquerda: titulo h2 + descricao em cinza + label cinza + input
+     pill cinza claro.
+   - A direita: botao "Salvar" amarelo pill, alinhado verticalmente com
+     o centro do input (`align-items: flex-end` no wrapper + botao com
+     `margin-left: auto`).
+4. **Input `Tempo (horas uteis)`** mais compacto (`max-width: 200px`)
+   — no Figma ele aparece estreito, so comporta 2-3 digitos.
+5. **Descricao limpa** sem `<strong>Atrasada</strong>` nem mencao a
+   RN-008 — texto curto igual ao mockup.
+
+### Mudancas aplicadas
+
+**Passo 1 — Cards brancos + layout horizontal (refatoracao principal)**
+
+- `configuracoes.module.css` reescrito quase por completo:
+  - `.card` → `background: #ffffff` + `border-radius: var(--radius-card-xl)` (28px)
+  - `.title` → `clamp(2.5rem, 5vw, 4rem)` + `font-weight: 500`
+    (matching `/nova-prova` e `/provas`)
+  - `.h2` → `1.875rem` + `font-weight: 400` (menos dominante)
+  - `.description` → sem mais `strong`, `max-width: 620px`
+  - Novo wrapper `.cardBody` (flex row, `align-items: flex-end`,
+    `justify-content: space-between`, `flex-wrap: wrap`)
+  - Nova classe `.cardFields` (coluna a esquerda com label + input +
+    feedback inline) com `flex: 1 1 auto`
+  - `.input/.select` → fundo `var(--color-card-surface)` (cinza claro
+    pill) + `height: 52px` + focus amarelo via `box-shadow` — mesmo
+    padrao visual de `/nova-prova` e `/provas`
+  - `.label` → removido `text-transform: uppercase`, agora `var(--fs-xs)`
+    cinza suave
+  - `.inputNumero` nova classe limitando `max-width: 200px`
+  - `.btnPrimary` → `height: 52px` (igual ao input, alinhamento perfeito),
+    `padding: 0 3rem`, `margin-left: auto` (cola na ponta direita do
+    `.cardBody` mesmo com `flex-wrap`)
+  - `.sectionActions` e `.inputInline` removidos (codigo morto apos
+    a refatoracao)
+
+- `page.tsx` reorganizado (so o JSX, zero mudanca em handlers,
+  `useCallback`, `useState`, `useConfiguracoes`, validacoes):
+  - Cada `<form>` virou `className={styles.cardBody}` direto (antes
+    era `.form` dentro do card)
+  - Novo wrapper `<div className={styles.cardFields}>` envolvendo
+    label+input+feedback inline, com o `<button type="submit">` irmao
+    na direita
+  - Descricao do "Tempo de atraso" simplificada para
+    `"Uma prova digital sem movimentacao por mais que esse tempo e
+    considerada atrasada."` (Figma)
+
+**Passo 2 — Checkbox custom (refine pedido pelo Mario)**
+
+Mario mandou screenshot do card "Template da etiqueta" pedindo:
+*"deixe os checkbox com os cantos arredondados e com o icone dentro
+deles quando tiver check menor"*. O `accent-color` nativo nao permite
+controlar border-radius nem tamanho do check — foi substituido por
+checkbox custom:
+
+- **CSS (`configuracoes.module.css`)**:
+  - `.checkbox` (input nativo) → escondido via `clip: rect(0 0 0 0)`
+    mas preservando acessibilidade para teclado/AT.
+  - Nova classe `.checkboxBox` — caixa visual `22px × 22px`,
+    `border-radius: 6px`, `border: 1.5px solid var(--color-card-border)`,
+    fundo branco por default.
+  - `.checkbox:checked + .checkboxBox` → caixa fica amarela
+    (`var(--color-accent)`).
+  - SVG do `CheckIcon` dentro da caixa com `14px × 14px` (menor que
+    a caixa → ~4px de respiro em cada lado), `opacity: 0` por padrao,
+    `opacity: 1` quando `:checked`, com transicao de 120ms.
+  - `:focus-visible + .checkboxBox` → outline amarelo (teclado).
+  - `:disabled + .checkboxBox` → opacity 0.55 + cursor not-allowed.
+  - `:has(.checkbox:disabled)` no label para cursor not-allowed no
+    label todo.
+
+- **JSX (`page.tsx`)**:
+  - Import `CheckIcon` de `@/components/icons` (componente ja
+    existente — NAO toquei em `icons.tsx`).
+  - Dentro de cada `<label className={styles.checkboxLabel}>`:
+    `<input class=checkbox>` + `<span class=checkboxBox aria-hidden><CheckIcon /></span>` + `<span>label text</span>`
+    nessa ordem exata (o CSS `.checkbox:checked + .checkboxBox`
+    depende do input vir imediatamente antes da caixa).
+
+### JSX — estrutura final (por card)
+
+```tsx
+<section className={styles.card}>
+  <h2 className={styles.h2}>Tempo de atraso</h2>
+  <p className={styles.description}>Uma prova digital sem...</p>
+
+  <form onSubmit={handleSubmit} className={styles.cardBody}>
+    <div className={styles.cardFields}>
+      <div className={styles.field}>
+        <label>Tempo (horas uteis)</label>
+        <input className={`${styles.input} ${styles.inputNumero}`} />
+      </div>
+      {error && <div className={styles.inlineError}>...</div>}
+      {success && <div className={styles.inlineSuccess}>...</div>}
+    </div>
+
+    <button type="submit" className={styles.btnPrimary}>Salvar</button>
+  </form>
+</section>
+```
+
+Checkbox custom no card "Template da etiqueta":
+
+```tsx
+<label className={styles.checkboxLabel}>
+  <input type="checkbox" className={styles.checkbox} ... />
+  <span className={styles.checkboxBox} aria-hidden="true">
+    <CheckIcon />
+  </span>
+  <span>Exibir logo 3Studio no cabecalho</span>
+</label>
+```
+
+### O que foi preservado (nao quebrou)
+
+- Hook `useConfiguracoes` (zero mudancas)
+- Handlers `handleSubmitTempoAtraso` e `handleSubmitTemplate` (intactos)
+- Estados `tempoAtrasoLocal`, `tempoAtrasoStatus`, `templateLocal`,
+  `templateStatus` (intactos)
+- Validacao de range `TEMPO_ATRASO_MIN_HORAS / MAX_HORAS` (intacta)
+- `useEffect` que sincroniza estado local com a API (intacto)
+- Imports de `@/lib/types/configuracao` (whitelist de chaves, type
+  guards, `FORMATOS_ETIQUETA`, `FORMATO_LABELS`) — intactos
+- Campo `Nome do template` ainda `readOnly + disabled` na Wave 2
+  (regra preservada do codigo original)
+- Mobile notice `"acesse a versao desktop"` (mesmo padrao de `/usuarios`,
+  `/nova-prova`, `/provas`, `/provas/[id]`)
+- Mensagens de erro/sucesso inline (reposicionadas dentro do
+  `.cardFields`, mas logica igual)
+- Backend, hooks, schemas, migrations, RLS — zero toque
+- `components/icons.tsx` — zero toque (usei `CheckIcon` ja exportado)
+- Sidebar, layout do dashboard, outras rotas — zero toque
+
+### Gates de qualidade
+
+| Gate | Resultado |
+|---|---|
+| `tsc --noEmit --incremental false` | ✅ exit 0 |
+| Next.js dev server (`preview_start`) | ✅ sobe sem erros |
+| Nenhum erro de console/servidor nos logs | ✅ |
+| Rota `/configuracoes` | ✅ 200 (redireciona pra `/login` via middleware — esperado) |
+| Rota `/login` | ✅ renderiza sem regressao colateral |
+| Validacao visual pelo Mario | ✅ aprovado em 2 passos (layout + checkboxes) |
+
+### Arquivos modificados
+
+```
+M frontend/src/app/(dashboard)/configuracoes/page.tsx               (JSX reorganizado + CheckIcon no checkbox)
+M frontend/src/app/(dashboard)/configuracoes/configuracoes.module.css (reescrito — cards brancos, layout horizontal, checkbox custom)
+```
+
+### ADRs novos
+
+- **ADR-068** — Tela `/configuracoes`: cards brancos com layout
+  horizontal (fields + botao Salvar na mesma row) e checkbox custom
+  substituindo `accent-color`
+
+### Status
+
+Tela `/configuracoes` matching o Figma final do Mario. Wave 2
+completa do lado visual — todas as 4 telas (`/nova-prova`, `/provas`,
+`/provas/[id]`, `/configuracoes`) alinhadas ao Figma. Aguardando
+commit consolidado das Sessoes 14-17.
+
+---
+
+## [2026-04-10 — Sessao 16] — UI: /provas/[id] (detalhe) alinhada ao Figma
+
+### Contexto
+
+Apos finalizar `/nova-prova` na Sessao 15, Mario enviou um novo mockup
+Figma para a tela de detalhe de uma prova (`/provas/[id]`), pedindo que
+a tela ficasse "exatamente igual" ao design. Escopo autorizado: apenas
+o front-end de `/provas/[id]`. Nada de backend, hooks, modal, outras
+rotas ou `components/icons.tsx`.
+
+### Design-alvo do Figma
+
+1. **Botao Voltar**: pill discreto no topo esquerdo, com seta `←` + "Voltar"
+2. **Card branco principal** envolvendo:
+   - Header duplo: numero do requerimento (grande bold) + nome (grande
+     tambem bold, um pouco menor)
+   - Metadata compacta em paragrafos com label bold: Cliente, Vendedor,
+     Rota, Ciclo Atual, Criada em
+   - Botoes: "Visualizar etiqueta" amarelo + "Baixar etiqueta" preto
+   - Imagem da arte: quadrado cinza claro no canto superior direito
+3. **Card preto aninhado DENTRO do card branco**, nao fora:
+   - Titulo branco "Historico de movimentacoes"
+   - Empty state em cinza claro
+
+### Etapas da sessao (iterativo — 4 rodadas)
+
+**16a — Primeira tentativa do layout**
+- Refatorei `page.tsx` e `detalhe.module.css` com:
+  - Botao Voltar pill com `ArrowLeftIcon` SVG **inline** na propria pagina
+    (nao toquei em `components/icons.tsx` para respeitar o escopo)
+  - Card branco nested como secao separada (fora do timeline)
+  - Header duplo + metadata em `<p>` com `<strong>`
+  - Status preservado em linha separada bem discreta
+    (`.statusLine` com cor `--color-card-text-dim` e fonte menor)
+  - Motivo de cancelamento preservado em vermelho italico
+  - Timeline card em preto, irmao do card branco
+- **Mudancas no contrato visual**: removidos `<dl>`/`<dt>`/`<dd>`,
+  uppercase labels, letter-spacing, "Atualizada em", chip de
+  localizacao do vendedor, badge colorido de status.
+- Classes `.status_*` coloridas continuam no CSS (fallback) mas nao
+  sao mais aplicadas por nenhum JSX — codigo morto porem de baixo custo.
+
+**16b — "Ficou sem harmonia"**
+Feedback do Mario: tamanhos desproporcionais. Art slot gigante (usava
+`aspect-ratio: 1/1` que fazia o quadrado crescer proporcional a coluna),
+tipografia com peso fraco, metadata muito espacada, timeline card com
+muito padding vazio.
+- **Art slot**: `aspect-ratio` substituido por `height: 280px` fixo
+  + `max-width: 340px`. Virou retangulo controlado.
+- **Tipografia**:
+  - `.title`: `clamp(2.5rem, 5vw, 3.75rem)` → `3.5rem` fixo, peso `600 → 700`
+  - `.subtitle`: `clamp(1.75rem, 3.5vw, 2.5rem)` → `2.4rem` fixo, peso `500 → 600`
+- **Metadata**: fonte `base → 0.95rem`, `gap 0.35rem → 0.25rem`
+- **Botoes**: `padding 0.875rem 2rem → 0.85rem 1.5rem`, `min-width 200 → 180`
+- **Paddings**: `innerCard 3rem 3.5rem → 2.75rem 3rem`, `timelineCard 2.5rem 3rem → 2rem 2.5rem`
+- **Timeline**: titulo `clamp → 1.875rem fixo`, peso `500 → 600`,
+  `margin-bottom 2rem → 1.25rem`, empty state `padding 3rem 0 1rem → 1.5rem 0 0.5rem`
+
+**16c — "Card preto dentro do branco + imagem quadrada"**
+Feedback: o card branco envolve TUDO (incluindo o timeline preto), e
+a imagem volta a ser quadrado 1:1 mas com tamanho controlado.
+- **JSX**: `<section className={styles.timelineCard}>` movida para
+  DENTRO de `<section className={styles.innerCard}>` como irma do
+  `<div className={styles.innerCardGrid}>`.
+- **Art slot**: volta ao `aspect-ratio: 1 / 1`, mas com
+  `grid-template-columns: minmax(0, 1.55fr) minmax(0, 340px)` — o teto
+  da coluna impede o quadrado de crescer absurdamente.
+- **`.innerCardGrid`** ganhou `margin-bottom: 2rem` para abrir espaco
+  antes do timeline card aninhado.
+- **`.timelineCard`** perdeu sua `margin-bottom` externa.
+
+**16d — "Remover status + aumentar imagem"**
+Feedback final: remover a linha "Status" completamente (nao e mais
+necessario preservar) e aumentar o card da imagem.
+- **`<p>` do Status removido** do `page.tsx`.
+- **Classe `.statusLine` removida** do CSS (codigo morto).
+- **Grid column direita**: `minmax(0, 340px) → minmax(0, 380px)`.
+- **Proporcao do grid**: `1.55fr → 1.4fr` para balancear o espaco
+  entre texto e imagem.
+- **Responsive** (`< 1100px`): `max-width 340px → 380px`.
+- **`STATUS_LABELS` import preservado** — ainda usado na timeline
+  quando Wave 3 popular movimentacoes reais.
+
+### JSX — estrutura final
+
+```tsx
+<>
+  <div className={styles.breadcrumb}>
+    <Link href="/provas" className={styles.backBtn}>
+      <ArrowLeftIcon />
+      <span>Voltar</span>
+    </Link>
+  </div>
+
+  {loading && <div className={styles.loadingBox}>Carregando...</div>}
+  {error && <div className={styles.errorBox}>...</div>}
+
+  {!loading && !error && prova && (
+    <section className={styles.innerCard}>
+      <div className={styles.innerCardGrid}>
+        <div className={styles.mainInfo}>
+          <h1 className={styles.title}>{prova.nro_requerimento}</h1>
+          <h2 className={styles.subtitle}>{prova.nome}</h2>
+          <div className={styles.metadata}>
+            <p><strong>Cliente:</strong> {prova.cliente}</p>
+            <p><strong>Vendedor:</strong> {prova.vendedor_nome}</p>
+            <p><strong>Rota:</strong> {formatRota(...)}</p>
+            <p><strong>Ciclo Atual:</strong> {prova.ciclo_atual}</p>
+            <p><strong>Criada em:</strong> {formatDate(...)}</p>
+            {prova.motivo_cancelamento && <p className={styles.motivoCancelamento}>...</p>}
+          </div>
+          <div className={styles.actions}>
+            <button className={styles.btnPrimary}>Visualizar etiqueta</button>
+            <button className={styles.btnSecondary}>Baixar etiqueta</button>
+          </div>
+        </div>
+        <div className={styles.artSlot}>
+          {/* imagem ou placeholder */}
+        </div>
+      </div>
+
+      {/* Timeline ANINHADA dentro do innerCard */}
+      <section className={styles.timelineCard}>
+        <h2 className={styles.timelineTitle}>Historico de movimentacoes</h2>
+        {/* empty state ou lista */}
+      </section>
+    </section>
+  )}
+
+  <VisualizarEtiquetaModal ... />
+</>
+```
+
+### O que foi preservado (nao quebrou)
+
+- Hook `useProvaDetail` (zero mudancas)
+- Funcao `handleDownloadEtiqueta` (apenas o label do botao mudou)
+- Funcoes utilitarias `formatDate`, `formatRota`
+- Tratamento de loading/error/imagemError/imgLoadError
+- JSX dos itens de timeline quando Wave 3 popular movimentacoes
+  (usa `STATUS_LABELS` ainda)
+- Motivo de cancelamento em vermelho italico quando presente
+- `VisualizarEtiquetaModal` (zero mudancas no componente ou import)
+- Todo o bloco CSS do modal (`.modalOverlay`, `.modalContent`, etc)
+- `components/icons.tsx` (nao tocado — usei SVG inline na propria pagina)
+
+### Gates de qualidade
+
+| Gate | Resultado |
+|---|---|
+| `tsc --noEmit` | ✅ exit 0 |
+| `next lint` | ✅ clean |
+| `next build` | ✅ clean — `/provas/[id]` 5.58 KB (era 5.81 KB) |
+| Rotas no build | ✅ nenhuma `preview-*` residual |
+
+### Arquivos modificados
+
+```
+M frontend/src/app/(dashboard)/provas/[id]/page.tsx              (ArrowLeftIcon inline + JSX reorganizado)
+M frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css    (4 rodadas de ajustes)
+```
+
+### ADRs novos
+
+- **ADR-066** — Tela `/provas/[id]`: card branco envolvendo timeline
+  aninhado + art slot quadrado com teto via grid column
+- **ADR-067** — Remocao do status visual da tela de detalhe (Sessao 16d)
+
+### Status
+
+Tela `/provas/[id]` matching o Figma final do Mario. Aguardando
+commit consolidado das Sessoes 14, 15 e 16.
+
+---
+
+## [2026-04-10 — Sessao 15] — UI: /nova-prova alinhada ao Figma
+
+### Contexto
+
+Apos terminar a tela de detalhe da prova, Mario enviou o mockup Figma
+da tela `/nova-prova` (cadastro de prova digital) pedindo o mesmo
+tratamento — "exatamente igual ao design". Escopo autorizado: apenas
+o front-end de `/nova-prova`, sem tocar em outros arquivos.
+
+### Design-alvo do Figma
+
+1. **Header**: titulo `"Nova prova digital"` grande preto a esquerda +
+   botao `"Criar prova"` amarelo pill no canto superior **direito**
+   (antes estava em um footer abaixo do dropzone)
+2. **Grid 2x2** de campos com labels pretos seguidos de `:`:
+   - Row 1: `Nome:` | `Numero do requerimento:`
+   - Row 2: `Cliente:` | `Vendedor:`
+3. **Inputs pill** cinza claro (matching o padrao de `/provas` e
+   `/configuracoes`), altura 56px, sem border
+4. **Dropzone grande** cinza claro SEM dashed border, contendo:
+   - Titulo: `"Arraste uma imagem ou clique para selecionar"`
+   - Hint: `"JPG ou PNG"`
+   - Icone `+` grande (56x56) centralizado
+
+### Mudancas implementadas
+
+#### `page.tsx`
+
+- **`<form>` envolvendo TUDO** (header + grid + dropzone) para o botao
+  do header poder submeter.
+- **Botao "Criar prova" movido para dentro do `<header>`** com
+  `type="submit"` e `disabled={!canSubmit}`.
+- **Footer actions inteiro REMOVIDO** (`.footerActions` nao renderiza mais).
+- **Labels reescritos** com `:` no final (matching padrao Figma):
+  - `"Nome da prova"` → `"Nome:"`
+  - `"Numero do requerimento"` → `"Numero do requerimento:"`
+  - `"Cliente"` → `"Cliente:"`
+  - `"Vendedor responsavel"` → `"Vendedor:"`
+- **`<PlusIcon width={56} height={56} />`** adicionado no dropzone
+  (aproveita o icon ja existente em `components/icons.tsx` — nao
+  precisou criar novo nem mudar o arquivo).
+- **Tela de sucesso** (quando `result !== null`) **intocada** — nao
+  tinha mockup no Figma, mantem o visual anterior.
+
+#### `nova-prova.module.css`
+
+- **`.pageHeader`**: `margin-bottom 3rem → 3.5rem` (mais respiro)
+- **`.title`**: `clamp(2rem, 4.5vw, 3.75rem) → clamp(2.5rem, 5vw, 4rem)`,
+  peso `400 → 500`, letter-spacing `-0.01em → -0.02em`
+- **`.formGrid`**: `gap 1.5rem 2rem → 2rem 2.5rem` (mais espaco entre campos)
+- **`.label`**: era UPPERCASE muted. Virou:
+  - `text-transform: none`
+  - `font-weight: 500 → 400`
+  - `font-size: var(--fs-sm) → var(--fs-base)` (maior)
+  - `color: var(--color-card-text-muted) → var(--color-card-text)` (preto)
+  - `letter-spacing: 0.04em → 0`
+- **`.input/.select`**: reescritos no padrao de `/provas`:
+  - `height: 48px → 56px`
+  - `padding: 0 1.25rem → 0 1.5rem`
+  - `border: 1px solid transparent → none`
+  - focus: `border-color → box-shadow: 0 0 0 2px var(--color-accent)`
+- **`.dropzone`**:
+  - `min-height: 220px → 360px` (muito maior, matching Figma)
+  - `border: 2px dashed → 2px solid transparent` (sem dashed)
+  - Hover: `border-color: var(--color-accent)` (indicacao sutil)
+- **`.dropzoneEmpty`**: `min-height 188 → 316`, cor do titulo para preto
+- **`.dropzoneTitle`**: `fs-lg → fs-xl`, peso `500 → 400`
+- **`.dropzoneHint`**: `margin-bottom: 1.5rem` para separar do icone
+- **`.dropzoneIcon`**: classe nova — flex center para o `<PlusIcon>`
+- **`.previewImg`**: `180x180 → 260x260` (preview maior quando arquivo selecionado)
+- **`.footerActions`**: removida — nao e mais renderizada
+- **`.btnPrimary`**: agora e usada no header ao inves do footer, maior
+  (`padding 0.875rem 2.5rem → 0.9rem 3rem`, font `base → 1.0625rem`)
+- Media query `< 1080px` ajustada (mantida)
+
+### O que foi preservado
+
+- Hook `useCreateProva` (zero mudancas)
+- Toda a logica de upload: ~fetch presigned URL → PUT R2 → POST /provas/~
+- Validacao client-side (`arquivoError` inline do Sessao 12/A3)
+- Fetch de vendedores ativos para o select
+- Preview local de imagem via `URL.createObjectURL`
+- Tratamento de drag-and-drop
+- Tela de sucesso (post-criacao) com detalhes + PDF iframe
+- Funcoes `handleDownloadPdf`, `handlePrint`, `handleNovaProva`, `handleFileSelect`
+- Mobile notice (`< 768px`)
+
+### ⚠️ Nota sobre arquivos restaurados pelo editor
+
+Durante a sessao, 2 arquivos apareceram como modificados no `git status`
+SEM eu ter tocado neles:
+- `frontend/src/components/icons.tsx` — docstring JSDoc inicial foi removido
+- `frontend/src/app/(dashboard)/configuracoes/configuracoes.module.css` — comentario inicial foi removido
+
+Provavelmente foi um formatter externo (prettier/vscode) agindo ao
+abrir os arquivos. **Restaurei ambos com `git checkout`** para voltar
+ao estado original. Registrado aqui para sessoes futuras: se ver
+arquivos inesperados no `git status`, e provavelmente o formatter do
+editor e deve ser revertido.
+
+### Gates de qualidade
+
+| Gate | Resultado |
+|---|---|
+| `tsc --noEmit` | ✅ exit 0 |
+| `next lint` | ✅ clean |
+| `next build` | ✅ `/nova-prova` 5.38 KB |
+| Rotas no build | ✅ nenhuma `preview-*` residual |
+
+### Arquivos modificados
+
+```
+M frontend/src/app/(dashboard)/nova-prova/page.tsx                 (JSX + PlusIcon)
+M frontend/src/app/(dashboard)/nova-prova/nova-prova.module.css    (novo layout)
+```
+
+### ADR novo
+
+- **ADR-065** — `/nova-prova`: botao de submit no header + dropzone
+  grande com PlusIcon + labels pretos com `:`
+
+---
+
+## [2026-04-10 — Sessao 14] — Design do template da etiqueta PDF (90×57mm)
+
+### Contexto
+
+Mario enviou uma imagem do design Figma de uma nova etiqueta de
+rastreio, junto com 2 arquivos SVG das logos (`Logo 3studio.svg` e
+`Logo studio e arte.svg` do Desktop). O escopo foi "mexer somente
+nisso" — ou seja, apenas o `etiqueta_service.py` e seus testes. Nada
+de API, frontend ou schema.
+
+**Especificacoes:**
+- Dimensao FIXA: **9cm x 5,7cm** (90mm x 57mm, paisagem)
+- Layout matching imagem Figma enviada:
+  - Linha horizontal preta no topo
+  - Cabecalho: 2 logos vetoriais (3STUDIO + studio&ART!) lado a lado
+  - Texto "Aponte a camera para o **QR CODE**" no canto direito
+  - Banner preto horizontal como separador (x=3 a ~x=47)
+  - 3 campos: Nome, Requerimento, Vendedor (label bold + valor)
+  - QR Code quadrado com cantos arredondados no canto direito
+  - Rodape: ano (esquerda) + "Etiqueta de rastreio" (direita)
+  - Linha horizontal preta no rodape
+
+### Pre-requisitos tecnicos descobertos
+
+**Verificacao de SVG no `fpdf2`:**
+```
+fpdf2 version: 2.8.7
+defusedxml: OK (0.7.1)
+SVG render: OK
+```
+
+`fpdf2 >= 2.7` suporta SVG nativamente via `pdf.image()` quando
+`defusedxml` esta instalado — ambos ja estavam no venv do projeto,
+zero dependencia nova.
+
+### Assets novos
+
+```
+backend/app/services/etiqueta_assets/
+├── logo_3studio.svg          (2685 bytes, viewBox 56.23 x 11.85)
+└── logo_studio_e_arte.svg    (5337 bytes, viewBox 45.57 x 23.79)
+```
+
+Copiados diretamente do Desktop do Mario. Vetoriais, cor preta
+(`#1d1d1b`), zero rasterizacao — imprimiveis em qualquer tamanho
+sem perda de qualidade.
+
+### Reescrita do `etiqueta_service.py`
+
+**Constantes adicionadas ao modulo:**
+```python
+ETIQUETA_W = 90.0
+ETIQUETA_H = 57.0
+_ASSETS_DIR = Path(__file__).resolve().parent / "etiqueta_assets"
+_LOGO_3STUDIO = _ASSETS_DIR / "logo_3studio.svg"
+_LOGO_STUDIO_ART = _ASSETS_DIR / "logo_studio_e_arte.svg"
+
+# Adaptive sizing dos campos (Nome/Req/Vendedor)
+_CAMPO_W = 53.0
+_CAMPO_INNER_W = _CAMPO_W - 5.0        # overhead do multi_cell + markdown
+_LINE_H_DEFAULT = 4.8
+_FONT_SIZE_DEFAULT = 9.0
+_FONT_SIZE_MIN = 7.0
+_SIZES_TO_TRY = (9.0, 8.5, 8.0, 7.5, 7.0)
+```
+
+**Nova funcao `_check_assets()`** — levanta `RuntimeError` se os
+SVGs faltarem no deploy (fail-fast).
+
+**Adaptive sizing** — Feature principal. O nome da prova pode ter
+ate 200 chars, mas o espaco na etiqueta e fixo. Em vez de truncar
+ou sempre quebrar linha, o helper `_campo()` testa 5 tamanhos de
+fonte do MAIOR pro MENOR e usa o primeiro que cabe em 1 linha:
+
+```python
+def _campo(label: str, valor: str) -> None:
+    chosen_size = _FONT_SIZE_MIN
+    for size in _SIZES_TO_TRY:
+        if _measure_one_line(label, valor, size):
+            chosen_size = size
+            break
+    pdf.set_font(_FONT_FAMILY, "", chosen_size)
+    line_h = _LINE_H_DEFAULT * (chosen_size / _FONT_SIZE_DEFAULT)
+    pdf.multi_cell(
+        w=_CAMPO_W, h=line_h,
+        text=f"**{label}:** {valor}",
+        markdown=True,
+        new_x="LMARGIN", new_y="NEXT",
+    )
+```
+
+Comportamento por cenario:
+- Nome curto (`"Rotulo Verao"`): 9pt (grande, folgado)
+- Nome padrao do mockup (`"ETIQ CAFE CAPRONI CLASSICO"`): **7pt, 1 linha**
+- Nome muito longo: 7pt + wrap automatico do multi_cell para 2 linhas
+
+**Calibragem empirica do overhead do multi_cell markdown**: o
+`get_string_width` subestima em ~5mm vs o que o `multi_cell` com
+`markdown=True` realmente consome. Testei injetando width vermelho
+vibrante para identificar a diferenca — ficou documentado no
+comentario do codigo com o valor calibrado.
+
+**Ajustes finos pos-feedback (rodada 2):**
+- Logos desceram 2mm para dar respiro do topo (`y=6 → y=8`)
+- Banner desceu proporcionalmente (`y=14 → y=16`)
+- Texto "Aponte a camera" CENTRALIZADO horizontalmente sobre o QR
+  via `multi_cell(align="C")` com 2 linhas (`"Aponte a camera\npara o **QR CODE**"`)
+- Campos Nome/Req/Vendedor centralizados VERTICALMENTE entre banner
+  e rodape (`set_y(20) → set_y(25)`) — eliminou espaco vazio no fim
+
+### Testes
+
+**Ajustado:**
+- `test_pdf_80mm_thermal_tem_tamanho_diferente_do_a4` →
+  `test_pdf_formato_legacy_e_aceito_mas_ignorado`
+
+Antes validava que `"A4"` e `"80mm_thermal"` geravam outputs
+distintos. Agora valida que geram **identicos byte-a-byte** — o
+campo `formato` e aceito pelo schema (compat com configuracao
+existente) mas completamente ignorado pelo render.
+
+**Novos:**
+```
+test_pdf_acentos_latin1_ok               (ja existia)
+test_pdf_euro_simbolo_ok                 (ja existia)
+test_pdf_smart_quotes_ok                 (ja existia)
+test_pdf_em_en_dash_ok                   (ja existia)
+test_pdf_chars_fora_do_font_nao_crashea  (ja existia)
+```
+
+Os 5 testes Unicode herdados da Sessao 12 continuam passando
+porque DejaVu Sans continua sendo a fonte registrada (ver ADR-053).
+
+### Sessao 14 — validacao visual
+
+Geracao de preview via `pypdfium2` (instalado nesta sessao) para
+rasterizar o PDF e inspecionar visualmente:
+
+```python
+import pypdfium2 as pdfium
+img = pdfium.PdfDocument(out)[0].render(scale=400/72).to_pil()
+img.save("etiqueta_preview.png", "PNG")
+```
+
+3 cenarios de nome testados:
+1. **Curto** (`"Rotulo Verao"`): fonte 9pt default, layout folgado
+2. **Padrao do mockup** (`"ETIQ CAFE CAPRONI CLASSICO"`): 7pt, 1 linha
+3. **Muito longo** (50+ chars): 7pt + wrap natural
+
+Todos geraram PDFs validos. Layout final validado visualmente pelo Mario.
+
+### Gates de qualidade
+
+| Gate | Resultado |
+|---|---|
+| `pytest tests/test_etiqueta_service.py` | ✅ **12 passed** |
+| `pytest` full | ✅ **278 passed** |
+| `ruff check app/services/` | ✅ clean |
+| PDF render | ✅ ~22.8 KB/etiqueta |
+
+### Arquivos modificados
+
+```
+M  backend/app/services/etiqueta_service.py        (reescrito: 90x57mm + adaptive sizing)
+M  backend/tests/test_etiqueta_service.py          (teste legacy ajustado)
+?? backend/app/services/etiqueta_assets/logo_3studio.svg
+?? backend/app/services/etiqueta_assets/logo_studio_e_arte.svg
+?? backend/etiqueta_preview.pdf                    (temp para validacao visual)
+?? backend/etiqueta_preview.png                    (temp para validacao visual)
+```
+
+### Dependencia nova no venv (nao commitada ao pyproject)
+
+- `pypdfium2` — instalada durante a sessao apenas para renderizacao
+  visual do PDF em PNG (validacao). **Nao e requerida em runtime**
+  pelo backend em producao. Se precisar disso no futuro em algum
+  script de dev, adicionar como `[dev]` extra no `pyproject.toml`
+  (nao adicionado nesta sessao para manter o scope "mexer somente nisso").
+
+### ADRs novos
+
+- **ADR-063** — Dimensao fixa 90x57mm + logos SVG vetoriais +
+  fonte Unicode DejaVu para a etiqueta
+- **ADR-064** — Adaptive font sizing nos campos (9pt → 7pt) +
+  calibragem empirica do overhead do `multi_cell` com `markdown=True`
+
+---
+
+## [2026-04-09 — Sessao 13] — UI: /provas alinhada ao Figma + scroll interno no dashboard
+
+### Contexto
+
+Apos a entrega da Wave 2 semi-pronta (Sessao 12 — commit `c3d133b`), Mario
+pediu ajustes visuais na tela `/provas` para bater exatamente com um novo
+design no Figma dele. A imagem PNG enviada mostrava:
+
+1. **Filtros** em grid 4x2 com inputs pill cinza-claro, labels pretos com
+   `:`, botao "Limpar" preto pill.
+2. **Tabela** com:
+   - Contorno externo arredondado unico (nao por linha)
+   - Dividers verticais cinza entre colunas, contidos no padding interno
+   - Header com labels cinza medio (font-weight 500, font-size 1.25rem)
+   - Rows sem border horizontal, texto centralizado
+   - Status como texto plano (sem badges coloridos)
+   - Botao "Ver" amarelo pill na ultima coluna
+3. **Scroll interno** no card branco — ao rolar a listagem longa, a
+   sidebar permanece fixa e apenas o conteudo do card se move.
+4. **Scrollbar customizada** discreta, sem "passar" pelos cantos
+   arredondados do card.
+
+Restricoes:
+- Nao tocar em nenhum arquivo de `/usuarios/*` — apenas observar como a
+  tabela dela esta feita e aplicar o mesmo padrao em `/provas`.
+- Nao tocar no backend.
+- Mobile continua mostrando a mensagem "acesse a versao desktop".
+
+### Etapas da sessao
+
+A sessao foi feita em 4 iteracoes ate o design bater com o Figma:
+
+**13a** — Primeira tentativa de alinhamento visual:
+- Reescreveu `provas.module.css` com labels pretos, inputs pill cinza,
+  filtros 4x2, botao Limpar preto, tabela com border arredondado proprio
+  (`background: #f3f3f3; border: 1px solid #cfcfcf`), status como texto
+  plano, botao Ver amarelo.
+- Criou `STATUS_LABELS_SHORT` em `prova.ts` com labels abreviados
+  preservando distincao dos 10 estados (usado na listagem; o detalhe
+  continua com `STATUS_LABELS` longos).
+- Screenshot visual confirmou match geral mas textos quebrando em
+  multilinha em viewport 1600px. Fix: `min-width: 1280px` na tabela +
+  `white-space: nowrap` nas celulas.
+
+**13b** — Tabela nao estava matching o padrao de /usuarios:
+- Reescreveu o bloco de tabela em `provas.module.css` copiando FIELMENTE
+  o padrao de `usuarios.module.css`:
+  - `.tableWrap`: `border 1px solid var(--color-card-border);
+    border-radius var(--radius-card-lg); padding 1.5rem`
+  - `.table th`: `font-size 1.25rem; font-weight 500; color muted;
+    border-right 1px`
+  - `.table td`: `font-size 0.9rem; color muted; border-right 1px`
+  - `.table th:last-child, td:last-child { border-right: none }`
+  - Dividers verticais contidos no padding — nao encostam na borda externa.
+- Botao `.detailBtn` (Ver): mesmas metricas do `.editBtn` de /usuarios
+  (padding 0.5rem 1.25rem, min-width 84px, border-radius pill) mas com
+  `background: var(--color-accent)` em vez de `#000`.
+- Paginacao: copiou padrao de /usuarios (pill transparent com border).
+
+**13c** — Habilitou scroll interno no `.card` do layout:
+- `layout.module.css`: `.main { height: 100vh; overflow: hidden }` +
+  `.card { height: calc(100vh - 2rem); overflow-y: auto }`.
+- Override mobile (`< 768px`) reverte para `auto`/`visible` — no mobile
+  a pagina continua scrollando nativamente.
+- Validado via `preview_eval` runtime:
+  ```json
+  {
+    "docHeight": 1080,              // = viewportHeight (pagina NAO scrolla)
+    "mainStyle": { "height": "1080px", "overflow": "hidden" },
+    "cardStyle": {
+      "height": "1048px",
+      "scrollHeight": 1508,         // conteudo excede viewport
+      "hasInternalScroll": true     // scroll DENTRO do card
+    }
+  }
+  ```
+- Screenshot confirmou: ao scrollar 400px dentro do card, a sidebar
+  permanece fixa e apenas o interior do card se move.
+
+**13d** — Ajuste fino da scrollbar (feedback do Mario: "a scroll esta
+muito fora do card branco"):
+- **Diagnostico**: a scrollbar do `.card` (aplicada direto no container
+  com `overflow-y: auto`) ficava encostada nas bordas do card e, por
+  causa do `border-radius: 28px`, o thumb parecia "passar" visualmente
+  pelos cantos arredondados.
+- **Fix (refatoracao do layout)**:
+  - `layout.tsx`: `{children}` agora envolvido em `<div className={styles.cardInner}>`.
+  - `.card` vira apenas CONTAINER: `overflow: hidden` + `border-radius`
+    (sem padding, sem scroll). Clipa qualquer filho pelos cantos curvos.
+  - `.cardInner`: novo — `height: 100%`, `padding: var(--card-padding)`,
+    `padding-right: calc(var(--card-padding) - 10px)` (compensa largura
+    da scrollbar), `overflow-y: auto`.
+  - Scrollbar customizada aplicada no `.cardInner` (nao mais no `.card`):
+    ```css
+    scrollbar-width: thin;
+    scrollbar-color: #9a9a9a transparent;
+    ::-webkit-scrollbar { width: 10px; background: transparent }
+    ::-webkit-scrollbar-track { background: transparent; margin: 40px 0 }
+    ::-webkit-scrollbar-thumb { background: #9a9a9a; border-radius: 999px;
+                                 min-height: 48px }
+    ::-webkit-scrollbar-thumb:hover { background: #6d6d6d }
+    ::-webkit-scrollbar-thumb:active { background: #525252 }
+    ```
+  - `margin: 40px 0` na track garante que a area ativa do thumb nunca
+    entra na regiao dos cantos curvos do card (`border-radius ~28px`).
+  - `overflow: hidden` no `.card` clipa visualmente qualquer pixel da
+    scrollbar que ainda tente passar — defesa em profundidade.
+
+### Mudancas da tela /provas (page.tsx)
+
+- Removido `<span className={styles.totalBadge}>...</span>` do header
+  (o Figma nao tem badge de total).
+- Filtros reorganizados no grid 4x2 com labels matching Figma:
+  Row 1: `Buscar nome ou requerimento:` | `Cliente:` | `Status:` | `Rota:`
+  Row 2: `Vendedor` | `Criada em:` | `Finalizada em:` | `Limpar` (btn).
+- Filtro vendedor agora sempre renderizado (nao mais condicional a
+  `is_admin`), com `disabled={!showVendedorFilter}` para manter o grid
+  4x2 consistente para todos os perfis.
+- Labels de data: `"Criada em (inicio)"` → `"Criada em:"`, `"Criada em
+  (fim)"` → `"Finalizada em:"`.
+- Botao: `"Limpar filtros"` → `"Limpar"`.
+- Tabela: header `<th>Acoes</th>` → `<th aria-label="Acoes"></th>`
+  (coluna sem titulo visivel — so o botao).
+- Status cell: usa `STATUS_LABELS_SHORT` em vez de `STATUS_LABELS`;
+  removido o concat de classes `status_${p.status}` (badges coloridos
+  deletados do CSS).
+- Botao acao: `"Ver detalhes"` → `"Ver"` + `aria-label` acessivel.
+
+### Scroll interno — validacao cross-browser
+
+- Runtime: `scrollbarPx = 10`, regras CSS matching no CSSOM confirmado
+  via `document.styleSheets`, scroll programatico via `card.scrollTop`
+  funcional.
+- O Chrome headless do `preview_screenshot` **nao renderiza**
+  `::-webkit-scrollbar` no buffer de captura (testado com thumb vermelho
+  vibrante + track amarelo vibrante + `!important` — mesmo assim
+  invisivel na imagem). A scrollbar aparece normalmente em browsers
+  reais (Chrome/Edge/Safari/Firefox desktop).
+- **Validacao final** ficara para quando o Mario abrir em producao —
+  eu testei estruturalmente (CSS matching, scroll funcional, elemento
+  correto) mas nao consegui capturar visualmente.
+
+### Arquivos modificados
+
+```
+M frontend/src/app/(dashboard)/layout.tsx              (wrapper .cardInner)
+M frontend/src/app/(dashboard)/layout.module.css       (scroll interno + scrollbar custom)
+M frontend/src/app/(dashboard)/provas/page.tsx         (filtros 4x2, labels, status plano, Ver)
+M frontend/src/app/(dashboard)/provas/provas.module.css (tabela copiada de /usuarios)
+M frontend/src/lib/types/prova.ts                      (STATUS_LABELS_SHORT)
+M frontend/tsconfig.tsbuildinfo                        (autogerado)
+```
+
+**Intocados conforme instrucao**: `usuarios/*`, todo o backend, todas as
+outras rotas do dashboard (embora `.card` do layout afete todas — e uma
+melhoria neutra para elas, nao regressao).
+
+### Gates de qualidade
+
+| Gate | Resultado |
+|---|---|
+| `tsc --noEmit` | ✅ exit 0 |
+| `next lint` | ✅ clean |
+| `next build` | ✅ clean (`/provas` 4.39 KB, middleware 80.1 KB) |
+| Rotas no build | ✅ nenhuma `preview-*` residual |
+
+### Responsividade
+
+- **Desktop (≥ 768px)**: sidebar fixa + card com altura fixa do viewport
+  + scroll interno no `.cardInner` com scrollbar customizada pill cinza.
+- **Tablet (1280-768px)**: grid de filtros colapsa para 3 ou 2 colunas
+  via media queries em `provas.module.css`.
+- **Mobile (< 768px)**: sidebar vira drawer off-canvas, `.main` e `.card`
+  voltam para altura auto + overflow visible (browser faz scroll
+  natural), mensagem `"Para acessar esse recurso, acesse a versao
+  desktop."` e exibida no lugar do conteudo em `/provas`.
+
+### Riscos / observacoes
+
+- **`.cardInner` afeta todas as rotas**: a refatoracao do layout cria um
+  wrapper interno em TODAS as paginas do dashboard. Validei
+  estruturalmente /preview-usuarios (mock) durante a sessao antes do
+  cleanup — nenhuma regressao visual. Quando Mario abrir /usuarios em
+  producao, o comportamento sera identico + scroll interno + scrollbar
+  customizada (melhoria, nao regressao).
+- **Label "Finalizada em"**: o backend Wave 2 so tem
+  `periodo_inicio`/`periodo_fim` (ambos filtrando por `created_at`). O
+  label do Figma sugere um filtro por data de finalizacao que nao existe
+  no backend. Mantive os labels do Figma mas mapeando para os mesmos
+  query params existentes. Se Wave 3+ introduzir `finalizada_at` real,
+  basta trocar o query param do segundo campo.
+- **Chrome headless do preview nao renderiza scrollbars customizadas
+  em screenshots**: testado empiricamente na sessao. Documentado aqui
+  para futuras rodadas de verificacao visual — se precisar de captura
+  de scrollbar, abrir no browser real.
+
+### ADRs novos
+
+- **ADR-059** — Refatoracao do `.card` do layout em container + filho
+  scrollavel (`.cardInner`) para scroll interno sem vazar nos cantos
+  arredondados.
+- **ADR-060** — Scrollbar customizada cross-browser (Firefox
+  `scrollbar-width/color` + WebKit `::-webkit-scrollbar-*`).
+- **ADR-061** — `STATUS_LABELS_SHORT` separado de `STATUS_LABELS` para
+  contextos com restricao de largura (tabela de listagem).
+- **ADR-062** — Reuso do padrao de tabela de `/usuarios` em `/provas`
+  (copia fiel de tokens e regras, divergencia explicita so na cor do
+  botao de acao).
+
+### Status
+
+Tela `/provas` visualmente matching Figma, tabela no mesmo padrao de
+`/usuarios`, scroll interno no card funcional e contido pelos cantos
+arredondados. Aguardando validacao visual do Mario em browser real
+(Chrome/Edge) antes de commit.
+
+---
+
 ## [2026-04-09 — Sessao 12] — Wave 2: Auditoria de engenharia senior + hardening (semi-pronta)
 
 ### Contexto

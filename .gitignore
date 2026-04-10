@@ -43,3 +43,8 @@ htmlcov/
 # Misc
 *.log
 *.bak
+
+# Artefatos de preview do etiqueta_service (Wave 2, C06) — gerados localmente
+# por scripts de debug do PDF, nao fazem parte do runtime nem dos testes.
+backend/etiqueta_preview.pdf
+backend/etiqueta_preview.png

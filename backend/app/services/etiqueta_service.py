@@ -5,21 +5,33 @@ O template vem de `configuracoes_sistema.template_etiqueta` (ADR-036), que
 apos a migration 009 e um objeto JSONB:
   {
     "nome": "padrao",
-    "formato": "A4" | "80mm_thermal",
+    "formato": "A4" | "80mm_thermal",  # legacy, nao usado mais
     "logo_enabled": bool,
     "mostrar_data_criacao": bool
   }
 
-Dois formatos suportados:
-  - A4: folha inteira, layout centralizado, util para impressao em jato/laser
-    quando ainda nao ha impressora termica.
-  - 80mm_thermal: etiqueta compacta 80x100mm, para impressora termica que
-    aceita o formato bobina.
+A etiqueta tem dimensao fixa **90mm x 57mm (paisagem)** definida pelo
+design no Figma — comprimento 9cm e altura 5,7cm. O campo `formato` no
+template e ignorado pelo render, mas continua sendo aceito pelo schema
+para compatibilidade com a configuracao existente.
 
-Ambos renderizam: nome da prova, numero do requerimento, vendedor responsavel
-e imagem do QR Code (gerada por `qrcode_service.gerar_imagem_qr`).
+LAYOUT (matching o design Figma — Sessao 14):
+  - Linha horizontal preta no topo (border-top sutil)
+  - Cabecalho esquerdo: 2 logos lado a lado (3STUDIO + studio&ART!)
+  - Cabecalho direito: texto "Aponte a camera para o QR CODE"
+  - Banner preto horizontal abaixo dos logos (separator visual grosso)
+  - Conteudo esquerdo: Nome, Requerimento, Vendedor (label bold + valor)
+  - Conteudo direito: QR Code dentro de retangulo com cantos arredondados
+  - Rodape esquerdo: ano de criacao
+  - Rodape direito: "Etiqueta de rastreio"
+  - Linha horizontal preta no rodape (border-bottom sutil)
 
-FONTE UNICODE (post-Wave 2 hardening):
+LOGOS:
+  Os 2 logos sao SVG vetoriais em `app/services/etiqueta_assets/`.
+  fpdf2 (>=2.7) renderiza SVG nativamente via `pdf.image()` — exige
+  `defusedxml` instalado (ja vem com fpdf2[svg]).
+
+FONTE UNICODE (post-Wave 2 hardening, Sessao 12):
   `fpdf2` nao consegue renderizar caracteres fora de Latin-1 com a fonte
   builtin Helvetica — chars como €, smart quotes, em/en dash, CJK, emoji
   lancam FPDFUnicodeEncodingException e quebram a criacao da prova.
@@ -44,7 +56,7 @@ logger = logging.getLogger(__name__)
 
 TEMPLATE_PADRAO = {
     "nome": "padrao",
-    "formato": "A4",
+    "formato": "A4",  # legacy, nao usado mais — etiqueta sempre 90x57mm
     "logo_enabled": True,
     "mostrar_data_criacao": False,
 }
@@ -56,6 +68,29 @@ _FONTS_DIR = Path(__file__).resolve().parent / "fonts"
 _FONT_REGULAR = _FONTS_DIR / "DejaVuSans.ttf"
 _FONT_BOLD = _FONTS_DIR / "DejaVuSans-Bold.ttf"
 _FONT_FAMILY = "DejaVu"
+
+# ─── Assets visuais (logos vetoriais) ─────────────────────────────────────
+_ASSETS_DIR = Path(__file__).resolve().parent / "etiqueta_assets"
+_LOGO_3STUDIO = _ASSETS_DIR / "logo_3studio.svg"
+_LOGO_STUDIO_ART = _ASSETS_DIR / "logo_studio_e_arte.svg"
+
+# ─── Dimensoes da etiqueta ────────────────────────────────────────────────
+# 9cm x 5.7cm = 90mm x 57mm (paisagem)
+ETIQUETA_W = 90.0
+ETIQUETA_H = 57.0
+
+# ─── Parametros do adaptive sizing dos campos ─────────────────────────────
+# Largura do bloco de texto esquerdo (x=3 a x=56, antes do QR em x=58).
+# O multi_cell com markdown=True tem ~5mm de overhead (cell padding interno
+# + margem de seguranca pro wrap) comparado ao que `get_string_width` mede
+# diretamente. Calibrado empiricamente contra o caso real "ETIQ CAFE
+# CAPRONI CLASSICO" — nome longo que no 7pt cabe em uma linha.
+_CAMPO_W = 53.0
+_CAMPO_INNER_W = _CAMPO_W - 5.0
+_LINE_H_DEFAULT = 4.8
+_FONT_SIZE_DEFAULT = 9.0
+_FONT_SIZE_MIN = 7.0
+_SIZES_TO_TRY = (9.0, 8.5, 8.0, 7.5, 7.0)
 
 
 def _register_fonts(pdf: FPDF) -> None:
@@ -73,9 +108,23 @@ def _register_fonts(pdf: FPDF) -> None:
     pdf.add_font(_FONT_FAMILY, "B", str(_FONT_BOLD))
 
 
+def _check_assets() -> None:
+    """Verifica que os SVGs dos logos existem no deploy."""
+    missing = [p for p in (_LOGO_3STUDIO, _LOGO_STUDIO_ART) if not p.exists()]
+    if missing:
+        raise RuntimeError(
+            f"Assets de etiqueta ausentes: {[str(p) for p in missing]}. "
+            "Verifique backend/app/services/etiqueta_assets/."
+        )
+
+
 def _fmt_datetime(dt: datetime) -> str:
     """Formata em pt-BR sem depender de locale do sistema."""
     return dt.strftime("%d/%m/%Y %H:%M")
+
+
+def _fmt_year(dt: datetime) -> str:
+    return dt.strftime("%Y")
 
 
 def gerar_pdf(
@@ -89,108 +138,175 @@ def gerar_pdf(
 ) -> bytes:
     """Renderiza a etiqueta como PDF e retorna os bytes.
 
+    Dimensao FIXA de 90mm x 57mm (paisagem) — matching o design do Figma.
+    O campo `formato` do template e aceito mas ignorado pelo render.
+
     Args:
         nome_prova: Texto exibido em destaque.
         nro_requerimento: Numero do requerimento.
         vendedor_nome: Nome completo do vendedor responsavel.
         qr_image_bytes: PNG do QR Code (de qrcode_service.gerar_imagem_qr).
         template: Dict com as chaves do template_etiqueta. Se None, usa TEMPLATE_PADRAO.
-        created_at: Usado apenas quando template["mostrar_data_criacao"] = True.
+                  Campos respeitados: `logo_enabled`, `mostrar_data_criacao`.
+        created_at: Usado para extrair o ano (rodape) e a data completa
+                    (quando `mostrar_data_criacao` = True).
 
     Returns:
         Bytes do PDF (comeca com b'%PDF-').
 
     Raises:
-        RuntimeError: se os TTFs de DejaVu nao estiverem presentes no deploy.
+        RuntimeError: se TTFs ou SVGs estiverem ausentes no deploy.
     """
     tpl = {**TEMPLATE_PADRAO, **(template or {})}
-    formato = tpl.get("formato", "A4")
     logo_enabled = bool(tpl.get("logo_enabled", True))
     mostrar_data = bool(tpl.get("mostrar_data_criacao", False))
 
-    if formato == "80mm_thermal":
-        pdf = FPDF(orientation="P", unit="mm", format=(80, 120))
-        largura_util = 74  # 80mm - 2*3mm margem
-        qr_size = 40
-    else:
-        pdf = FPDF(orientation="P", unit="mm", format="A4")
-        largura_util = 190  # A4 = 210mm - 2*10mm margem
-        qr_size = 70
+    _check_assets()
 
+    pdf = FPDF(orientation="P", unit="mm", format=(ETIQUETA_W, ETIQUETA_H))
+    pdf.set_auto_page_break(auto=False)
+    pdf.set_margins(left=3, top=3, right=3)
+    pdf.add_page()
     _register_fonts(pdf)
 
-    pdf.set_auto_page_break(auto=False)
-    pdf.set_margins(
-        left=10 if formato != "80mm_thermal" else 3,
-        top=10 if formato != "80mm_thermal" else 5,
-        right=10 if formato != "80mm_thermal" else 3,
-    )
-    pdf.add_page()
+    # Cor padrao: tudo preto sobre branco
+    pdf.set_draw_color(0, 0, 0)
+    pdf.set_fill_color(0, 0, 0)
+    pdf.set_text_color(0, 0, 0)
 
-    # ─── Cabecalho ────────────────────────────────────────────────────────
+    # ─── Linha horizontal superior ────────────────────────────────────────
+    pdf.set_line_width(0.4)
+    pdf.line(3, 3, ETIQUETA_W - 3, 3)
+
+    # ─── Cabecalho: logos a esquerda + texto QR a direita ────────────────
     if logo_enabled:
-        pdf.set_font(_FONT_FAMILY, "B", 18 if formato != "80mm_thermal" else 14)
-        pdf.cell(largura_util, 10, "3STUDIO", align="C", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(2)
+        # Logo 3STUDIO — viewBox 56.23 x 11.85 (ratio ~4.75:1).
+        # 22mm largura -> ~4.6mm altura. Posicionado com respiro do topo.
+        pdf.image(str(_LOGO_3STUDIO), x=4, y=8, w=22)
 
-    pdf.set_font(_FONT_FAMILY, "B", 14 if formato != "80mm_thermal" else 10)
-    pdf.cell(
-        largura_util,
-        8,
-        "PROVA DIGITAL",
+        # Logo studio &ART! — viewBox 45.57 x 23.79 (ratio ~1.92:1).
+        # 13mm largura -> ~6.8mm altura. Posicionado um pouco acima para
+        # que o ponto de exclamacao alongado fique alinhado ao topo do
+        # 3STUDIO.
+        pdf.image(str(_LOGO_STUDIO_ART), x=28.5, y=6.5, w=13)
+
+    # Texto direito: "Aponte a camera para o QR CODE"
+    # Centralizado horizontalmente EM CIMA do QR Code (que comeca em
+    # x=58, w=29 → centro em x=72.5). Usa multi_cell com markdown=True
+    # + align="C" para suportar **bold** inline e auto-centralizar.
+    pdf.set_xy(58, 6)
+    pdf.set_font(_FONT_FAMILY, "", 7.5)
+    pdf.multi_cell(
+        w=29,
+        h=3.5,
+        text="Aponte a camera\npara o **QR CODE**",
+        markdown=True,
         align="C",
         new_x="LMARGIN",
         new_y="NEXT",
-        border="B",
     )
-    pdf.ln(4)
 
-    # ─── Campos de texto ─────────────────────────────────────────────────
-    label_font_size = 10 if formato != "80mm_thermal" else 8
-    value_font_size = 12 if formato != "80mm_thermal" else 9
+    # ─── Banner preto horizontal (separador grosso) ──────────────────────
+    # Vai apenas do inicio (x=3) ate o fim do bloco dos logos (~x=46),
+    # NAO se estende ate o lado direito onde fica o QR code.
+    pdf.set_fill_color(0, 0, 0)
+    pdf.rect(3, 16, 44, 2, style="F")
 
-    def _linha_campo(label: str, valor: str) -> None:
-        pdf.set_font(_FONT_FAMILY, "B", label_font_size)
-        pdf.cell(largura_util, 5, label, new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font(_FONT_FAMILY, "", value_font_size)
-        # multi_cell permite quebra automatica de linhas longas.
-        pdf.multi_cell(largura_util, 6, valor, new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(1)
+    # ─── Conteudo esquerdo: Nome / Requerimento / Vendedor ───────────────
+    # Adaptive sizing: usa multi_cell com markdown=True (suporta **bold**
+    # inline). Tenta os tamanhos do MAIOR pro MENOR e usa o primeiro que
+    # couber em uma unica linha. Constantes (_CAMPO_W, _SIZES_TO_TRY, etc)
+    # definidas no topo do modulo.
 
-    _linha_campo("NOME DA PROVA", nome_prova)
-    _linha_campo("NUMERO DO REQUERIMENTO", nro_requerimento)
-    _linha_campo("VENDEDOR RESPONSAVEL", vendedor_nome)
+    def _measure_one_line(label: str, valor: str, size: float) -> bool:
+        """Retorna True se 'Label: valor' (label bold + valor regular)
+        cabe em _CAMPO_INNER_W."""
+        pdf.set_font(_FONT_FAMILY, "B", size)
+        w_label = pdf.get_string_width(f"{label}: ")
+        pdf.set_font(_FONT_FAMILY, "", size)
+        w_valor = pdf.get_string_width(valor)
+        return w_label + w_valor < _CAMPO_INNER_W
 
+    def _campo(label: str, valor: str) -> None:
+        # Procura o maior tamanho de fonte (dos _SIZES_TO_TRY) que faz
+        # o conteudo caber em uma unica linha. Se nenhum couber, usa o
+        # menor (_FONT_SIZE_MIN) e deixa o multi_cell quebrar em 2 linhas.
+        chosen_size = _FONT_SIZE_MIN
+        for size in _SIZES_TO_TRY:
+            if _measure_one_line(label, valor, size):
+                chosen_size = size
+                break
+        pdf.set_x(3)
+        pdf.set_font(_FONT_FAMILY, "", chosen_size)
+        line_h = _LINE_H_DEFAULT * (chosen_size / _FONT_SIZE_DEFAULT)
+        pdf.multi_cell(
+            w=_CAMPO_W,
+            h=line_h,
+            text=f"**{label}:** {valor}",
+            markdown=True,
+            new_x="LMARGIN",
+            new_y="NEXT",
+        )
+        pdf.ln(0.8)
+
+    # Centralizacao vertical dos 3 campos entre o banner (y=18) e o
+    # rodape (y=49). Espaco util = 31mm; 3 campos com line_h ~5.6mm
+    # (multi_cell 4.8mm + ln 0.8mm) ocupam ~16.8mm. Sobram ~14.2mm
+    # distribuidos igualmente — ~7.1mm em cima + ~7.1mm embaixo.
+    pdf.set_y(25)
+    _campo("Nome", nome_prova)
+    _campo("Requerimento", nro_requerimento)
+    _campo("Vendedor", vendedor_nome)
+
+    # Data de criacao opcional (logo abaixo do bloco principal)
     if mostrar_data and created_at is not None:
-        _linha_campo("DATA DE CRIACAO", _fmt_datetime(created_at))
+        _campo("Data", _fmt_datetime(created_at))
 
-    pdf.ln(3)
-
-    # ─── QR Code ─────────────────────────────────────────────────────────
-    # Centraliza horizontalmente o QR na area util.
+    # ─── QR Code (lado direito) ──────────────────────────────────────────
+    # Quadrado com cantos arredondados envolvendo o QR.
+    # Posicionado em x=58 (em vez de 55) para liberar 3mm a mais para o
+    # bloco esquerdo, permitindo que "Nome: ETIQ CAFE CAPRONI CLASSICO"
+    # caiba em uma linha so com fonte 7.5pt.
+    qr_box_x = 58
+    qr_box_y = 15
+    qr_box_size = 29
+    pdf.set_line_width(0.4)
+    pdf.set_draw_color(0, 0, 0)
+    # `round_corners=True` exige fpdf2 >= 2.7 (ja temos 2.8.7)
+    pdf.rect(
+        qr_box_x,
+        qr_box_y,
+        qr_box_size,
+        qr_box_size,
+        style="D",
+        round_corners=True,
+        corner_radius=2.8,
+    )
+    # QR code centralizado dentro do quadrado, com pequena margem.
+    qr_padding = 2.2
+    qr_size = qr_box_size - 2 * qr_padding
     qr_io = io.BytesIO(qr_image_bytes)
-    current_y = pdf.get_y()
     pdf.image(
         qr_io,
-        x=(pdf.w - qr_size) / 2,
-        y=current_y,
+        x=qr_box_x + qr_padding,
+        y=qr_box_y + qr_padding,
         w=qr_size,
         h=qr_size,
     )
-    pdf.set_y(current_y + qr_size + 3)
 
-    # Legenda abaixo do QR. Nao usamos italico porque DejaVu Oblique nao esta
-    # bundled (economiza ~700KB) — peso regular em tamanho menor da o mesmo
-    # destaque visual.
-    pdf.set_font(_FONT_FAMILY, "", 8)
-    pdf.cell(
-        largura_util,
-        4,
-        "Escaneie o QR Code com o sistema para movimentar esta prova",
-        align="C",
-        new_x="LMARGIN",
-        new_y="NEXT",
-    )
+    # ─── Rodape: ano (esquerda) + texto (direita) ────────────────────────
+    rodape_y = 49
+    pdf.set_font(_FONT_FAMILY, "", 8.5)
+    ano = _fmt_year(created_at) if created_at is not None else ""
+    pdf.set_xy(3, rodape_y)
+    pdf.cell(40, 4, ano, align="L")
+
+    pdf.set_xy(ETIQUETA_W - 50, rodape_y)
+    pdf.cell(47, 4, "Etiqueta de rastreio", align="R")
+
+    # ─── Linha horizontal inferior ────────────────────────────────────────
+    pdf.set_line_width(0.4)
+    pdf.line(3, ETIQUETA_H - 3, ETIQUETA_W - 3, ETIQUETA_H - 3)
 
     # fpdf2 retorna bytearray. Convertemos para bytes imutavel para
     # compatibilidade com quem espera bytes (base64, testes, etc).

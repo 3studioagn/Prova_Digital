@@ -408,6 +408,14 @@ async def test_patch_no_auth(mock_db):
 
 
 async def test_patch_commit_failure_rollback(admin_user, mock_db):
+    """Commit failure em PATCH retorna 502 (nao 500) apos o fix A2 da
+    auditoria Wave 2 (Sessao 21 — ADR-077). 502 Bad Gateway e o status
+    correto: o upstream do FastAPI (Postgres) nao conseguiu commitar,
+    nao e bug interno do backend. Cliente pode retentar com back-off.
+
+    Consistente com o padrao estabelecido nos Componentes 07 e 08
+    (ADR-074, ADR-076).
+    """
     _setup(mock_db, admin=admin_user)
     cfg = _make_config("tempo_atraso_horas_uteis", 48)
     mock_db.execute.return_value = _scalar(cfg)
@@ -418,7 +426,8 @@ async def test_patch_commit_failure_rollback(admin_user, mock_db):
             f"{PREFIX}/tempo_atraso_horas_uteis",
             json={"valor": 72},
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
+    assert "atualizar configuracao" in resp.json()["detail"].lower()
     mock_db.rollback.assert_awaited()
 
 
@@ -460,3 +469,120 @@ async def test_patch_sem_descricao_mantem_atual(admin_user, mock_db):
         )
     assert resp.status_code == 200
     assert cfg.descricao == "desc atual preservada"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# A1 + A2 + M1 + M2 (auditoria Wave 2 — Sessao 21) — robustez do C09
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Os 5 testes abaixo cobrem os fixes da auditoria senior do Componente 09:
+#   A1 — try/except em `list_configuracoes` e `get_configuracao`.
+#        Erros transitorios de DB → 502 (padrao ADR-074/076).
+#   A2 — try/except maior em `update_configuracao` + commit failure 502.
+#        Valida via mock de side_effect em db.execute (select falhando).
+#   M1 — branch defensivo "PATCH whitelisted mas ausente do DB".
+#   M2 — branch do validator de `mostrar_data_criacao` nao-bool.
+
+
+async def test_list_configuracoes_db_error_returns_502(admin_user, mock_db):
+    """A1 — erro transitorio no DB do `list_configuracoes` retorna 502."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = RuntimeError("connection reset by peer")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/")
+
+    assert resp.status_code == 502
+    assert "carregar configuracoes" in resp.json()["detail"].lower()
+
+
+async def test_get_configuracao_db_error_returns_502(admin_user, mock_db):
+    """A1 — erro transitorio no DB do `get_configuracao` retorna 502.
+
+    A chave e whitelisted (tempo_atraso_horas_uteis), entao o check da
+    whitelist passa e o codigo chega ate o db.execute que falha.
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = RuntimeError("pooler not reachable")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/tempo_atraso_horas_uteis")
+
+    assert resp.status_code == 502
+    assert "carregar configuracao" in resp.json()["detail"].lower()
+
+
+async def test_patch_configuracao_db_error_returns_502(admin_user, mock_db):
+    """A2 — erro transitorio no SELECT FOR UPDATE retorna 502 (nao 500)."""
+    _setup(mock_db, admin=admin_user)
+    # Falha antes do SELECT — o validator de valor passa, entao a primeira
+    # interacao com DB e o SELECT FOR UPDATE.
+    mock_db.execute.side_effect = RuntimeError("db timeout mid-transaction")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.patch(
+            f"{PREFIX}/tempo_atraso_horas_uteis",
+            json={"valor": 72},
+        )
+
+    assert resp.status_code == 502
+    assert "atualizar configuracao" in resp.json()["detail"].lower()
+    mock_db.rollback.assert_awaited()
+
+
+async def test_patch_configuracao_whitelisted_mas_ausente_no_db(
+    admin_user, mock_db
+):
+    """M1 — branch defensivo: chave whitelisted, validator passa, mas o
+    SELECT FOR UPDATE retorna None (seed removido manualmente, migration
+    revertida, etc). Handler deve retornar 404 com mensagem especifica —
+    NAO 502 e NAO 500.
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.return_value = _scalar(None)  # SELECT retorna vazio
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.patch(
+            f"{PREFIX}/tempo_atraso_horas_uteis",
+            json={"valor": 72},
+        )
+
+    assert resp.status_code == 404
+    assert "nao esta cadastrada" in resp.json()["detail"].lower()
+    # Nao deve chamar rollback — nenhum flush ou mutacao aconteceu antes
+    # do raise do 404.
+    mock_db.rollback.assert_not_awaited()
+    # Nao deve chamar commit tampouco.
+    mock_db.commit.assert_not_awaited()
+
+
+async def test_patch_template_mostrar_data_criacao_nao_bool(admin_user, mock_db):
+    """M2 — valida o branch do validator que rejeita `mostrar_data_criacao`
+    nao-booleano. Completa a cobertura dos 4 campos do template (os outros
+    3 ja sao testados: nome, formato, logo_enabled).
+
+    Nota: a chave de acesso e usada com um valor invalido — o handler nao
+    precisa sequer chegar no DB porque a validacao Pydantic-like do
+    dispatch acontece antes do SELECT FOR UPDATE.
+    """
+    _setup(mock_db, admin=admin_user)
+
+    invalid_template = {
+        "nome": "padrao",
+        "formato": "A4",
+        "logo_enabled": True,
+        "mostrar_data_criacao": "true",  # string em vez de bool
+    }
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.patch(
+            f"{PREFIX}/template_etiqueta",
+            json={"valor": invalid_template},
+        )
+
+    assert resp.status_code == 422
+    detail = resp.json()["detail"].lower()
+    assert "mostrar_data_criacao" in detail
+    assert "booleano" in detail
+    # A validacao acontece ANTES de qualquer query (ADR-045 dispatch).
+    mock_db.execute.assert_not_called()

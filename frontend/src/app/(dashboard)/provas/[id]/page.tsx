@@ -12,14 +12,12 @@ import {
 import { VisualizarEtiquetaModal } from "./VisualizarEtiquetaModal";
 import styles from "./detalhe.module.css";
 
-function formatDateTime(iso: string): string {
+function formatDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("pt-BR", {
+    return new Date(iso).toLocaleDateString("pt-BR", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
     });
   } catch {
     return iso;
@@ -30,6 +28,27 @@ function formatRota(rota: Rota | null, rotaProjetada: Rota | null): string {
   if (rota) return ROTA_LABELS[rota];
   if (rotaProjetada) return `${ROTA_LABELS[rotaProjetada]} (projetada)`;
   return "—";
+}
+
+/** Ícone seta esquerda SVG inline para o botão Voltar.
+ * Evita tocar em `components/icons.tsx` (fora do escopo desta sessão). */
+function ArrowLeftIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={18}
+      height={18}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      <path d="M19 12H5M12 19l-7-7 7-7" />
+    </svg>
+  );
 }
 
 interface PageProps {
@@ -62,7 +81,12 @@ export default function ProvaDetalhePage({ params }: PageProps) {
 
   const handleDownloadEtiqueta = useCallback(async () => {
     const token = await getToken();
-    if (!token) return;
+    if (!token) {
+      // Sem token: feedback imediato + redireciona fluxo para login
+      // (o middleware ja trata o redirect no proximo navigate).
+      alert("Sessao expirada. Faca login novamente.");
+      return;
+    }
     const apiBase =
       process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     try {
@@ -70,7 +94,17 @@ export default function ProvaDetalhePage({ params }: PageProps) {
         `${apiBase}/api/v1/provas/${id}/etiqueta.pdf`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) {
+        // Tenta ler o detail do backend (422 de gerar_pdf, 502 de DB).
+        let detail: string | null = null;
+        try {
+          const body = await resp.json();
+          detail = body?.detail ?? null;
+        } catch {
+          // Resposta nao-JSON — ignora e usa fallback.
+        }
+        throw new Error(detail ?? `HTTP ${resp.status}`);
+      }
       const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -80,8 +114,20 @@ export default function ProvaDetalhePage({ params }: PageProps) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch {
-      // noop — o botao do modal tem feedback melhor
+    } catch (err) {
+      // M1 (auditoria Wave 2 — Sessao 20): feedback explicito em caso
+      // de falha. Antes o catch era silencioso (comentario "noop"), o
+      // que deixava o usuario confuso quando o botao "Baixar etiqueta"
+      // nao fazia nada. Usa alert() nativo como fallback — nao ha
+      // sistema de toast no projeto ainda.
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Nao foi possivel baixar a etiqueta.";
+      alert(
+        `Nao foi possivel baixar a etiqueta: ${msg}\n\n` +
+          "Tente novamente ou use o botao 'Visualizar etiqueta' para abrir o PDF no modal.",
+      );
     }
   }, [id, getToken, prova?.nro_requerimento]);
 
@@ -92,8 +138,9 @@ export default function ProvaDetalhePage({ params }: PageProps) {
       </div>
       <div className={styles.desktopOnly}>
         <div className={styles.breadcrumb}>
-          <Link href="/provas" className={styles.backLink}>
-            ← Voltar para provas
+          <Link href="/provas" className={styles.backBtn}>
+            <ArrowLeftIcon />
+            <span>Voltar</span>
           </Link>
         </div>
 
@@ -114,79 +161,60 @@ export default function ProvaDetalhePage({ params }: PageProps) {
 
         {!loading && !error && prova && (
           <>
-            <header className={styles.pageHeader}>
-              <div>
-                <h1 className={styles.title}>{prova.nro_requerimento}</h1>
-                <p className={styles.subtitle}>{prova.nome}</p>
-              </div>
-              <span
-                className={`${styles.statusBadge} ${styles[`status_${prova.status}`] ?? ""}`}
-              >
-                {STATUS_LABELS[prova.status]}
-              </span>
-            </header>
+            {/* Card branco principal: envolve dados + arte no topo E o
+                card preto do historico abaixo, tudo em um unico container. */}
+            <section className={styles.innerCard}>
+              <div className={styles.innerCardGrid}>
+                <div className={styles.mainInfo}>
+                  <h1 className={styles.title}>{prova.nro_requerimento}</h1>
+                  <h2 className={styles.subtitle}>{prova.nome}</h2>
 
-            <section className={styles.detailGrid}>
-              <div className={styles.dataCard}>
-                <h2 className={styles.h2}>Dados da prova</h2>
-
-                <dl className={styles.dl}>
-                  <dt>Cliente</dt>
-                  <dd>{prova.cliente}</dd>
-
-                  <dt>Vendedor</dt>
-                  <dd>
-                    {prova.vendedor_nome}
-                    {prova.vendedor_localizacao && (
-                      <span className={styles.chip}>
-                        {prova.vendedor_localizacao}
-                      </span>
-                    )}
-                  </dd>
-
-                  <dt>Rota</dt>
-                  <dd>{formatRota(prova.rota, prova.rota_projetada)}</dd>
-
-                  <dt>Ciclo atual</dt>
-                  <dd>{prova.ciclo_atual}</dd>
-
-                  <dt>Criada em</dt>
-                  <dd>{formatDateTime(prova.created_at)}</dd>
-
-                  <dt>Atualizada em</dt>
-                  <dd>{formatDateTime(prova.updated_at)}</dd>
-
-                  {prova.motivo_cancelamento && (
-                    <>
-                      <dt>Motivo do cancelamento</dt>
-                      <dd className={styles.motivoCancelamento}>
+                  <div className={styles.metadata}>
+                    <p className={styles.metadataItem}>
+                      <strong>Cliente:</strong> {prova.cliente}
+                    </p>
+                    <p className={styles.metadataItem}>
+                      <strong>Vendedor:</strong> {prova.vendedor_nome}
+                    </p>
+                    <p className={styles.metadataItem}>
+                      <strong>Rota:</strong>{" "}
+                      {formatRota(prova.rota, prova.rota_projetada)}
+                    </p>
+                    <p className={styles.metadataItem}>
+                      <strong>Ciclo Atual:</strong> {prova.ciclo_atual}
+                    </p>
+                    <p className={styles.metadataItem}>
+                      <strong>Criada em:</strong> {formatDate(prova.created_at)}
+                    </p>
+                    {prova.motivo_cancelamento && (
+                      <p
+                        className={`${styles.metadataItem} ${styles.motivoCancelamento}`}
+                      >
+                        <strong>Motivo do cancelamento:</strong>{" "}
                         {prova.motivo_cancelamento}
-                      </dd>
-                    </>
-                  )}
-                </dl>
+                      </p>
+                    )}
+                  </div>
 
-                <div className={styles.cardActions}>
-                  <button
-                    type="button"
-                    className={styles.btnPrimary}
-                    onClick={() => setEtiquetaModalOpen(true)}
-                  >
-                    Visualizar etiqueta
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.btnSecondary}
-                    onClick={handleDownloadEtiqueta}
-                  >
-                    Baixar etiqueta (PDF)
-                  </button>
+                  <div className={styles.actions}>
+                    <button
+                      type="button"
+                      className={styles.btnPrimary}
+                      onClick={() => setEtiquetaModalOpen(true)}
+                    >
+                      Visualizar etiqueta
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.btnSecondary}
+                      onClick={handleDownloadEtiqueta}
+                    >
+                      Baixar etiqueta
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <div className={styles.artCard}>
-                <h2 className={styles.h2}>Arte</h2>
-                <div className={styles.artContainer}>
+                <div className={styles.artSlot}>
                   {imagemError && (
                     <div className={styles.artPlaceholder}>
                       Falha ao carregar URL da arte: {imagemError}
@@ -217,47 +245,50 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                   )}
                 </div>
               </div>
-            </section>
 
-            <section className={styles.timelineCard}>
-              <h2 className={styles.h2}>Historico de movimentacoes</h2>
-              {movimentacoes && movimentacoes.total === 0 && (
-                <div className={styles.timelineEmpty}>
-                  <p>Esta prova ainda nao teve movimentacoes.</p>
-                  <p className={styles.timelineHint}>
-                    A timeline visual fica disponivel quando a prova for
-                    escaneada pela primeira vez.
-                  </p>
-                </div>
-              )}
-              {movimentacoes && movimentacoes.total > 0 && (
-                <ul className={styles.timelineList}>
-                  {movimentacoes.items.map((m) => (
-                    <li key={m.id} className={styles.timelineItem}>
-                      <div className={styles.timelineHeader}>
-                        <span className={styles.timelineStatus}>
-                          {STATUS_LABELS[m.status_anterior]} →{" "}
-                          {STATUS_LABELS[m.status_novo]}
-                        </span>
-                        <span className={styles.timelineDate}>
-                          {formatDateTime(m.created_at)}
-                        </span>
-                      </div>
-                      <div className={styles.timelineMeta}>
-                        Por <strong>{m.usuario_nome}</strong> ({m.usuario_setor})
-                        · Ciclo {m.ciclo}
-                        {m.rota_no_momento &&
-                          ` · ${ROTA_LABELS[m.rota_no_momento]}`}
-                      </div>
-                      {m.motivo_reprovacao && (
-                        <div className={styles.timelineMotivo}>
-                          Motivo: {m.motivo_reprovacao}
+              {/* Card preto ANINHADO dentro do innerCard branco */}
+              <section className={styles.timelineCard}>
+                <h2 className={styles.timelineTitle}>
+                  Historico de movimentacoes
+                </h2>
+                {movimentacoes && movimentacoes.total === 0 && (
+                  <div className={styles.timelineEmpty}>
+                    <p>Esta prova ainda nao teve movimentacoes.</p>
+                    <p className={styles.timelineHint}>
+                      A timeline visual fica disponivel quando a prova for
+                      escaneada pela primeira vez.
+                    </p>
+                  </div>
+                )}
+                {movimentacoes && movimentacoes.total > 0 && (
+                  <ul className={styles.timelineList}>
+                    {movimentacoes.items.map((m) => (
+                      <li key={m.id} className={styles.timelineItem}>
+                        <div className={styles.timelineHeader}>
+                          <span className={styles.timelineStatus}>
+                            {STATUS_LABELS[m.status_anterior]} →{" "}
+                            {STATUS_LABELS[m.status_novo]}
+                          </span>
+                          <span className={styles.timelineDate}>
+                            {formatDate(m.created_at)}
+                          </span>
                         </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
+                        <div className={styles.timelineMeta}>
+                          Por <strong>{m.usuario_nome}</strong> ({m.usuario_setor})
+                          · Ciclo {m.ciclo}
+                          {m.rota_no_momento &&
+                            ` · ${ROTA_LABELS[m.rota_no_momento]}`}
+                        </div>
+                        {m.motivo_reprovacao && (
+                          <div className={styles.timelineMotivo}>
+                            Motivo: {m.motivo_reprovacao}
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             </section>
 
             <VisualizarEtiquetaModal

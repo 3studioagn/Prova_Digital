@@ -1,7 +1,20 @@
 /*
  * Pagina Provas — listagem com filtros + tabela + paginacao.
- * Reutiliza tokens de `globals.css`. Segue o padrao visual de /usuarios
- * mas com CSS isolado (nao importa usuarios.module.css).
+ *
+ * Layout alinhado ao design Figma (superficie clara #eaeaea herdada do
+ * .card do layout do dashboard). Estilo:
+ *   - Titulo grande preto, sem badge de total
+ *   - Filtros em grid 4x2 pill-shaped com labels pretos acima dos inputs
+ *   - Botao "Limpar" preto arredondado no final da segunda linha
+ *   - Tabela em card branco/claro arredondado com dividers verticais
+ *     entre colunas e status em texto plano (nao badge colorido)
+ *   - Botao "Ver" amarelo pill pequeno como acao de cada linha
+ *
+ * Todos os tokens vem de globals.css. Pontos de atencao:
+ *   --color-card-bg     = #eaeaea (ja eh o fundo do .card do layout)
+ *   --color-card-surface = #d9d9d9 (fundo dos inputs pill)
+ *   --color-accent      = #ffcb5c (botao Ver)
+ *   --color-card-text   = #000000
  */
 
 /* ── Mobile-only notice / desktop wrapper ─────────────────────────── */
@@ -17,32 +30,15 @@
 /* ── Header ───────────────────────────────────────────────────────── */
 
 .pageHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 2rem;
-  flex-wrap: wrap;
+  margin-bottom: 2.5rem;
 }
 
 .title {
-  font-size: var(--fs-display);
-  font-weight: 400;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 500;
   line-height: 1.05;
   color: var(--color-card-text);
-  letter-spacing: -0.01em;
-}
-
-.totalBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.5rem 1.25rem;
-  background: var(--color-card-surface);
-  border: 1px solid var(--color-card-border);
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-sm);
-  color: var(--color-card-text-muted);
-  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 
 /* ── Filtros ──────────────────────────────────────────────────────── */
@@ -50,62 +46,82 @@
 .filters {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  margin-bottom: 2rem;
+  gap: 1.25rem;
+  margin-bottom: 2.5rem;
 }
 
 .filterRow {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1rem;
-  align-items: flex-end;
+  gap: 1.25rem;
+  align-items: end;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
+  gap: 0.5rem;
+  min-width: 0;
 }
 
 .label {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--color-card-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--fs-base);
+  font-weight: 400;
+  color: var(--color-card-text);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .input,
 .select {
-  height: 42px;
-  padding: 0 1rem;
-  background: #fff;
-  border: 1px solid var(--color-card-border);
+  width: 100%;
+  height: 56px;
+  padding: 0 1.5rem;
+  background: var(--color-card-surface);
+  border: none;
   border-radius: var(--radius-pill);
   font-family: inherit;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   color: var(--color-card-text);
-  transition: border-color 0.15s ease;
+  transition: box-shadow 0.15s ease;
+}
+
+.input::placeholder {
+  color: var(--color-card-text-muted);
 }
 
 .input:focus,
 .select:focus {
   outline: none;
-  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+/* Safari/Chrome renderizam date inputs com width "natural" que comporta
+   dd/mm/aaaa + icone — forcamos a mesma altura/fonte dos outros campos. */
+.input[type="date"] {
+  line-height: 56px;
+}
+.input[type="date"]::-webkit-datetime-edit {
+  padding: 0;
+}
+.input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.55;
+  filter: brightness(0);
 }
 
 .select {
   appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'><path d='M1 1l5 5 5-5' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9' fill='none'><path d='M1 1l6 6 6-6' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat;
-  background-position: right 1rem center;
-  padding-right: 2.5rem;
+  background-position: right 1.5rem center;
+  padding-right: 3rem;
   cursor: pointer;
 }
 
 .clearWrap {
   display: flex;
-  align-items: flex-end;
+  align-items: end;
   justify-content: flex-end;
 }
 
@@ -113,14 +129,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 42px;
-  padding: 0 1.5rem;
-  background: var(--color-bg-input);
+  width: 100%;
+  height: 56px;
+  padding: 0 2rem;
+  background: var(--color-bg);
   color: var(--color-text-primary);
   border: none;
   border-radius: var(--radius-pill);
   font-family: inherit;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-base);
   font-weight: 500;
   cursor: pointer;
   transition: opacity 0.15s ease;
@@ -135,180 +152,175 @@
   cursor: not-allowed;
 }
 
-/* ── Tabela ───────────────────────────────────────────────────────── */
+/* ── Tabela ───────────────────────────────────────────────────────── *
+ * Mesma estrutura visual da tabela de /usuarios (usuarios.module.css):
+ * contorno externo arredondado + separadores verticais entre colunas
+ * contidos na area padded (nao encostam na borda externa).
+ *
+ * Diferenca: botao de acao e o "Ver" amarelo em vez do par editar/excluir.
+ */
 
 .tableWrap {
+  background: transparent;
   border: 1px solid var(--color-card-border);
   border-radius: var(--radius-card-lg);
-  background: transparent;
+  padding: 1.5rem;
   overflow: hidden;
   margin-bottom: 1.5rem;
-  padding: 1rem 0;
 }
 
 .tableScroll {
+  width: 100%;
   overflow-x: auto;
 }
 
 .table {
   width: 100%;
-  min-width: 900px;
   border-collapse: collapse;
-  font-size: var(--fs-sm);
+  font-size: 0.9375rem;
+  table-layout: auto;
 }
 
-.table th,
-.table td {
-  padding: 0.875rem 1rem;
+/* Linha divisoria abaixo do cabecalho */
+.table thead tr {
+  border-bottom: 1px solid var(--color-card-border);
+}
+
+/* Cabecalho */
+.table th {
   text-align: center;
-  vertical-align: middle;
+  padding: 1.125rem 1rem;
+  color: var(--color-card-text-muted);
+  font-weight: 500;
+  font-size: 1.25rem;
+  white-space: nowrap;
   border-right: 1px solid var(--color-card-border);
+  background: transparent;
 }
 
+/* Corpo */
+.table td {
+  text-align: center;
+  padding: 1rem;
+  color: var(--color-card-text-muted);
+  border-right: 1px solid var(--color-card-border);
+  vertical-align: middle;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+/* Ultima coluna nao tem divisor a direita (evita linha dupla com a borda) */
 .table th:last-child,
 .table td:last-child {
   border-right: none;
 }
 
-.table thead tr {
-  border-bottom: 1px solid var(--color-card-border);
-}
-
-.table th {
-  font-weight: 600;
-  color: var(--color-card-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: var(--fs-xs);
-}
-
-.table td {
-  color: var(--color-card-text);
-}
-
 .mono {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: var(--fs-xs);
+  font-family: inherit;
 }
 
 .thActions {
-  width: 120px;
+  text-align: center;
 }
 
 .actions {
-  width: 120px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
+/* Botao "Ver" — pill amarelo com o mesmo dimensionamento do editBtn de
+   /usuarios. Nao usamos mais #000; a acao principal do provas e neutra
+   (visualizacao) e segue o acento de marca. */
 .detailBtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.5rem 1rem;
-  background: #000;
-  color: #fff;
+  padding: 0.5rem 1.25rem;
+  background: var(--color-accent);
+  color: var(--color-card-text);
   border: none;
   border-radius: var(--radius-pill);
-  font-family: inherit;
-  font-size: var(--fs-xs);
+  font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
+  min-width: 84px;
   text-decoration: none;
-  transition: opacity 0.15s ease;
+  transition: background 0.15s;
 }
 
 .detailBtn:hover {
-  opacity: 0.85;
+  background: var(--color-accent-hover);
+  text-decoration: none;
 }
 
-/* ── Status badges ────────────────────────────────────────────────── */
+/* ── Status (texto plano — cores ficam reservadas para botoes) ────── */
 
 .statusBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.25rem 0.75rem;
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  background: var(--color-card-surface);
-  color: var(--color-card-text);
-  white-space: nowrap;
-}
-
-.status_CRIADA {
-  background: color-mix(in srgb, var(--color-accent) 25%, white);
-}
-
-.status_RETIRADA_PELO_VENDEDOR,
-.status_APROVADA_PELO_VENDEDOR,
-.status_DE_VOLTA_3STUDIO {
-  background: #d4ecff;
-  color: #003766;
-}
-
-.status_COM_MOTORISTA,
-.status_ENVIADA_PARA_CLICHERIA,
-.status_ENCAMINHADA_A_CLICHERIA {
-  background: #fff3c4;
-  color: #664000;
-}
-
-.status_RECEBIDA_PELA_CLICHERIA {
-  background: #c9f0d1;
-  color: #0a4a19;
-}
-
-.status_REPROVADA_PELO_VENDEDOR,
-.status_CANCELADA {
-  background: color-mix(in srgb, var(--color-danger) 20%, white);
-  color: #6b0000;
+  display: inline-block;
+  font-weight: 400;
+  font-size: 0.9375rem;
+  color: var(--color-card-text-muted);
 }
 
 /* ── Estados de loading / vazio / erro na tabela ──────────────────── */
 
 .loadingCell,
 .emptyCell {
-  padding: 3rem 1rem;
   text-align: center;
+  padding: 3rem 1rem;
   color: var(--color-card-text-muted);
-  font-size: var(--fs-base);
+  font-size: 0.9375rem;
+  border-right: none !important;
 }
 
 .errorCell {
-  padding: 2rem 1rem;
   text-align: center;
-  color: var(--color-danger);
-  font-size: var(--fs-sm);
+  padding: 2.5rem 1rem;
+  border-right: none !important;
+}
+
+.errorMessage {
+  display: inline-block;
+  background: var(--color-danger-soft);
+  color: #a82727;
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.9375rem;
+  margin-bottom: 1rem;
+  max-width: 480px;
 }
 
 .retryBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 0.75rem;
-  padding: 0.5rem 1.25rem;
-  background: var(--color-accent);
-  color: var(--color-card-text);
+  display: inline-block;
+  background: #000000;
+  color: #ffffff;
   border: none;
+  padding: 0.625rem 1.5rem;
   border-radius: var(--radius-pill);
-  font-size: var(--fs-xs);
-  font-weight: 500;
+  font-size: 0.875rem;
   cursor: pointer;
+  font-weight: 500;
+  transition: opacity 0.15s;
 }
 
-/* ── Paginacao ────────────────────────────────────────────────────── */
+.retryBtn:hover {
+  opacity: 0.85;
+}
+
+/* ── Paginacao (espelha padrao de /usuarios) ──────────────────────── */
 
 .pagination {
   display: flex;
+  justify-content: center;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0 0.5rem;
-  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
 }
 
 .pageInfo {
-  font-size: var(--fs-sm);
   color: var(--color-card-text-muted);
+  font-size: 0.875rem;
 }
 
 .pageButtons {
@@ -317,29 +329,22 @@
 }
 
 .pageBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 36px;
-  height: 36px;
-  padding: 0 0.5rem;
-  background: var(--color-card-surface);
-  color: var(--color-card-text);
+  background: transparent;
   border: 1px solid var(--color-card-border);
+  color: var(--color-card-text);
+  padding: 0.5rem 1.25rem;
   border-radius: var(--radius-pill);
-  font-family: inherit;
-  font-size: var(--fs-sm);
-  font-weight: 600;
   cursor: pointer;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  font-size: 0.875rem;
+  transition: background 0.15s;
 }
 
 .pageBtn:hover:not(:disabled) {
-  background: var(--color-accent);
+  background: rgba(0, 0, 0, 0.05);
 }
 
 .pageBtn:disabled {
-  opacity: 0.35;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -366,13 +371,13 @@
   }
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 1280px) {
   .filterRow {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 960px) {
   .filterRow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

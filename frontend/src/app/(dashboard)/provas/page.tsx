@@ -6,10 +6,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import { useListProvas, type ListProvasFilters } from "@/hooks/useListProvas";
+// A4 (auditoria Wave 2 — Sessao 19): `loadDebounced` foi removido do hook
+// porque a pagina ja faz debounce local via setTimeout em handleBuscaChange
+// e handleClienteChange. A destructuring abaixo inclui apenas `load`.
 import {
   ROTA_LABELS,
   ROTA_OPTIONS,
   STATUS_LABELS,
+  STATUS_LABELS_SHORT,
   STATUS_OPTIONS,
   type Rota,
   type StatusProva,
@@ -42,13 +46,17 @@ function ProvasPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // Fonte UNICA de truth para o access token nesta pagina. `useListProvas`
+  // e o fetchMe useEffect (abaixo) consomem esse mesmo callback — evita
+  // duas chamadas independentes a `getSession()` em paralelo na mesma
+  // pagina (mesmo padrao do fix A5 do Componente 06, Sessao 18).
   const getToken = useCallback(async () => {
     const supabase = createClient();
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token ?? null;
   }, []);
 
-  const { loading, error, data, load, loadDebounced } = useListProvas(getToken);
+  const { loading, error, data, load } = useListProvas(getToken);
 
   // ── Estado local dos filtros (sincronizado com URL) ─────────────────
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -80,7 +88,6 @@ function ProvasPageInner() {
   // digitacao fluida (sem escrever na URL a cada tecla).
   const [buscaInput, setBuscaInput] = useState(urlFilters.busca ?? "");
   const [clienteInput, setClienteInput] = useState(urlFilters.cliente ?? "");
-  const isFirstRenderRef = useRef(true);
 
   // Sincroniza inputs locais quando a URL muda externamente
   // (ex: botao back do browser, Limpar filtros).
@@ -89,13 +96,13 @@ function ProvasPageInner() {
     setClienteInput(urlFilters.cliente ?? "");
   }, [urlFilters.busca, urlFilters.cliente]);
 
-  // Carrega me + lista de vendedores (so admin).
+  // A1 (auditoria Wave 2 — Sessao 19): fetchMe usa `getToken` em vez de
+  // chamar `getSession()` direto. Unifica a fonte de truth do access token
+  // na pagina (mesmo padrao do fix A5 do C06, Sessao 18).
   useEffect(() => {
     const controller = new AbortController();
     async function fetchMe() {
-      const supabase = createClient();
-      const { data: sess } = await supabase.auth.getSession();
-      const token = sess.session?.access_token;
+      const token = await getToken();
       if (!token || controller.signal.aborted) return;
       try {
         const meData = await apiFetch<MeResponse>("/api/v1/users/me", {
@@ -122,12 +129,14 @@ function ProvasPageInner() {
     }
     fetchMe();
     return () => controller.abort();
-  }, []);
+  }, [getToken]);
 
   // Dispara load sempre que a URL muda.
+  //
+  // M1 (auditoria Wave 2 — Sessao 19): `isFirstRenderRef` foi removido
+  // — era setado no primeiro render mas nunca lido depois, dead state.
   useEffect(() => {
     load(urlFilters);
-    isFirstRenderRef.current = false;
   }, [urlFilters, load]);
 
   // ── Helpers para atualizar a URL ─────────────────────────────────────
@@ -222,25 +231,20 @@ function ProvasPageInner() {
       <div className={styles.desktopOnly}>
         <header className={styles.pageHeader}>
           <h1 className={styles.title}>Provas digitais</h1>
-          {data && (
-            <span className={styles.totalBadge}>
-              {data.total} {data.total === 1 ? "prova" : "provas"}
-            </span>
-          )}
         </header>
 
-        {/* ── Filtros ──────────────────────────────────────────────── */}
+        {/* ── Filtros (4x2 — bate com Figma) ─────────────────────── */}
         <section className={styles.filters} aria-label="Filtros">
           <div className={styles.filterRow}>
             <div className={styles.field}>
               <label htmlFor="filtro_busca" className={styles.label}>
-                Buscar (nome ou requerimento)
+                Buscar nome ou requerimento:
               </label>
               <input
                 id="filtro_busca"
                 type="search"
                 className={styles.input}
-                placeholder="REQ-2026, Rotulo..."
+                placeholder="123456"
                 value={buscaInput}
                 onChange={(e) => handleBuscaChange(e.target.value)}
               />
@@ -248,7 +252,7 @@ function ProvasPageInner() {
 
             <div className={styles.field}>
               <label htmlFor="filtro_cliente" className={styles.label}>
-                Cliente
+                Cliente:
               </label>
               <input
                 id="filtro_cliente"
@@ -262,7 +266,7 @@ function ProvasPageInner() {
 
             <div className={styles.field}>
               <label htmlFor="filtro_status" className={styles.label}>
-                Status
+                Status:
               </label>
               <select
                 id="filtro_status"
@@ -281,7 +285,7 @@ function ProvasPageInner() {
 
             <div className={styles.field}>
               <label htmlFor="filtro_rota" className={styles.label}>
-                Rota
+                Rota:
               </label>
               <select
                 id="filtro_rota"
@@ -289,7 +293,7 @@ function ProvasPageInner() {
                 value={urlFilters.rota ?? ""}
                 onChange={(e) => handleRotaChange(e.target.value)}
               >
-                <option value="">Todas</option>
+                <option value="">Todos</option>
                 {ROTA_OPTIONS.map((r) => (
                   <option key={r} value={r}>
                     {ROTA_LABELS[r]}
@@ -300,35 +304,36 @@ function ProvasPageInner() {
           </div>
 
           <div className={styles.filterRow}>
-            {showVendedorFilter && (
-              <div className={styles.field}>
-                <label htmlFor="filtro_vendedor" className={styles.label}>
-                  Vendedor
-                </label>
-                <select
-                  id="filtro_vendedor"
-                  className={styles.select}
-                  value={urlFilters.vendedor_id ?? ""}
-                  onChange={(e) => handleVendedorChange(e.target.value)}
-                >
-                  <option value="">Todos</option>
-                  {vendedores.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.nome}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+            <div className={styles.field}>
+              <label htmlFor="filtro_vendedor" className={styles.label}>
+                Vendedor:
+              </label>
+              <select
+                id="filtro_vendedor"
+                className={styles.select}
+                value={urlFilters.vendedor_id ?? ""}
+                onChange={(e) => handleVendedorChange(e.target.value)}
+                disabled={!showVendedorFilter}
+                aria-disabled={!showVendedorFilter}
+              >
+                <option value="">Todos</option>
+                {vendedores.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <div className={styles.field}>
               <label htmlFor="filtro_inicio" className={styles.label}>
-                Criada em (inicio)
+                Criada em:
               </label>
               <input
                 id="filtro_inicio"
                 type="date"
                 className={styles.input}
+                placeholder="dd/mm/aaaa"
                 value={urlFilters.periodo_inicio ?? ""}
                 onChange={(e) => handlePeriodoInicioChange(e.target.value)}
               />
@@ -336,12 +341,13 @@ function ProvasPageInner() {
 
             <div className={styles.field}>
               <label htmlFor="filtro_fim" className={styles.label}>
-                Criada em (fim)
+                Finalizada em:
               </label>
               <input
                 id="filtro_fim"
                 type="date"
                 className={styles.input}
+                placeholder="dd/mm/aaaa"
                 value={urlFilters.periodo_fim ?? ""}
                 onChange={(e) => handlePeriodoFimChange(e.target.value)}
               />
@@ -354,7 +360,7 @@ function ProvasPageInner() {
                 onClick={handleLimparFiltros}
                 disabled={!temFiltrosAtivos}
               >
-                Limpar filtros
+                Limpar
               </button>
             </div>
           </div>
@@ -373,7 +379,7 @@ function ProvasPageInner() {
                   <th>Status</th>
                   <th>Rota</th>
                   <th>Criada em</th>
-                  <th className={styles.thActions}>Acoes</th>
+                  <th className={styles.thActions} aria-label="Acoes"></th>
                 </tr>
               </thead>
               <tbody>
@@ -417,10 +423,8 @@ function ProvasPageInner() {
                       <td>{p.cliente}</td>
                       <td>{p.vendedor_nome}</td>
                       <td>
-                        <span
-                          className={`${styles.statusBadge} ${styles[`status_${p.status}`] ?? ""}`}
-                        >
-                          {STATUS_LABELS[p.status]}
+                        <span className={styles.statusBadge}>
+                          {STATUS_LABELS_SHORT[p.status]}
                         </span>
                       </td>
                       <td>{p.rota ? ROTA_LABELS[p.rota] : "—"}</td>
@@ -429,8 +433,9 @@ function ProvasPageInner() {
                         <Link
                           href={`/provas/${p.id}`}
                           className={styles.detailBtn}
+                          aria-label={`Ver prova ${p.nro_requerimento}`}
                         >
-                          Ver detalhes
+                          Ver
                         </Link>
                       </td>
                     </tr>
