@@ -108,12 +108,10 @@ export default function NovaProvaPage() {
     return () => controller.abort();
   }, [getToken]);
 
-  // Revoga object URLs antigos quando o arquivo muda (evitar leak).
-  useEffect(() => {
-    return () => {
-      if (arquivoPreview) URL.revokeObjectURL(arquivoPreview);
-    };
-  }, [arquivoPreview]);
+  // F09 (auditoria externa Wave 2): o `handleFileSelect` ja revoga a URL
+  // antiga antes de criar a nova. Um useEffect de cleanup aqui seria
+  // redundante (o cleanup captura o valor atual do closure via deps
+  // `[arquivoPreview]`, revogando a URL que ainda esta em uso). Removido.
 
   const handleFileSelect = useCallback((file: File | null) => {
     if (arquivoPreview) URL.revokeObjectURL(arquivoPreview);

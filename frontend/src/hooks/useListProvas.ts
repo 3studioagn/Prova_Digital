@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { ProvaListResponse, Rota, StatusProva } from "@/lib/types/prova";
 
@@ -38,17 +38,29 @@ const INITIAL: State = { loading: true, error: null, data: null };
  * exportava um `loadDebounced` que nunca foi chamado pela pagina — dead
  * code removido na auditoria Wave 2 Sessao 19, A4.)
  *
- * Protecao contra race: `latestReqRef` garante que apenas o resultado
- * do load() mais recente atualiza o estado, descartando responses
- * fora-de-ordem se o usuario mudar filtros enquanto uma request esta
- * em voo.
+ * Protecao contra race:
+ *  1. `latestReqRef` garante que apenas o resultado do load() mais recente
+ *     atualiza o estado, descartando responses fora-de-ordem.
+ *  2. F21 (auditoria externa Wave 2): quando um novo load() comeca, o
+ *     `AbortController` do load anterior e abortado — a request HTTP em
+ *     voo e cancelada (economiza banda em redes lentas com filtros mudando
+ *     rapidamente). No unmount do componente, o ultimo controller tambem
+ *     e abortado para evitar atualizacoes de estado apos unmount.
  */
 export function useListProvas(getToken: () => Promise<string | null>) {
   const [state, setState] = useState<State>(INITIAL);
   const latestReqRef = useRef<number>(0);
+  const inflightControllerRef = useRef<AbortController | null>(null);
 
   const load = useCallback(
     async (filters: ListProvasFilters): Promise<void> => {
+      // F21: aborta a request anterior (se houver) antes de comecar a nova.
+      if (inflightControllerRef.current) {
+        inflightControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      inflightControllerRef.current = controller;
+
       const reqId = ++latestReqRef.current;
       setState((s) => ({ ...s, loading: true, error: null }));
 
@@ -58,6 +70,7 @@ export function useListProvas(getToken: () => Promise<string | null>) {
       } catch {
         token = null;
       }
+      if (reqId !== latestReqRef.current) return;
       if (!token) {
         setState({
           loading: false,
@@ -82,13 +95,15 @@ export function useListProvas(getToken: () => Promise<string | null>) {
       try {
         const data = await apiFetch<ProvaListResponse>(
           `/api/v1/provas/?${qs.toString()}`,
-          { token },
+          { token, signal: controller.signal },
         );
         // Se outro load() mais recente comecou antes desse retornar, descarta.
         if (reqId !== latestReqRef.current) return;
         setState({ loading: false, error: null, data });
       } catch (err) {
         if (reqId !== latestReqRef.current) return;
+        // F21: request abortada nao e erro — e a proxima load() ja assumiu.
+        if (err instanceof DOMException && err.name === "AbortError") return;
         const msg =
           err instanceof ApiError
             ? err.message
@@ -98,6 +113,15 @@ export function useListProvas(getToken: () => Promise<string | null>) {
     },
     [getToken],
   );
+
+  // Cleanup no unmount: aborta qualquer request em voo.
+  useEffect(() => {
+    return () => {
+      if (inflightControllerRef.current) {
+        inflightControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   return { ...state, load };
 }

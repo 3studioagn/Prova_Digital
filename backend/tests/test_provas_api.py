@@ -445,6 +445,13 @@ async def test_create_prova_magic_bytes_invalid(admin_user, vendedor_matriz, moc
 async def test_create_prova_commit_failure_rollback_and_cleanup(
     admin_user, vendedor_matriz, mock_db
 ):
+    """Falha de commit (DB transiente) retorna 502 e limpa R2.
+
+    F01 (auditoria externa): mudanca de 500 -> 502 para alinhar com o padrao
+    unificado dos ADR-074 (C07 list), ADR-076 (C08 detalhe) e ADR-078 (C09
+    update). 502 = "upstream indisponivel, pode retentar" (DB e upstream do
+    FastAPI); 500 seria "bug interno" (nao e o caso aqui).
+    """
     _setup(mock_db, admin=admin_user)
     # Ordem de db.execute na nova implementacao (gerar_pdf antes do commit):
     # 1. SELECT nro_req (sem duplicata)
@@ -475,9 +482,67 @@ async def test_create_prova_commit_failure_rollback_and_cleanup(
                     "object_key": "provas/2026/04/fail/arte.jpg",
                 },
             )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
+    assert "persistir prova" in resp.json()["detail"].lower()
     mock_db.rollback.assert_awaited()
     mock_delete.assert_awaited_once()
+
+
+async def test_create_prova_refresh_failure_after_commit_responds_201(
+    admin_user, vendedor_matriz, mock_db
+):
+    """F02 (auditoria externa): db.refresh falhando APOS o commit bem-sucedido
+    deve responder 201 com os dados em memoria em vez de 500.
+
+    Rationale: quando o refresh falha, a prova ja esta persistida no DB (o
+    commit teve sucesso). Retornar 500 seria enganoso porque o cliente
+    retentaria e pegaria 409 'ja cadastrada' — o usuario acharia que a prova
+    nao foi criada quando na verdade foi. O fix constroi o response usando
+    o `created_at` gerado no backend antes do INSERT e os dados do ORM em
+    memoria.
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = [
+        _scalar(None),
+        _scalar(vendedor_matriz),
+        _scalar(DEFAULT_TEMPLATE),
+    ]
+    # Commit bem-sucedido (default AsyncMock)
+    mock_db.refresh.side_effect = Exception("connection dropped after commit")
+
+    with patch(
+        "app.api.v1.provas.r2_signed.head_object",
+        new=AsyncMock(return_value={"ContentLength": 1024}),
+    ), patch(
+        "app.api.v1.provas.r2_signed.get_object_head_bytes",
+        new=AsyncMock(return_value=FAKE_JPEG_HEAD),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(
+                f"{PREFIX}/",
+                json={
+                    "nome": "Refresh Fail",
+                    "nro_requerimento": "REQ-REFRESH-FAIL",
+                    "cliente": "C",
+                    "vendedor_id": str(vendedor_matriz.id),
+                    "object_key": "provas/2026/04/refreshfail/arte.jpg",
+                },
+            )
+
+    # Response deve ser 201 normal — refresh failure e degradacao graciosa.
+    assert resp.status_code == 201, resp.json()
+    data = resp.json()
+    assert data["prova"]["nome"] == "Refresh Fail"
+    assert data["prova"]["nro_requerimento"] == "REQ-REFRESH-FAIL"
+    assert data["prova"]["status"] == "CRIADA"
+    # created_at/updated_at vem do datetime.now(UTC) gerado no backend antes
+    # do INSERT — devem ser strings ISO validas.
+    assert data["prova"]["created_at"] is not None
+    assert data["prova"]["updated_at"] is not None
+    # Commit foi chamado com sucesso; rollback NAO foi chamado (refresh
+    # failure nao desfaz o commit).
+    mock_db.commit.assert_awaited_once()
+    mock_db.rollback.assert_not_awaited()
 
 
 async def test_create_prova_pdf_generation_failure_rollsback_before_commit(
@@ -780,6 +845,33 @@ async def test_list_filter_periodo(admin_user, mock_db):
     assert "2026-04-01" in sql
     # Periodo fim e inclusivo — ADR-048 adiciona 1 dia, entao aparece 05-01
     assert "2026-05-01" in sql
+
+
+async def test_list_filter_periodo_respects_brt_timezone(admin_user, mock_db):
+    """F25 (auditoria externa): datas do filtro sao interpretadas em BRT
+    (America/Sao_Paulo, UTC-3 fixo), nao em UTC.
+
+    `periodo_inicio=2026-04-09` deve virar `2026-04-09 00:00 BRT` =
+    `2026-04-09 03:00 UTC` no SQL compilado. Sem a conversao, seria
+    `2026-04-09 00:00 UTC`, o que excluiria provas criadas as 00:00-03:00
+    BRT do dia 9 (= 03:00-06:00 UTC do dia 9) e incluiria provas do dia 8
+    BRT depois das 21:00 (= 00:00 UTC do dia 9) — ambos comportamentos
+    confundem o usuario.
+    """
+    _setup(mock_db, admin=admin_user)
+    _capture_list_stmts(mock_db, count=0, rows=[])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(
+            f"{PREFIX}/?periodo_inicio=2026-04-09&periodo_fim=2026-04-09"
+        )
+
+    assert resp.status_code == 200
+    sql = _compiled_sql(mock_db._captured_stmts[0])
+    # Inicio = 2026-04-09 00:00 BRT = 2026-04-09 03:00 UTC
+    assert "2026-04-09 03:00:00" in sql
+    # Fim = 2026-04-10 00:00 BRT = 2026-04-10 03:00 UTC (adicionou 1 dia)
+    assert "2026-04-10 03:00:00" in sql
 
 
 async def test_list_filter_vendedor_id(admin_user, mock_db):
@@ -1151,10 +1243,23 @@ async def test_list_no_auth_401(mock_db):
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def _detail_row(prova, vendedor_nome, vendedor_localizacao):
-    """Mock do `result.first()` para query de detalhe com JOIN."""
+def _detail_row(
+    prova, vendedor_nome, vendedor_localizacao, vendedor_setor=SetorEnum.VENDEDOR
+):
+    """Mock do `result.first()` para query de detalhe com JOIN.
+
+    F05 (auditoria externa Wave 2): o JOIN agora retorna 4 colunas
+    (prova, vendedor_nome, vendedor_localizacao, vendedor_setor) para
+    eliminar a segunda query do `get_prova_detail`. O default de setor
+    e VENDEDOR porque esse e o caso de 99% dos testes de detalhe.
+    """
     r = MagicMock()
-    r.first.return_value = (prova, vendedor_nome, vendedor_localizacao)
+    r.first.return_value = (
+        prova,
+        vendedor_nome,
+        vendedor_localizacao,
+        vendedor_setor,
+    )
     return r
 
 
@@ -1178,6 +1283,11 @@ def _scalars_all(items):
 
 
 async def test_get_detail_happy_admin(admin_user, vendedor_matriz, mock_db):
+    """F05 (auditoria externa): apos a mudanca no helper
+    `_carregar_prova_com_scoping` que ja inclui `vendedor_setor` no JOIN,
+    o handler nao faz mais uma segunda query — o side_effect tem apenas
+    o `_detail_row` unico.
+    """
     _setup(mock_db, admin=admin_user)
     prova = _make_prova(
         nome="Prova Detalhe",
@@ -1188,7 +1298,6 @@ async def test_get_detail_happy_admin(admin_user, vendedor_matriz, mock_db):
 
     mock_db.execute.side_effect = [
         _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
-        _scalar(vendedor_matriz),  # SELECT vendedor para rota_projetada
     ]
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
@@ -1201,6 +1310,8 @@ async def test_get_detail_happy_admin(admin_user, vendedor_matriz, mock_db):
     assert data["vendedor_localizacao"] == "MATRIZ"
     assert data["rota_projetada"] == "PADRAO"
     assert data["rota"] is None
+    # F05: apenas 1 execute (scoped), nao 2 como antes da otimizacao.
+    assert mock_db.execute.call_count == 1
 
 
 async def test_get_detail_rota_projetada_filial(
@@ -1210,7 +1321,6 @@ async def test_get_detail_rota_projetada_filial(
     prova = _make_prova(vendedor_id=vendedor_filial.id)
     mock_db.execute.side_effect = [
         _detail_row(prova, vendedor_filial.nome, vendedor_filial.localizacao),
-        _scalar(vendedor_filial),
     ]
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
         resp = await ac.get(f"{PREFIX}/{prova.id}")
@@ -1221,13 +1331,16 @@ async def test_get_detail_rota_projetada_filial(
 async def test_get_detail_rota_projetada_none_para_nao_vendedor(
     admin_user, mock_db
 ):
-    """Edge case: vendedor original nao e mais VENDEDOR (setor mudou)."""
+    """Edge case: vendedor original nao e mais VENDEDOR (setor mudou).
+
+    F05: passamos `vendedor_setor=SetorEnum.STUDIO` explicitamente no
+    _detail_row — antes o setor vinha de um segundo SELECT Usuario.
+    """
     ex_vendedor = make_user(setor=SetorEnum.STUDIO, localizacao=None, is_admin=False)
     prova = _make_prova(vendedor_id=ex_vendedor.id)
     _setup(mock_db, admin=admin_user)
     mock_db.execute.side_effect = [
-        _detail_row(prova, ex_vendedor.nome, None),
-        _scalar(ex_vendedor),
+        _detail_row(prova, ex_vendedor.nome, None, vendedor_setor=SetorEnum.STUDIO),
     ]
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
         resp = await ac.get(f"{PREFIX}/{prova.id}")
@@ -1241,7 +1354,6 @@ async def test_get_detail_vendedor_scoping_happy(vendedor_matriz, mock_db):
     prova = _make_prova(vendedor_id=vendedor_matriz.id)
     mock_db.execute.side_effect = [
         _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
-        _scalar(vendedor_matriz),
     ]
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
         resp = await ac.get(f"{PREFIX}/{prova.id}")
@@ -1276,6 +1388,39 @@ async def test_get_detail_no_auth_401(mock_db):
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
         resp = await ac.get(f"{PREFIX}/{uuid.uuid4()}")
     assert resp.status_code == 401
+
+
+async def test_get_detail_invalid_uuid_retorna_404(admin_user, mock_db):
+    """C08 M3 (auditoria externa Wave 2): UUID invalido no path retorna 404
+    'Prova nao encontrada' em vez de 422 verbose do Pydantic validator.
+
+    Antes deste fix, o FastAPI retornava 422 com mensagem verbose do tipo
+    'Input should be a valid UUID, invalid character: expected an optional
+    prefix of `urn:uuid:`...' — vazava detalhes do validator e era
+    inconsistente com o 404 retornado quando um UUID valido aponta para
+    prova inexistente. Agora ambos os casos retornam o mesmo 404 generico
+    em todos os 5 endpoints de detalhe.
+    """
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        for path in ("abc-not-uuid", "123", "xxx"):
+            resp_detail = await ac.get(f"{PREFIX}/{path}")
+            assert resp_detail.status_code == 404, (
+                f"GET /{path} retornou {resp_detail.status_code}"
+            )
+            assert resp_detail.json()["detail"] == "Prova nao encontrada"
+
+            resp_imagem = await ac.get(f"{PREFIX}/{path}/imagem-url")
+            assert resp_imagem.status_code == 404
+
+            resp_mov = await ac.get(f"{PREFIX}/{path}/movimentacoes")
+            assert resp_mov.status_code == 404
+
+            resp_pdf = await ac.get(f"{PREFIX}/{path}/etiqueta.pdf")
+            assert resp_pdf.status_code == 404
+
+            resp_qr = await ac.get(f"{PREFIX}/{path}/qr-code.png")
+            assert resp_qr.status_code == 404
 
 
 # ─── GET /{id}/imagem-url ─────────────────────────────────────────────

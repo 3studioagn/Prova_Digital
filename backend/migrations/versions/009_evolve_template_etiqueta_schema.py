@@ -24,6 +24,26 @@ Contexto (ADR-036):
 
 Idempotente: o WHERE filtra pelo valor string legado, entao roda multiplas
 vezes sem efeito quando ja aplicada.
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║  WARNING — DOWNGRADE LOSSY (F12, auditoria externa Wave 2)               ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║  O downgrade() reverte TODAS as customizacoes do admin (logo_enabled,    ║
+║  mostrar_data_criacao, formato) para a string literal '"padrao"'.        ║
+║  Qualquer configuracao customizada via PATCH /api/v1/configuracoes/      ║
+║  template_etiqueta sera PERDIDA IRREVERSIVELMENTE.                       ║
+║                                                                          ║
+║  Isso e intencional porque o schema antigo era apenas uma string — nao   ║
+║  ha como representar os 3 flags booleanos + formato em uma string.       ║
+║  Nao ha correcao possivel sem introduzir uma tabela de historico.        ║
+║                                                                          ║
+║  Antes de rodar `alembic downgrade` abaixo da revisao 009:               ║
+║    1. Exportar o valor atual:                                            ║
+║       `SELECT valor FROM configuracoes_sistema                           ║
+║        WHERE chave = 'template_etiqueta';`                               ║
+║    2. Salvar em um local externo para restauracao manual posterior.      ║
+║    3. Avisar todos os operadores que o template sera resetado.           ║
+╚══════════════════════════════════════════════════════════════════════════╝
 """
 from typing import Sequence, Union
 
@@ -50,6 +70,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # F12 (auditoria externa Wave 2): WARNING lossy. Ver bloco no topo do
+    # arquivo. O print() abaixo aparece no stdout do `alembic downgrade`
+    # como ultimo alerta antes do UPDATE.
+    print(
+        "\n[WARNING] Migration 009 downgrade: customizacoes do template_etiqueta "
+        "(logo_enabled, mostrar_data_criacao, formato) serao PERDIDAS. "
+        "Exporte o valor atual antes se precisar preservar.\n"
+    )
     op.execute("""
     UPDATE public.configuracoes_sistema
     SET valor = '"padrao"'::jsonb

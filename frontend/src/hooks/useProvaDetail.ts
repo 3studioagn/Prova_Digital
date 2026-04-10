@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
 import type {
   ImagemUrlResponse,
@@ -33,15 +33,24 @@ const INITIAL: State = {
  * URL da imagem das provas LIST-TEST-*) nao derrube a tela toda — o usuario
  * ainda ve os dados e o historico, com uma mensagem especifica na area da
  * arte.
+ *
+ * F07 (auditoria externa Wave 2): protecao contra race condition. Se o
+ * usuario clicar "Tentar novamente" repetidamente ou o componente remountar
+ * com um novo `provaId` antes do load() anterior terminar, `latestReqRef`
+ * garante que apenas o resultado do load() mais recente atualiza o estado.
+ * Loads fora-de-ordem sao descartados silenciosamente. Mesmo padrao do
+ * `useListProvas`.
  */
 export function useProvaDetail(
   provaId: string | null,
   getToken: () => Promise<string | null>,
 ) {
   const [state, setState] = useState<State>(INITIAL);
+  const latestReqRef = useRef<number>(0);
 
   const load = useCallback(async () => {
     if (!provaId) return;
+    const reqId = ++latestReqRef.current;
     setState({ ...INITIAL, loading: true });
 
     let token: string | null;
@@ -50,6 +59,8 @@ export function useProvaDetail(
     } catch {
       token = null;
     }
+    // Se outro load() mais recente comecou antes desse resolver o token, descarta.
+    if (reqId !== latestReqRef.current) return;
     if (!token) {
       setState({
         ...INITIAL,
@@ -66,6 +77,9 @@ export function useProvaDetail(
       apiFetch<ImagemUrlResponse>(`${base}/imagem-url`, { token }),
       apiFetch<MovimentacaoListResponse>(`${base}/movimentacoes`, { token }),
     ]);
+
+    // Se outro load() mais recente comecou durante as requests, descarta.
+    if (reqId !== latestReqRef.current) return;
 
     // Erro na prova em si = erro total — nao tem o que mostrar.
     if (provaRes.status === "rejected") {

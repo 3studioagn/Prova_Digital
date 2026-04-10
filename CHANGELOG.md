@@ -2,6 +2,205 @@
 
 ---
 
+## [2026-04-10 — Sessao 22] — Auditoria externa Wave 2 + hardening
+
+### Contexto
+
+Apos a Sessao 21 declarar "Wave 2 pronta para sign-off", Mario solicitou
+uma **segunda auditoria independente**, desta vez com protocolo ainda mais
+rigoroso: read-only total na Fase 1-3, gate obrigatorio antes de qualquer
+edicao, e escopo estrito a Wave 2 (C06/C07/C08/C09). O objetivo era
+verificar as alegacoes das Sessoes 18-21 empiricamente e procurar
+problemas novos que aquelas sessoes pudessem ter perdido.
+
+O processo esta registrado em `ADR-079` (meta-ADR da auditoria externa).
+
+### Fase 1-2 — Carregamento de contexto + analise
+
+- Lidos todos os arquivos da Wave 2 + DECISIONS.md + CHANGELOG.md + schema
+  + migrations + RLS + Requisitos v3.0 + DAT v2.0 + Backlog v3.0.
+- Re-verificacao empirica das alegacoes das Sessoes 18-21:
+  - `pytest -v` → **300 passing** ✅
+  - `ruff check` → limpo ✅
+  - `tsc --noEmit` → limpo ✅
+  - `next lint` → limpo ✅
+  - `next build` → OK ✅
+  - Cobertura: configuracoes.py 100%, schemas/configuracao.py 100%,
+    provas.py 95%, services 97-100% ✅
+
+Todas as alegacoes das Sessoes 18-21 **confirmadas empiricamente**.
+
+### Fase 2 — Achados NOVOS (27 catalogados, 20 acionaveis)
+
+Auditoria multi-eixo (requisitos, schema/migrations/RLS, backend, frontend,
+seguranca, testes, qualidade, integracao entre Waves) produziu:
+
+**Criticos (1):**
+- **F23** — 2 SVGs `logo_3studio.svg` e `logo_studio_e_arte.svg` staged
+  mas nao commitados (ADR-071 da Sessao 18 documentou mas nao resolveu).
+  Qualquer deploy Railway fresh quebra. **Resolvido via commit baseline
+  desta sessao (commit `270c59a` incluiu os 2 arquivos no HEAD).**
+
+**Altos (3):**
+- **F01** — `create_prova` retornava 500 no commit failure generico,
+  inconsistente com ADR-074/076/078 que padronizaram 502. ADR-077 alegou
+  "padrao unificado" — factualmente falso. Corrigido.
+- **F02** — `db.refresh(nova_prova)` fora do try/except: janela rara mas
+  real de 500 apos o commit bem-sucedido, com prova ja persistida. Cliente
+  recebia 500 e retentava, pegando 409 "ja cadastrada". Corrigido para
+  usar dados em memoria em caso de refresh failure.
+- **F25** — Filtro de periodo usava UTC direto, confundindo usuario em
+  America/Sao_Paulo. Prova criada 23:30 BRT (= 02:30 UTC proximo dia) nao
+  aparecia no filtro do dia certo. Corrigido com offset fixo -3.
+
+**Medios (10):**
+- **F03** — Policy RLS `pol_movimentacoes_select` nao cobre MOTORISTA/
+  CLICHERIA (gap de defesa em profundidade). **Documentado como TODO
+  explicito para Wave 3** — nao aplicado agora porque a Wave 2 nao insere
+  movimentacoes e o backend ja cobre via `_carregar_prova_com_scoping`.
+- **F04** — `log_audit` usava `request.client.host` direto, retornando IP
+  do gateway Railway em producao. Corrigido para ler X-Forwarded-For com
+  fallback X-Real-IP + client.host.
+- **F05** — `get_prova_detail` fazia 2 queries (scoped + SELECT Usuario
+  para rota_projetada). Corrigido extendendo `_carregar_prova_com_scoping`
+  para incluir `vendedor_setor` no JOIN + novo helper
+  `_determinar_rota_projetada(setor, localizacao)`. Elimina 1 query por
+  request de detalhe.
+- **F07** — `useProvaDetail.load` sem `latestReqRef` (race condition em
+  clicks rapidos). Corrigido com mesmo padrao do `useListProvas`.
+- **F12** — Migration 009 downgrade lossy sem warning. Adicionado bloco
+  de WARNING explicito no topo do arquivo + `print()` no downgrade.
+- **F17 / F22 / F24** — Ausencia de testes de RLS automatizados + ausencia
+  de testes de integracao com Postgres real. **Aceitos formalmente como
+  debitos para Wave 6** (auditoria final).
+- **F18** — Rate limit pendente (C06 A1). **Aceito como decidido pela
+  Sessao 18.**
+- **F27** — Zero teste cobrindo `db.refresh` failure em `create_prova`
+  (lacuna que permitiu F02 passar). Corrigido junto com F02 — novo teste
+  `test_create_prova_refresh_failure_after_commit_responds_201`.
+
+**Baixos (6):**
+- **F06** — `_valida_object_key` aceita `./`. Cosmetico, ignorado.
+- **F08** — `VisualizarEtiquetaModal` re-fetch sem cache. UX minor, ignorado.
+- **F09** — `useEffect` de cleanup do `arquivoPreview` redundante com
+  handler. Corrigido (removido).
+- **F10** — Label "Finalizada em" mas filtra `created_at`. Corrigido para
+  "Criada ate".
+- **F14** — `_valida_content_type` rejeita `image/jpg` informal. Decisao
+  de design aceita, ignorado.
+- **F21** — `useListProvas` nao aborta requests em voo. Corrigido com
+  `AbortController`.
+
+### Fase 3 — Debitos aceitos (herdados das Sessoes 18-21) — aplicados
+
+Alem dos achados novos, Mario autorizou aplicar 4 debitos ja aceitos:
+
+- **C07 B1** — `MeResponse` extraido para `lib/types/usuario.ts`. Wave 2
+  usa o tipo compartilhado; Wave 1 (`layout.tsx`) intocada.
+- **C08 M2** — Mesmo que F05 (query duplicada). Corrigido junto.
+- **C08 M3** — UUID invalido no path retornava 422 Pydantic verbose.
+  Corrigido com dependency `parse_prova_id` que retorna 404 "Prova nao
+  encontrada" consistente com os outros casos. Aplicado nos 5 handlers de
+  detalhe.
+- **Flake `test_pdf_formato_legacy`** — Comparacao byte-a-byte sensivel a
+  timestamp do fpdf2. Corrigido com `monkeypatch` de `datetime` no modulo
+  `fpdf.fpdf` e `fpdf.output` via classe `_FrozenDatetime`. Validado com
+  5 runs consecutivas.
+
+### Fase 4 — Execucao (14 fixes aplicados)
+
+Ordem: commit baseline (270c59a, resolve F23) → F01 → F02+F27 → F25 →
+F03 (comment) → F04 → F05 (=C08 M2) → F07 → F12 → F09+F10+F21 →
+C07 B1 → C08 M3 → Flake.
+
+**NAO tocado (fora do escopo autorizado):**
+- **F13** — Warning `InsecureKeyLengthWarning` em `test_jwt.py` (Wave 1).
+  Mario foi explicito: "iremos mexer somente no que for da wave 2".
+
+### Metricas (antes → depois)
+
+| Camada | Sessao 21 | Sessao 22 | Delta |
+|---|---|---|---|
+| Testes backend | 300 | **308** | +8 |
+| Cobertura `provas.py` | 95% (306 stmts) | **95%** (322 stmts) | +16 stmts cobertos |
+| Cobertura `configuracoes.py` | 100% | **100%** | — |
+| Cobertura `audit_service.py` | 100% | **100%** (29 stmts, era 18) | +11 stmts cobertos |
+| Cobertura global | 94% | **94%** | — |
+| Achados criticos | — | 1 (F23, resolvido no baseline) | — |
+| Achados altos resolvidos | — | 3 | — |
+| Achados medios aplicados | — | 6 | — |
+| Debitos aceitos aplicados | — | 4 | — |
+| ADRs novos | — | 2 (079-080) | — |
+| Bundle `/provas/[id]` | 5.73 kB | **5.77 kB** | +40 B |
+| Bundle `/provas` | 4.31 kB | **4.38 kB** | +70 B |
+| Bundle `/nova-prova` | 5.41 kB | **5.40 kB** | -10 B |
+| Ruff / tsc / lint / build | limpo | limpo | — |
+
+### Novos testes (8)
+
+1. `test_create_prova_commit_failure_rollback_and_cleanup` — atualizado
+   para asserta 502 (era 500) + mensagem "persistir prova" (F01).
+2. `test_create_prova_refresh_failure_after_commit_responds_201` — novo,
+   valida F02+F27 (refresh failure apos commit responde 201 com dados
+   em memoria).
+3. `test_list_filter_periodo_respects_brt_timezone` — novo, valida F25
+   (datas do filtro interpretadas em BRT).
+4-8. `test_log_audit_usa_x_forwarded_for_quando_presente`,
+   `test_log_audit_x_forwarded_for_pega_primeiro_ip_da_cadeia`,
+   `test_log_audit_usa_x_real_ip_como_fallback`,
+   `test_log_audit_fallback_para_client_host_sem_headers`,
+   `test_log_audit_x_forwarded_for_vazio_cai_no_fallback` — novos, validam
+   F04 (X-Forwarded-For em audit logs).
+9. `test_get_detail_invalid_uuid_retorna_404` — novo, valida C08 M3
+   (UUID invalido em path retorna 404 em todos os 5 endpoints).
+
+### Arquivos alterados nesta sessao
+
+**Backend (9):**
+- `backend/app/api/v1/provas.py` — F01 (500→502), F02 (db.refresh guard),
+  F05 (eliminar query duplicada), F25 (timezone BRT), C08 M3 (parse_prova_id).
+- `backend/app/services/audit_service.py` — F04 (X-Forwarded-For).
+- `backend/migrations/versions/009_evolve_template_etiqueta_schema.py` —
+  F12 (warning downgrade).
+- `backend/migrations/rls/005_initplan_optimization.sql` — F03 (TODO Wave 3).
+- `backend/tests/test_provas_api.py` — atualizados 5+ testes + 3 novos.
+- `backend/tests/test_audit_service.py` — +5 testes.
+- `backend/tests/test_etiqueta_service.py` — fix flake com monkeypatch.
+
+**Frontend (4):**
+- `frontend/src/hooks/useListProvas.ts` — F21 (AbortController).
+- `frontend/src/hooks/useProvaDetail.ts` — F07 (latestReqRef).
+- `frontend/src/app/(dashboard)/nova-prova/page.tsx` — F09 (remover useEffect).
+- `frontend/src/app/(dashboard)/provas/page.tsx` — F10 (label) + C07 B1 (MeResponse).
+- `frontend/src/lib/types/usuario.ts` — C07 B1 (export MeResponse).
+
+**Contexto (2):**
+- `DECISIONS.md` — ADR-079 (meta-auditoria externa) + ADR-080 (detalhes de
+  implementacao dos fixes).
+- `CHANGELOG.md` — esta entrada.
+
+**NAO modificados** (Wave 1, congelados): `layout.tsx`, `test_jwt.py`,
+todos os outros arquivos de Wave 0 e Wave 1.
+
+### Wave 2 — Sign-off definitivo
+
+Apos Sessao 22, a Wave 2 esta:
+- 308 testes passing (22 novos desde Sessao 17, 8 desta sessao)
+- 94% cobertura global, 95-100% nos arquivos Wave 2
+- Ruff / tsc / lint / build limpos
+- Padrao unificado de error handling **verdadeiramente** unificado nos
+  4 componentes (C06 create_prova agora alinhado)
+- Contrato HTTP consistente (409 race / 502 DB transient / 422 input)
+- Zero regressoes funcionais introduzidas
+- Zero debitos criticos ou altos pendentes (F18/C06 A1 e teorico, F17/F22/
+  F24 adiados para Wave 6 com autorizacao explicita, F03 adiado para Wave 3
+  com TODO explicito)
+
+Proximo passo: **Wave 3** — Scanner QR + Assinatura Digital + Maquina de
+Estados em producao.
+
+---
+
 ## [2026-04-10 — Sessao 21] — Auditoria senior Wave 2 — Componente 09 (FINAL)
 
 ### Contexto

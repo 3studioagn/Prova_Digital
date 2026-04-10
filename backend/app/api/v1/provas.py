@@ -37,7 +37,16 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -83,6 +92,22 @@ router = APIRouter()
 
 PRESIGNED_URL_TTL_SECONDS = 900  # 15 minutos (DAT: URLs assinadas com TTL curto)
 
+# F25 (auditoria externa): filtros de data da listagem sao interpretados no
+# fuso horario da 3Studio (America/Sao_Paulo = UTC-3 fixo). Sem isso, uma
+# prova criada em 2026-04-09 23:30 BRT (= 2026-04-10 02:30 UTC) nao aparece
+# no filtro `periodo_inicio=2026-04-09 & periodo_fim=2026-04-09` porque a
+# query usaria `created_at >= 2026-04-09 00:00 UTC` e `< 2026-04-10 00:00
+# UTC` — a prova esta em 2026-04-10 UTC. Convertendo o input do usuario
+# para UTC antes de filtrar, o comportamento passa a bater com o que o
+# usuario ve na coluna "Criada em" da tabela.
+#
+# Usamos offset fixo -3 em vez de `zoneinfo.ZoneInfo("America/Sao_Paulo")`
+# porque (a) o Brasil nao tem DST desde 2019 e a aplicacao so lida com datas
+# atuais/futuras, e (b) `zoneinfo` no Windows precisa do pacote `tzdata`
+# como dependencia extra, o que evitamos. Se eventualmente for necessario
+# lidar com datas historicas pre-2019, trocar por ZoneInfo + tzdata.
+BRT_TIMEZONE = timezone(timedelta(hours=-3))
+
 # Magic bytes reconhecidos (ADR-032).
 MAGIC_BYTES = {
     "image/jpeg": b"\xff\xd8\xff",
@@ -106,6 +131,33 @@ async def _cleanup_r2(object_key: str) -> None:
     except Exception:
         logger.exception(
             "R2 cleanup FALHOU para %s — orfao possivel, investigar", object_key
+        )
+
+
+def parse_prova_id(
+    prova_id: str = Path(..., description="UUID da prova digital"),
+) -> uuid.UUID:
+    """Converte o `prova_id` do path para UUID, retornando 404 se invalido.
+
+    C08 M3 (auditoria externa Wave 2): antes, o FastAPI tipava o path como
+    `uuid.UUID` diretamente, o que fazia o Pydantic retornar 422 com mensagem
+    verbose do validator ("invalid character: expected an optional prefix of
+    `urn:uuid:`...") quando um usuario digitava URL manualmente (ex:
+    `/provas/abc123`). A mensagem vaza detalhes internos do validator e e
+    inconsistente com o 404 retornado quando um UUID valido aponta para uma
+    prova inexistente ou escondida por scoping.
+
+    Esta dependency normaliza o comportamento: qualquer ID nao-UUID vira
+    404 "Prova nao encontrada", igual ao caso de prova ausente. O openapi
+    schema continua documentando o path como string simples (`{prova_id}`)
+    — quem consumir o OpenAPI ve um 404 coerente.
+    """
+    try:
+        return uuid.UUID(prova_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
         )
 
 
@@ -458,6 +510,10 @@ async def create_prova(
             detail="Numero de requerimento ja cadastrado",
         )
     except Exception:
+        # F01 (auditoria externa): DB errors transitorios no commit retornam
+        # 502 para alinhar com ADR-074 (C07), ADR-076 (C08) e ADR-078 (C09).
+        # 502 expressa "upstream indisponivel, cliente pode retentar com
+        # back-off"; 500 seria "bug interno do backend" (nao e o caso aqui).
         await db.rollback()
         logger.exception(
             "Falha ao persistir prova %s (nro_req=%s). Limpando R2.",
@@ -466,11 +522,33 @@ async def create_prova(
         )
         await _cleanup_r2(body.object_key)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Falha ao criar prova digital",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao persistir prova",
         )
 
-    await db.refresh(nova_prova)
+    # F02 (auditoria externa): db.refresh esta FORA do try/except do commit.
+    # Se refresh falhar (conexao dropa entre commit e refresh, janela rara
+    # mas possivel), a prova JA ESTA persistida no DB — retornar 500 para o
+    # cliente seria enganoso porque o cliente retentaria e receberia 409 na
+    # segunda tentativa. Em vez disso, se o refresh falhar, construimos o
+    # response com os valores ja conhecidos em memoria e logamos warning.
+    try:
+        await db.refresh(nova_prova)
+        created_at_response = nova_prova.created_at
+        updated_at_response = nova_prova.updated_at
+    except Exception:
+        logger.warning(
+            "db.refresh falhou apos commit da prova %s (nro_req=%s). "
+            "Respondendo com dados em memoria. Investigar drift eventual.",
+            nova_prova.id,
+            nova_prova.nro_requerimento,
+        )
+        # `created_at` foi gerado no backend antes do INSERT (ver linha do
+        # `datetime.now(tz=timezone.utc)` acima). Em `updated_at` usamos o
+        # mesmo valor — na Wave 2 nenhum UPDATE subsequente acontece entre
+        # INSERT e response.
+        created_at_response = created_at
+        updated_at_response = created_at
 
     pdf_base64 = base64.b64encode(pdf_bytes).decode("ascii")
 
@@ -500,8 +578,8 @@ async def create_prova(
         rota_projetada=rota_projetada,
         ciclo_atual=nova_prova.ciclo_atual,
         motivo_cancelamento=nova_prova.motivo_cancelamento,
-        created_at=nova_prova.created_at,
-        updated_at=nova_prova.updated_at,
+        created_at=created_at_response,
+        updated_at=updated_at_response,
     )
 
     return ProvaCreateResponse(
@@ -653,17 +731,26 @@ async def list_provas(
         )
 
     # Periodo (ADR-048): fim inclusivo — adicionamos 1 dia e usamos `<`.
+    #
+    # F25 (auditoria externa): interpretamos o input do usuario no fuso BRT
+    # (America/Sao_Paulo) antes de converter para UTC. Ver comentario em
+    # BRT_ZONE acima. Antes desta mudanca, `periodo_inicio=2026-04-09` era
+    # tratado como 2026-04-09 00:00 UTC (= 2026-04-08 21:00 BRT), o que
+    # confundia o usuario que esperava ver provas criadas no dia 9 BRT.
     if periodo_inicio is not None:
         inicio_dt = datetime(
             periodo_inicio.year, periodo_inicio.month, periodo_inicio.day,
-            tzinfo=timezone.utc,
-        )
+            tzinfo=BRT_TIMEZONE,
+        ).astimezone(timezone.utc)
         filters.append(ProvaDigital.created_at >= inicio_dt)
     if periodo_fim is not None:
-        fim_dt = datetime(
-            periodo_fim.year, periodo_fim.month, periodo_fim.day,
-            tzinfo=timezone.utc,
-        ) + timedelta(days=1)
+        fim_dt = (
+            datetime(
+                periodo_fim.year, periodo_fim.month, periodo_fim.day,
+                tzinfo=BRT_TIMEZONE,
+            )
+            + timedelta(days=1)
+        ).astimezone(timezone.utc)
         filters.append(ProvaDigital.created_at < fim_dt)
 
     # Count total (antes do offset/limit)
@@ -744,17 +831,23 @@ async def list_provas(
 
 async def _carregar_prova_com_scoping(
     db: AsyncSession, prova_id: uuid.UUID, user: Usuario
-) -> tuple[ProvaDigital, str, LocalizacaoEnum | None] | None:
+) -> tuple[ProvaDigital, str, LocalizacaoEnum | None, SetorEnum] | None:
     """Carrega a prova + dados do vendedor respeitando o scoping por setor.
 
-    Retorna uma tupla `(prova, vendedor_nome, vendedor_localizacao)` ou `None`
-    quando a prova nao existe ou o usuario nao tem permissao de ve-la.
+    Retorna `(prova, vendedor_nome, vendedor_localizacao, vendedor_setor)` ou
+    `None` quando a prova nao existe ou o usuario nao tem permissao de ve-la.
+
+    F05 (auditoria externa Wave 2): o `vendedor_setor` foi adicionado ao JOIN
+    para que `get_prova_detail` possa calcular `rota_projetada` sem fazer uma
+    segunda query por request. Os outros 4 endpoints de detalhe nao usam
+    setor — fazem unpacking com `_` para o 4o elemento.
     """
     stmt = (
         select(
             ProvaDigital,
             Usuario.nome.label("vendedor_nome"),
             Usuario.localizacao.label("vendedor_localizacao"),
+            Usuario.setor.label("vendedor_setor"),
         )
         .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
         .where(ProvaDigital.id == prova_id)
@@ -766,15 +859,40 @@ async def _carregar_prova_com_scoping(
     row = (await db.execute(stmt)).first()
     if row is None:
         return None
-    prova, vendedor_nome, vendedor_localizacao = row
-    return prova, vendedor_nome, vendedor_localizacao
+    prova, vendedor_nome, vendedor_localizacao, vendedor_setor = row
+    return prova, vendedor_nome, vendedor_localizacao, vendedor_setor
+
+
+def _determinar_rota_projetada(
+    vendedor_setor: SetorEnum, vendedor_localizacao: LocalizacaoEnum | None
+) -> RotaEnum | None:
+    """Calcula `rota_projetada` a partir do setor e localizacao do vendedor.
+
+    Retorna None em edge cases onde a rota nao pode ser determinada (setor
+    != VENDEDOR, localizacao ausente). O frontend trata None exibindo
+    apenas `prova.rota` ou placeholder.
+
+    F05 (auditoria externa Wave 2): esta funcao substitui a chamada
+    `determinar_rota(vendedor)` que exigia um Usuario completo — agora
+    aceita os 2 campos escalares que ja vem no JOIN de
+    `_carregar_prova_com_scoping`.
+    """
+    if vendedor_setor != SetorEnum.VENDEDOR:
+        return None
+    if vendedor_localizacao is None:
+        return None
+    if vendedor_localizacao == LocalizacaoEnum.MATRIZ:
+        return RotaEnum.PADRAO
+    if vendedor_localizacao == LocalizacaoEnum.FILIAL:
+        return RotaEnum.DIRETA
+    return None
 
 
 def _build_prova_response(
     prova: ProvaDigital,
-    vendedor_obj: Usuario | None,
     vendedor_nome: str,
     vendedor_localizacao: LocalizacaoEnum | None,
+    vendedor_setor: SetorEnum,
 ) -> ProvaResponse:
     """Monta o ProvaResponse calculando `rota_projetada` quando possivel.
 
@@ -782,13 +900,6 @@ def _build_prova_response(
     calculada (ex: mudou de setor apos a criacao da prova). O frontend trata
     None exibindo apenas `prova.rota` ou placeholder.
     """
-    rota_projetada: RotaEnum | None = None
-    if vendedor_obj is not None:
-        try:
-            rota_projetada = determinar_rota(vendedor_obj)
-        except RotaIndeterminavelError:
-            rota_projetada = None
-
     return ProvaResponse(
         id=prova.id,
         nome=prova.nome,
@@ -801,7 +912,7 @@ def _build_prova_response(
         qr_code_hash=prova.qr_code_hash,
         status=prova.status,
         rota=prova.rota,
-        rota_projetada=rota_projetada,
+        rota_projetada=_determinar_rota_projetada(vendedor_setor, vendedor_localizacao),
         ciclo_atual=prova.ciclo_atual,
         motivo_cancelamento=prova.motivo_cancelamento,
         created_at=prova.created_at,
@@ -811,7 +922,7 @@ def _build_prova_response(
 
 @router.get("/{prova_id}", response_model=ProvaResponse)
 async def get_prova_detail(
-    prova_id: uuid.UUID,
+    prova_id: uuid.UUID = Depends(parse_prova_id),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> ProvaResponse:
@@ -822,6 +933,12 @@ async def get_prova_detail(
     timeout) para 502 com mensagem acionavel em vez do 500 generico do
     exception handler global. HTTPException (ex: 404 do scoping) e
     re-levantada para nao ser mascarada.
+
+    F05 (auditoria externa Wave 2): eliminada a segunda query que buscava
+    o objeto Usuario completo so para pegar o `setor` usado em
+    `determinar_rota`. Agora o JOIN em `_carregar_prova_com_scoping` ja
+    retorna `setor` e `localizacao`, que sao suficientes para calcular
+    `rota_projetada` via `_determinar_rota_projetada`.
     """
     try:
         result = await _carregar_prova_com_scoping(db, prova_id, current_user)
@@ -830,13 +947,7 @@ async def get_prova_detail(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Prova nao encontrada",
             )
-        prova, vendedor_nome, vendedor_localizacao = result
-
-        # Para calcular rota_projetada precisamos do Usuario completo (com setor).
-        # Consulta simples pelo id ja retornado.
-        vendedor_obj = (
-            await db.execute(select(Usuario).where(Usuario.id == prova.vendedor_id))
-        ).scalar_one_or_none()
+        prova, vendedor_nome, vendedor_localizacao, vendedor_setor = result
     except HTTPException:
         raise
     except Exception:
@@ -851,7 +962,7 @@ async def get_prova_detail(
         )
 
     return _build_prova_response(
-        prova, vendedor_obj, vendedor_nome, vendedor_localizacao
+        prova, vendedor_nome, vendedor_localizacao, vendedor_setor
     )
 
 
@@ -865,7 +976,7 @@ IMAGEM_URL_TTL_SECONDS = 900  # 15 minutos (ADR-050)
 
 @router.get("/{prova_id}/imagem-url", response_model=ImagemUrlResponse)
 async def get_imagem_url(
-    prova_id: uuid.UUID,
+    prova_id: uuid.UUID = Depends(parse_prova_id),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> ImagemUrlResponse:
@@ -876,7 +987,7 @@ async def get_imagem_url(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Prova nao encontrada",
         )
-    prova, _vendedor_nome, _vendedor_localizacao = result
+    prova, _vendedor_nome, _vendedor_localizacao, _vendedor_setor = result
 
     try:
         url = await r2_signed.generate_presigned_get_url(
@@ -906,7 +1017,7 @@ async def get_imagem_url(
     "/{prova_id}/movimentacoes", response_model=MovimentacaoListResponse
 )
 async def list_movimentacoes(
-    prova_id: uuid.UUID,
+    prova_id: uuid.UUID = Depends(parse_prova_id),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> MovimentacaoListResponse:
@@ -980,7 +1091,7 @@ async def list_movimentacoes(
 
 @router.get("/{prova_id}/etiqueta.pdf")
 async def get_etiqueta_pdf(
-    prova_id: uuid.UUID,
+    prova_id: uuid.UUID = Depends(parse_prova_id),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> Response:
@@ -1000,7 +1111,7 @@ async def get_etiqueta_pdf(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Prova nao encontrada",
             )
-        prova, vendedor_nome, _vendedor_localizacao = scoped
+        prova, vendedor_nome, _vendedor_localizacao, _vendedor_setor = scoped
 
         # Busca a etiqueta (snapshot imutavel criado junto com a prova)
         etiqueta = (
@@ -1078,7 +1189,7 @@ async def get_etiqueta_pdf(
 
 @router.get("/{prova_id}/qr-code.png")
 async def get_qr_code_png(
-    prova_id: uuid.UUID,
+    prova_id: uuid.UUID = Depends(parse_prova_id),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> Response:

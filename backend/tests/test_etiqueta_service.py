@@ -82,14 +82,37 @@ def test_pdf_a4_e_maior_que_vazio():
     assert len(pdf) > 1000
 
 
-def test_pdf_formato_legacy_e_aceito_mas_ignorado():
+def test_pdf_formato_legacy_e_aceito_mas_ignorado(monkeypatch):
     """Sessao 14: o campo `formato` do template foi obsoleto.
 
     A etiqueta tem dimensao fixa 90x57mm conforme design Figma. Os valores
     legacy "A4" e "80mm_thermal" continuam sendo aceitos pelo schema (para
     compat com configuracao existente) mas nao afetam o render — geram
     PDFs identicos byte-a-byte (com os mesmos inputs).
+
+    Flake fix (auditoria externa Wave 2): antes esse teste era flaky porque
+    comparava os bytes de 2 PDFs gerados em sucessao — o fpdf2 embute o
+    timestamp de `CreationDate` no metadata do PDF com resolucao de segundo,
+    entao 2 chamadas que cruzam a fronteira de segundo geravam PDFs com
+    metadata diferente e o `assert a4 == thermal` falhava. O fix congela o
+    `datetime.now()` dentro do modulo `fpdf.fpdf` e `fpdf.output` durante
+    a execucao do teste, via monkeypatch em classe auxiliar. Mesma saida
+    binaria garantida.
     """
+    import fpdf.fpdf
+    import fpdf.output
+
+    # Cria um datetime falso cujo .now() sempre retorna o mesmo valor.
+    fixed_now = datetime(2026, 4, 10, 12, 0, 0, tzinfo=timezone.utc)
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now if tz is None else fixed_now.astimezone(tz)
+
+    monkeypatch.setattr(fpdf.fpdf, "datetime", _FrozenDatetime)
+    monkeypatch.setattr(fpdf.output, "datetime", _FrozenDatetime)
+
     a4 = gerar_pdf(
         nome_prova="Teste",
         nro_requerimento="REQ-1",

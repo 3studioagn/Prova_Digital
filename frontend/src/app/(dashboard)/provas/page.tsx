@@ -18,15 +18,15 @@ import {
   type Rota,
   type StatusProva,
 } from "@/lib/types/prova";
-import type { UsuarioResponse, UsuarioListResponse } from "@/lib/types/usuario";
+import type {
+  MeResponse,
+  UsuarioListResponse,
+  UsuarioResponse,
+} from "@/lib/types/usuario";
 import styles from "./provas.module.css";
 
-interface MeResponse {
-  id: string;
-  nome: string;
-  setor: string;
-  is_admin: boolean;
-}
+// C07 B1 (auditoria externa Wave 2): `MeResponse` extraido para
+// `lib/types/usuario.ts` como fonte unica de verdade.
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -327,7 +327,7 @@ function ProvasPageInner() {
 
             <div className={styles.field}>
               <label htmlFor="filtro_inicio" className={styles.label}>
-                Criada em:
+                Criada a partir de:
               </label>
               <input
                 id="filtro_inicio"
@@ -341,7 +341,14 @@ function ProvasPageInner() {
 
             <div className={styles.field}>
               <label htmlFor="filtro_fim" className={styles.label}>
-                Finalizada em:
+                {/* F10 (auditoria externa Wave 2): antes "Finalizada em",
+                    que era enganoso — o filtro e sobre `created_at` da prova,
+                    nao sobre qualquer conceito de "finalizacao". Wave 2 nao
+                    tem o conceito de prova finalizada (isso existe na Wave 3
+                    como RECEBIDA_PELA_CLICHERIA, mas a coluna correspondente
+                    seria uma MAX(movimentacao.created_at), nao um campo na
+                    tabela provas_digitais). */}
+                Criada ate:
               </label>
               <input
                 id="filtro_fim"

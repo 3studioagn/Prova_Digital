@@ -126,6 +126,24 @@ CREATE POLICY pol_provas_update ON provas_digitais
 -- Admin ve todas. VENDEDOR ve movimentacoes das suas provas. Demais veem as proprias.
 -- INSERT e feito exclusivamente pelo backend via service_role (bypassa RLS).
 -- UPDATE/DELETE bloqueados pelo trigger trg_movimentacoes_imutavel.
+--
+-- F03 (auditoria externa Wave 2) — TODO Wave 3:
+-- A auditoria de 2026-04-10 detectou que esta policy NAO cobre MOTORISTA nem
+-- CLICHERIA, em desacordo com `pol_provas_select` acima (linhas 75-99) que
+-- cobre os 4 atores. Gap de defesa em profundidade: se MOTORISTA ou CLICHERIA
+-- acessar movimentacoes via Supabase client direto (nao via backend), nao
+-- verao movimentacoes que operacionalmente deveriam ver.
+--
+-- Por que NAO esta resolvido aqui: na Wave 2 nenhuma movimentacao e inserida
+-- (state machine stub — executar_transicao levanta NotImplementedError). O
+-- backend ja cobre o scoping via `_carregar_prova_com_scoping` em provas.py
+-- usando a mesma logica de `pol_provas_select` — funciona corretamente.
+--
+-- Resolver na Wave 3, no mesmo PR que implementar `executar_transicao` + o
+-- primeiro POST /provas/{id}/transicao. Criar `006_rls_movimentacoes_atores_completos.sql`
+-- espelhando a semantica de pol_provas_select: admin, vendedor das suas provas,
+-- MOTORISTA se a movimentacao gerou/saiu do status COM_MOTORISTA, CLICHERIA
+-- se a movimentacao gerou/saiu de status de clicheria.
 DROP POLICY IF EXISTS pol_movimentacoes_select ON movimentacoes;
 CREATE POLICY pol_movimentacoes_select ON movimentacoes
     FOR SELECT

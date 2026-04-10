@@ -12,7 +12,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 |------|--------|--------|---------|
 | **0 — Infra** | ✅ **COMPLETA** | Schema Postgres (6 tabelas de dominio + enums + triggers imutabilidade), RLS inicial, R2 bucket, keep-alive cron, CI/CD | 1 |
 | **1 — Auth + RBAC** | ✅ **COMPLETA** (sign-off Sessao 6) | Supabase Auth (ES256 JWKS), CRUD de usuarios com saga auth↔DB, RLS `is_admin=true`, tela `/usuarios` | 1-6 |
-| **2 — Nucleo do Dominio** | ✅ **COMPLETA** (Sessao 11) | Cadastro de prova + etiqueta + QR Code (C06), Listagem com filtros (C07), Detalhe + modal etiqueta/QR (C08), Configuracoes do sistema (C09) | 7-11 |
+| **2 — Nucleo do Dominio** | ✅ **COMPLETA** (sign-off Sessao 22 pos-auditoria externa) | Cadastro de prova + etiqueta + QR Code (C06), Listagem com filtros (C07), Detalhe + modal etiqueta/QR (C08), Configuracoes do sistema (C09) | 7-22 |
 | **3 — Scanner + Transicoes** | 🔜 Proxima | Camera HTML5, scanner QR, assinatura digital, maquina de estados (executar_transicao), reprovacao, cancelamento, reiniciar ciclo | — |
 | **4 — Dashboard + Atrasos** | ⏳ | Dashboard tempo real, contadores, calculo de atraso (RN-008), Realtime via Supabase | — |
 | **5 — Relatorios + Export** | ⏳ | CSV export, metricas por vendedor, dashboards gerenciais | — |

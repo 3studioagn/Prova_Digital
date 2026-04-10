@@ -21,6 +21,46 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import AuditLog
 
 
+def _extract_client_ip(request: Request) -> str | None:
+    """Extrai o IP real do cliente respeitando X-Forwarded-For.
+
+    F04 (auditoria externa Wave 2): em producao no Railway (atras de proxy),
+    `request.client.host` retorna o IP do gateway do Railway, nao o IP real
+    do usuario. RNF-005 exige log "completo e imutavel" — sem o IP real,
+    investigacoes de incidente ficam cegas.
+
+    Estrategia:
+      1. Tenta ler `X-Forwarded-For` e pega o PRIMEIRO IP da cadeia (o client
+         original). O formato e `client, proxy1, proxy2, ...`.
+      2. Se ausente, tenta `X-Real-IP` (alguns proxies usam esse header).
+      3. Fallback: `request.client.host` (correto em dev local e testes).
+
+    IMPORTANTE (seguranca): confiamos nesses headers porque o Railway e um
+    proxy confiavel que reescreve X-Forwarded-For no ingress. Se o projeto
+    migrar para uma infra onde o cliente possa injetar headers direto, essa
+    logica precisa ser endurecida para:
+      - Validar que o request vem de um proxy na whitelist
+      - Usar o PENULTIMO IP da cadeia (o ultimo e sempre o proxy)
+    Por ora, Railway single-proxy -> primeiro IP esta correto.
+    """
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        # Pode ter multiplos IPs separados por virgula — pegar o primeiro.
+        first = forwarded_for.split(",")[0].strip()
+        if first:
+            return first
+
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+
+    # Fallback: request.client pode ser None em testes sem cliente HTTP real.
+    if request.client is not None:
+        return request.client.host
+
+    return None
+
+
 async def log_audit(
     db: AsyncSession,
     *,
@@ -47,13 +87,11 @@ async def log_audit(
     Returns:
         A instancia AuditLog persistida (apos flush).
     """
-    ip_address = None
-    user_agent = None
+    ip_address: str | None = None
+    user_agent: str | None = None
 
     if request is not None:
-        # request.client pode ser None em testes sem cliente HTTP real.
-        if request.client is not None:
-            ip_address = request.client.host
+        ip_address = _extract_client_ip(request)
         ua = request.headers.get("user-agent")
         if ua:
             # Trunca para evitar logs gigantes (navegadores modernos tem UAs longos).

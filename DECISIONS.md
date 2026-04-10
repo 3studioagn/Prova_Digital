@@ -1796,3 +1796,133 @@ except Exception:
   - **Cobertura 100% em ambos os arquivos C09** (`configuracoes.py` e `schemas/configuracao.py`). Primeiro componente da Wave 2 a zerar os gaps.
   - **Frontend nao precisou de mudanca**: o hook `useConfiguracoes` ja propaga `ApiError.message` — o 502 com mensagem especifica do backend automaticamente substitui mensagens genericas quando o DB falhar. Melhoria automatica de UX sem tocar em 1 linha de frontend.
   - **`rollback` nao e chamado em caminhos felizes nem em 404 defensivo** — confirmado pelos testes. Nenhum desperdicio de conexao do pool.
+
+---
+
+## ADR-079 — Auditoria externa pos-sign-off da Wave 2 (Sessao 22)
+**Data:** 2026-04-10 (Wave 2, Sessao 22)
+**Contexto:** Apos a Sessao 21 declarar "Wave 2 pronta para sign-off" (ADR-077/078), Mario solicitou uma **segunda auditoria independente** com protocolo ainda mais rigoroso: read-only total na Fase 1-3, gate obrigatorio antes de qualquer edicao, escopo estrito a Wave 2 (C06/C07/C08/C09), Waves 0 e 1 congeladas. O objetivo era verificar as alegacoes das Sessoes 18-21 empiricamente e procurar problemas novos que aquelas sessoes pudessem ter perdido — uma especie de auditoria "zerada" sobre o trabalho ja feito.
+**Decisao (processo da auditoria externa):**
+  1. **Fase 1 — Carregamento de contexto**: ler DECISIONS.md (78 ADRs), CHANGELOG.md (21 sessoes), schema.sql, Requisitos v3.0, DAT v2.0, Backlog v3.0, UML, migrations, RLS, **todos** os 30 arquivos da Wave 2 (backend + frontend + tests). Entregar resumo de escopo e **parar no gate obrigatorio** para validacao do Mario.
+  2. **Fase 2 — Auditoria multi-eixo**: oito eixos em paralelo (requisitos/ADRs, schema/migrations/RLS, backend FastAPI, frontend Next.js, seguranca, testes, qualidade de codigo, integracao entre Waves). Para cada achado: severidade, arquivo+linha, descricao, impacto, correcao proposta.
+  3. **Fase 2b — Re-verificacao empirica**: rodar `pytest -v` (alegou 300 → confirmado), `ruff check` (alegou limpo → confirmado), `tsc --noEmit` (alegou limpo → confirmado), `next lint` (alegou limpo → confirmado), `next build` (alegou OK → confirmado). Todas as alegacoes das Sessoes 18-21 **confirmadas empiricamente**.
+  4. **Fase 3 — Relatorio consolidado**: 20 achados novos catalogados (1 critico, 3 altos, 10 medios, 6 baixos) + 6 debitos herdados das Sessoes 18-21 para Mario decidir. Gate obrigatorio antes de qualquer edicao.
+  5. **Fase 4 — Execucao**: commit baseline primeiro (resolve F23), depois 14 fixes em ordem de criticidade, commit final no fim.
+
+**Resultados (ver ADR-080 para detalhes de implementacao):**
+  - **14 fixes aplicados**: F01, F02+F27, F25, F04, F05 (=C08 M2), F07, F12, F09, F10, F21, C07 B1, C08 M3, Flake PDF, F23 (via commit baseline).
+  - **3 fixes NAO aplicados** por decisao explicita:
+    - **F03** (RLS movimentacoes sem MOTORISTA/CLICHERIA) → **adiado para Wave 3** (quando movimentacoes comecarem a existir). Documentado como TODO explicito no proprio arquivo `005_initplan_optimization.sql`.
+    - **F18** (rate limit em /upload-url e /provas/) → **mantido como debito aceito** (concordancia com Sessao 18, ADR-069).
+    - **F13** (warning HMAC em `test_jwt.py`) → **NAO TOCADO** porque e Wave 1 congelada. Mario foi explicito: "iremos mexer somente no que for da wave 2".
+  - **4 debitos herdados aplicados**: C07 B1 (MeResponse shared), C08 M2 (=F05), C08 M3 (404 em UUID invalido), Flake PDF (monkeypatch datetime).
+  - **Metricas**: 300 → **308 testes** (+8 novos). Cobertura `provas.py` 95% mantida (322 stmts, +16 cobertos). Cobertura `audit_service.py` 100% (29 stmts, +11). Global 94% mantido.
+  - **Ruff / tsc / lint / build**: todos limpos antes e depois.
+  - **Zero regressoes funcionais** introduzidas.
+  - **2 commits**: `270c59a` (baseline com Sessoes 13-21, resolve F23) e `[HEAD]` (todos os fixes da auditoria externa).
+
+**Alternativas consideradas no processo:**
+  - **Aceitar as alegacoes das Sessoes 18-21 sem re-verificar**: rejeitado — o ponto da auditoria externa e justamente validar o trabalho prévio.
+  - **Auditoria em bloco unico** (catalogar tudo sem parar no gate): rejeitado — Mario pediu protocolo conservador com gate, consistente com as sessoes anteriores.
+  - **Extender o escopo para Wave 0/1** quando encontrou F13 (HMAC warning em test_jwt): rejeitado — Mario foi explicito sobre escopo estrito a Wave 2.
+
+**Consequencias:**
+  - **Wave 2 verdadeiramente endurecida** — a auditoria externa encontrou 20 achados que as Sessoes 18-21 perderam, incluindo 1 critico (F23: SVGs nao commitados, que quebraria deploy Railway) e 3 altos (F01: 500 vs 502 inconsistente, F02: db.refresh race, F25: timezone UTC confunde usuario BRT).
+  - **Padrao unificado de error handling verdadeiramente unificado**: ADR-077 alegava isso, mas F01 mostrou que o `create_prova` ainda retornava 500. Corrigido — agora os 4 componentes (C06/C07/C08/C09) seguem o mesmo padrao 502 para DB transient.
+  - **Defesa em profundidade aumentada** em 4 dimensoes:
+    - Error handling: 502 em todos os commits failure + 422 em rendering + 409 em race de unicidade
+    - Race conditions: `latestReqRef` no `useProvaDetail` (era so no `useListProvas`)
+    - Resource cleanup: `AbortController` no `useListProvas` para cancelar requests em voo
+    - Data integrity: `db.refresh` failure handling garante que prova criada nao "vira fantasma" para o usuario
+  - **Audit trail produtivo em producao**: F04 garante que o IP real do usuario chega no audit_log em vez do IP do gateway Railway — essencial para investigacao de incidentes segundo RNF-005.
+  - **UX consistente**: F10 (label "Criada ate" em vez de "Finalizada em"), F25 (timezone BRT), C08 M3 (404 em vez de 422 verbose), F12 (warning lossy no downgrade) — todas melhorias de comunicacao com o usuario/operador.
+  - **Debito tecnico formalizado** para Wave 3 (F03, policy RLS movimentacoes) e Wave 6 (F17/F22/F24, testes de RLS e integracao real). Nenhum debito silencioso.
+  - **Meta-aprendizado**: o protocolo de "auditoria externa" (com re-verificacao empirica das alegacoes anteriores) e uma camada adicional valiosa sobre o ja estabelecido protocolo interno das Sessoes 18-21. Deveria ser repetido no final de cada Wave grande.
+
+---
+
+## ADR-080 — Detalhes de implementacao dos 14 fixes da auditoria externa
+**Data:** 2026-04-10 (Wave 2, Sessao 22)
+**Contexto:** ADR meta-documentativo do ADR-079 — registra decisoes tecnicas especificas de cada um dos 14 fixes aplicados na auditoria externa.
+
+### F01 — `create_prova` commit failure 500 → 502
+**Arquivo:** `backend/app/api/v1/provas.py:469-475` (antigo) → 502 + mensagem "Falha ao persistir prova".
+**Justificativa:** alinhamento com ADR-074 (C07 `list_provas`), ADR-076 (C08 4 endpoints) e ADR-078 (C09 3 endpoints). ADR-077 alegava que o padrao era unificado, mas o `create_prova` estava excluido desse padrao — factualmente falso. Fix 1 linha de codigo + 1 teste atualizado.
+
+### F02 + F27 — `db.refresh` fora do try/except
+**Arquivo:** `backend/app/api/v1/provas.py:477-494`.
+**Problema:** `await db.refresh(nova_prova)` acontecia APOS o commit bem-sucedido, fora de qualquer try/except. Se o refresh falhasse (raro mas possivel — connection drop entre commit e refresh), a exception bolha para o handler global → 500 generico. Mas a prova JA ESTA persistida no DB. Cliente recebe 500, retenta, pega 409 "ja cadastrada" — estado logico inconsistente da percepcao do usuario.
+**Decisao:** envolver `db.refresh` em try/except. Em caso de falha, construir o response com os valores em memoria (o `created_at` gerado no backend antes do INSERT via `datetime.now(UTC)` + `updated_at = created_at` porque na Wave 2 nenhum UPDATE acontece entre INSERT e response). Logar warning "respondendo com dados em memoria" para monitoramento.
+**Alternativas rejeitadas:**
+  - Rollback em caso de refresh failure: impossivel — commit ja aconteceu.
+  - Transacao em 2 fases (saga): overkill para uma unica query defensiva.
+  - Rodar refresh dentro do try/except do commit: mudaria o shape do commit failure handler e misturaria dois tipos de erro.
+**Teste novo:** `test_create_prova_refresh_failure_after_commit_responds_201` — mocka `db.refresh.side_effect = Exception` e valida response 201 com dados consistentes. Cobre a lacuna F27 (zero teste anterior para esse caminho).
+
+### F25 — Filtro de periodo com timezone BRT implicito
+**Arquivo:** `backend/app/api/v1/provas.py:93-106, 687-705`.
+**Problema:** filtros de data eram convertidos para UTC direto. Usuario em BRT que filtra `periodo_inicio=2026-04-09` nao via provas criadas as 23:30 BRT do dia 9 (= 02:30 UTC do dia 10).
+**Decisao:** usar offset fixo `-3` via `timezone(timedelta(hours=-3))` em vez de `ZoneInfo("America/Sao_Paulo")`. Motivos:
+  1. Brasil nao tem DST desde 2019 e a aplicacao so lida com datas atuais/futuras.
+  2. `zoneinfo` no Windows precisa do pacote `tzdata` como dep extra (descoberto em runtime na Sessao 22 — teste falhou com `ZoneInfoNotFoundError`). Evitar dep extra.
+  3. Se eventualmente for necessario lidar com datas historicas pre-2019 (backfills), trocar por ZoneInfo + tzdata.
+**Teste novo:** `test_list_filter_periodo_respects_brt_timezone` valida que `periodo_inicio=2026-04-09 & periodo_fim=2026-04-09` gera SQL com `>= 2026-04-09 03:00:00 UTC` e `< 2026-04-10 03:00:00 UTC`.
+
+### F03 — RLS `pol_movimentacoes_select` sem MOTORISTA/CLICHERIA
+**Arquivo:** `backend/migrations/rls/005_initplan_optimization.sql` (apenas comment, sem mudanca funcional).
+**Decisao:** **nao aplicar o fix na Wave 2**. Justificativas:
+  1. Wave 2 nao insere nenhuma movimentacao (state machine stub).
+  2. O backend ja cobre o scoping corretamente via `_carregar_prova_com_scoping` (ADR-046/049) usando a mesma logica de `pol_provas_select`.
+  3. Criar uma migration RLS 006 na Wave 2 acopla trabalho de Wave 3 ao fechamento da Wave 2.
+**Action:** adicionado bloco de comentario TODO dentro do proprio arquivo SQL, explicando o gap + as acoes necessarias para Wave 3 + referencia a este ADR.
+
+### F04 — `log_audit` sem X-Forwarded-For
+**Arquivo:** `backend/app/services/audit_service.py:24-56`.
+**Decisao:** criar helper `_extract_client_ip(request)` que:
+  1. Tenta `X-Forwarded-For` e pega o PRIMEIRO IP (o cliente original — os trailings sao proxies).
+  2. Fallback para `X-Real-IP` (alguns proxies usam esse header alternativo).
+  3. Fallback final para `request.client.host` (dev local, testes).
+**Seguranca:** confiamos nesses headers porque Railway e um proxy confiavel que reescreve X-Forwarded-For no ingress. Se o projeto migrar para infra onde o cliente possa injetar headers direto, a logica precisa ser endurecida para validar a origem do request. Documentado no docstring.
+**Testes novos (5):** happy path XFF, XFF com cadeia, X-Real-IP fallback, client.host fallback, XFF vazio cai no fallback.
+
+### F05 (=C08 M2) — Eliminar query duplicada em `get_prova_detail`
+**Arquivo:** `backend/app/api/v1/provas.py:796-955`.
+**Decisao:** estender `_carregar_prova_com_scoping` para incluir `Usuario.setor` no JOIN (vira tupla de 4 elementos). Criar novo helper `_determinar_rota_projetada(vendedor_setor, vendedor_localizacao)` que trabalha com escalares em vez do objeto Usuario. Atualizar `_build_prova_response` para calcular rota direto desses campos. `get_prova_detail` elimina a segunda query.
+**Impacto:** -1 query por request de detalhe (~5ms a menos), e codigo mais limpo (um caminho unico em vez de 2). Os outros 4 endpoints que usam o helper unpackam o 4o elemento como `_vendedor_setor` (nao usam).
+**Testes atualizados:** `_detail_row(prova, nome, localizacao, vendedor_setor=SetorEnum.VENDEDOR)` agora aceita o setor como kwarg opcional com default VENDEDOR. O teste `test_get_detail_rota_projetada_none_para_nao_vendedor` passa `vendedor_setor=SetorEnum.STUDIO` explicitamente. 4 testes do detail tiveram o `_scalar(vendedor)` removido (era a segunda query).
+
+### F07 — `useProvaDetail.load` sem `latestReqRef`
+**Arquivo:** `frontend/src/hooks/useProvaDetail.ts`.
+**Decisao:** copiar o padrao do `useListProvas`. Criar `latestReqRef`, incrementar no inicio de cada load, checar apos o `await getToken()` e apos o `await Promise.allSettled([...])`. Loads fora-de-ordem sao descartados silenciosamente.
+
+### F12 — Warning lossy no downgrade da migration 009
+**Arquivo:** `backend/migrations/versions/009_evolve_template_etiqueta_schema.py`.
+**Decisao:** adicionar bloco de WARNING em caixa ASCII no docstring do topo do arquivo + `print()` com alerta dentro do `downgrade()` antes do UPDATE. Zero mudanca de comportamento — so deixa explicito que o downgrade perde dados (logo_enabled, mostrar_data_criacao, formato customizados).
+
+### F09 — `useEffect` de cleanup de `arquivoPreview` redundante
+**Arquivo:** `frontend/src/app/(dashboard)/nova-prova/page.tsx:112-116`.
+**Decisao:** remover o useEffect. O `handleFileSelect` ja faz `URL.revokeObjectURL(arquivoPreview)` antes de criar a nova URL — o useEffect era redundante e potencialmente revoca a URL errada (captura do closure antigo). Substituido por comentario explicando a decisao.
+
+### F10 — Label "Finalizada em" trocado por "Criada ate"
+**Arquivo:** `frontend/src/app/(dashboard)/provas/page.tsx:345`.
+**Decisao:** o filtro `periodo_fim` e sobre `created_at`, nao sobre qualquer conceito de "finalizacao" (Wave 2 nem tem esse conceito). Trocado por "Criada ate" — honesto ao que o filtro realmente faz. Tambem ajustado "Criada em" → "Criada a partir de" no `periodo_inicio` para simetria.
+
+### F21 — `useListProvas` sem `AbortController`
+**Arquivo:** `frontend/src/hooks/useListProvas.ts`.
+**Decisao:** adicionar `inflightControllerRef` que guarda o `AbortController` da request atual. Cada novo `load()` aborta a anterior (se houver) antes de comecar. O `AbortError` que resulta e filtrado do catch (via `err instanceof DOMException && err.name === "AbortError"`) — nao e erro real. Cleanup no unmount do componente via useEffect. Economiza banda em redes lentas com filtros mudando rapidamente.
+
+### C07 B1 — Extrair `MeResponse` para tipos compartilhados
+**Arquivo:** `frontend/src/lib/types/usuario.ts` + `frontend/src/app/(dashboard)/provas/page.tsx`.
+**Decisao:** adicionar `MeResponse` em `usuario.ts` (arquivo de tipos ja compartilhado entre Wave 1 e Wave 2). A Wave 2 (`provas/page.tsx`) importa do tipo compartilhado. `layout.tsx` (Wave 1) continua com sua definicao local `UserInfo` — **nao tocado** porque Mario foi explicito que so toca Wave 2. O drift e aceitavel porque o tipo da Wave 1 e privado ao `layout.tsx`.
+
+### C08 M3 — UUID invalido no path retorna 404
+**Arquivo:** `backend/app/api/v1/provas.py:111-137` (novo `parse_prova_id`) + 5 handlers atualizados.
+**Descoberta:** a auditoria da Sessao 20 alegou que UUID invalido retornava **500**. **Falso** — re-verificacao empirica mostrou que o FastAPI ja retornava **422** com mensagem verbose do Pydantic validator (`"Input should be a valid UUID, invalid character: expected an optional prefix of 'urn:uuid:'..."`). Porem a mensagem vaza detalhes internos e e inconsistente com o 404 retornado quando um UUID valido aponta para prova inexistente.
+**Decisao:** criar dependency `parse_prova_id(prova_id: str = Path(...)) -> uuid.UUID` que converte manualmente e retorna 404 "Prova nao encontrada" em caso de `ValueError`. Aplicado via `Depends(parse_prova_id)` nos 5 handlers de detalhe. Resultado: 404 consistente em todos os casos onde a prova nao pode ser encontrada (ID invalido, ID valido ausente, scoping escondendo).
+**Teste novo:** `test_get_detail_invalid_uuid_retorna_404` cobre os 5 endpoints com 3 strings invalidas cada (15 asserts).
+
+### Flake `test_pdf_formato_legacy_e_aceito_mas_ignorado`
+**Arquivo:** `backend/tests/test_etiqueta_service.py`.
+**Problema:** o teste comparava bytes de 2 PDFs gerados em sucessao. O `fpdf2` embute `CreationDate` no metadata com resolucao de segundo — se as 2 chamadas cruzassem a fronteira de segundo, os bytes diferem e o `assert a4 == thermal` falhava.
+**Decisao:** usar `monkeypatch.setattr` para substituir `datetime` nos modulos `fpdf.fpdf` e `fpdf.output` por uma classe `_FrozenDatetime(datetime)` cujo `.now()` sempre retorna `datetime(2026, 4, 10, 12, 0, 0, UTC)`. Zero dep nova (sem `freezegun`), zero mudanca em `etiqueta_service.py` (so no teste).
+**Validacao:** 5 runs consecutivas do teste passando — flake eliminado.
