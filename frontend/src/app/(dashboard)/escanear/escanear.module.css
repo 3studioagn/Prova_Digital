@@ -1,0 +1,519 @@
+/*
+ * Pagina Escanear — Wave 3 Lote A sub-bloco A.5.
+ *
+ * Fluxo visual: (idle) -> scanner ativo -> prova resolvida -> assinatura
+ * -> sucesso. Cada estado tem seu proprio layout dentro do mesmo card
+ * do dashboard. Mesmo padrao de tokens (--color-card-*) do /nova-prova
+ * e /provas.
+ */
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+
+.pageHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2.5rem;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 500;
+  line-height: 1.05;
+  color: var(--color-card-text);
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  font-size: var(--fs-base);
+  color: var(--color-card-text-muted);
+  margin-top: 0.5rem;
+}
+
+/* ── Idle state: call-to-action grande ─────────────────────────────────── */
+
+.idleCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 4rem 2rem;
+  background: var(--color-card-surface);
+  border-radius: var(--radius-card-lg);
+  text-align: center;
+  min-height: 320px;
+}
+
+.idleIcon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-card-surface-alt);
+  border-radius: 50%;
+  color: var(--color-card-text);
+}
+
+.idleTitle {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: var(--color-card-text);
+}
+
+.idleDescription {
+  font-size: var(--fs-base);
+  color: var(--color-card-text-muted);
+  max-width: 480px;
+}
+
+/* ── Botao primario (amarelo pill) ─────────────────────────────────────── */
+
+.primaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.85rem 2rem;
+  background: var(--color-accent);
+  color: var(--color-text-dark);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.primaryButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Botao secundario (outline) ────────────────────────────────────────── */
+
+.secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  color: var(--color-card-text);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-base);
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background: var(--color-card-surface-alt);
+}
+
+/* ── Botao destrutivo (reprovar) ───────────────────────────────────────── */
+
+.dangerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.85rem 2rem;
+  background: var(--color-danger);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dangerButton:hover:not(:disabled) {
+  background: var(--color-danger-hover);
+}
+
+.dangerButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ── Scanner ativo ─────────────────────────────────────────────────────── */
+
+.scannerWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 2rem;
+  background: var(--color-card-surface);
+  border-radius: var(--radius-card-lg);
+}
+
+.scannerContainer {
+  width: 100%;
+  max-width: 360px;
+  aspect-ratio: 1 / 1;
+  background: #000000;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  position: relative;
+}
+
+/* O html5-qrcode injeta um <video> e overlays dentro do container. */
+.scannerContainer :global(video) {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+}
+
+.scannerStatus {
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  text-align: center;
+}
+
+.scannerError {
+  font-size: var(--fs-sm);
+  color: var(--color-danger);
+  text-align: center;
+  padding: 0.75rem 1rem;
+  background: var(--color-danger-soft);
+  border-radius: var(--radius-sm);
+  max-width: 400px;
+}
+
+/* ── Preview da prova ──────────────────────────────────────────────────── */
+
+.provaCard {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 2rem;
+  background: var(--color-card-surface);
+  border-radius: var(--radius-card-lg);
+}
+
+.provaCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.provaNome {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: var(--color-card-text);
+  margin-bottom: 0.25rem;
+}
+
+.provaNroReq {
+  font-size: var(--fs-sm);
+  color: var(--color-card-text-muted);
+  font-family: var(--font-family);
+  letter-spacing: 0.02em;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.9rem;
+  background: var(--color-accent-soft);
+  color: var(--color-card-text);
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.provaInfoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-card-divider);
+}
+
+.provaInfoLabel {
+  font-size: var(--fs-xs);
+  color: var(--color-card-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.provaInfoValue {
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+}
+
+/* ── Lista de transicoes disponiveis ───────────────────────────────────── */
+
+.actionsWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 2rem;
+  background: var(--color-card-surface);
+  border-radius: var(--radius-card-lg);
+}
+
+.actionsTitle {
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--color-card-text);
+}
+
+.actionsHint {
+  font-size: var(--fs-sm);
+  color: var(--color-card-text-muted);
+}
+
+.actionsList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.noActions {
+  font-size: var(--fs-base);
+  color: var(--color-card-text-muted);
+  padding: 1rem 0;
+}
+
+/* ── Modal (assinatura + reprovar) ─────────────────────────────────────── */
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modalCard {
+  background: var(--color-card-bg);
+  border-radius: var(--radius-card-lg);
+  padding: 2rem;
+  max-width: 560px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.modalTitle {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: var(--color-card-text);
+}
+
+.modalDescription {
+  font-size: var(--fs-base);
+  color: var(--color-card-text-muted);
+}
+
+.modalField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.modalLabel {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--color-card-text);
+}
+
+.modalTextarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 0.75rem 1rem;
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-card);
+  font-family: var(--font-family);
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  resize: vertical;
+}
+
+.modalTextarea:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* ── Canvas de assinatura ──────────────────────────────────────────────── */
+
+.signatureWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.signatureCanvas {
+  background: #ffffff;
+  border: 2px dashed var(--color-card-border);
+  border-radius: var(--radius-card);
+  width: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.signatureActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.signatureHint {
+  font-size: var(--fs-xs);
+  color: var(--color-card-text-muted);
+}
+
+.clearButton {
+  background: none;
+  border: none;
+  color: var(--color-card-text-muted);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  padding: 0.25rem 0.5rem;
+  text-decoration: underline;
+}
+
+.clearButton:hover {
+  color: var(--color-card-text);
+}
+
+/* ── Modal footer ──────────────────────────────────────────────────────── */
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.modalError {
+  padding: 0.75rem 1rem;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+
+/* ── Estados de feedback (sucesso/erro) ────────────────────────────────── */
+
+.successCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 2rem;
+  background: var(--color-card-surface);
+  border-radius: var(--radius-card-lg);
+  text-align: center;
+  min-height: 280px;
+}
+
+.successIcon {
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-success);
+  color: #ffffff;
+  border-radius: 50%;
+  font-size: 2.5rem;
+  font-weight: 300;
+}
+
+.successTitle {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: var(--color-card-text);
+}
+
+.successMessage {
+  font-size: var(--fs-base);
+  color: var(--color-card-text-muted);
+  max-width: 440px;
+}
+
+.errorCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 2rem;
+  background: var(--color-card-surface);
+  border-radius: var(--radius-card-lg);
+  text-align: center;
+  min-height: 240px;
+}
+
+.errorTitle {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: var(--color-danger);
+}
+
+.errorMessage {
+  font-size: var(--fs-base);
+  color: var(--color-card-text-muted);
+  max-width: 440px;
+}
+
+/* ── Layout da pagina ──────────────────────────────────────────────────── */
+
+.pageWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+/* ── Responsivo mobile ─────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .pageHeader {
+    margin-bottom: 1.5rem;
+  }
+
+  .idleCard,
+  .scannerWrapper,
+  .provaCard,
+  .actionsWrapper {
+    padding: 1.5rem 1rem;
+  }
+
+  .modalCard {
+    padding: 1.25rem;
+  }
+
+  .signatureCanvas {
+    height: 180px;
+  }
+}

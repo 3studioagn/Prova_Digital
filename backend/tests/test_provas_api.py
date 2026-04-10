@@ -1741,3 +1741,1323 @@ async def test_get_qr_code_png_db_error_returns_502(admin_user, mock_db):
 
     assert resp.status_code == 502
     assert "qr code" in resp.json()["detail"].lower()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# POST /api/v1/provas/scan  — Componente 10 (Wave 3 Lote A sub-bloco A.3)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Padrao de mock:
+#   - O handler faz 1 query SELECT (`_carregar_prova_por_nro_req_com_scoping`)
+#     + 1 audit via `log_audit` (que faz INSERT em audit_logs via db.add +
+#     db.flush). O `db.commit()` explicito no final fecha a transacao.
+#   - `mock_db.execute.side_effect = [_detail_row(...)]` entrega a prova.
+#   - Para valida-lo com hash correto geramos um payload real via
+#     `qrcode_service.gerar_payload_qr(nro_req, hash)` e passamos o mesmo
+#     hash pra prova via `_make_prova_com_hash(...)` local.
+
+
+def _make_prova_com_hash(
+    *, nro_requerimento, qr_code_hash, vendedor_id=None,
+    status_prova=StatusProvaEnum.CRIADA, rota=None,
+):
+    """Fabrica de ProvaDigital com controle do `qr_code_hash` (para testes
+    de scan). `_make_prova` acima sempre grava `"a"*64` — aqui precisamos
+    do hash real que foi usado para gerar o payload de teste.
+    """
+    now = datetime.now(timezone.utc)
+    return ProvaDigital(
+        id=uuid.uuid4(),
+        nome="Prova Scan",
+        nro_requerimento=nro_requerimento,
+        cliente="Cliente Scan",
+        vendedor_id=vendedor_id or uuid.uuid4(),
+        imagem_url=f"provas/2026/04/{uuid.uuid4().hex}/arte.jpg",
+        qr_code_hash=qr_code_hash,
+        status=status_prova,
+        rota=rota,
+        ciclo_atual=1,
+        motivo_cancelamento=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _gerar_hash_e_payload(nro_req: str) -> tuple[str, str]:
+    """Gera um (qr_code_hash, payload) consistente para usar nos testes.
+
+    Usa um UUID arbitrario para o `prova_id` do HMAC — o que importa pro
+    teste e que o hash seja estavel e que o payload bata com
+    `validar_payload_qr` contra ele.
+    """
+    prova_uuid = uuid.uuid4()
+    full_hash = qrcode_service.gerar_hash(prova_uuid, nro_req)
+    payload = qrcode_service.gerar_payload_qr(nro_req, full_hash)
+    return full_hash, payload
+
+
+# ─── POST /scan: happy paths ─────────────────────────────────────────
+
+
+async def test_scan_happy_vendedor_matriz_retorna_transicoes_corretas(
+    vendedor_matriz, mock_db
+):
+    """Cenario principal: vendedor escaneia prova em CRIADA e recebe
+    `[RETIRADA_PELO_VENDEDOR]` como transicoes permitidas."""
+    _setup(mock_db, user=vendedor_matriz)
+    nro_req = "REQ-SCAN-001"
+    full_hash, payload = _gerar_hash_e_payload(nro_req)
+    prova = _make_prova_com_hash(
+        nro_requerimento=nro_req,
+        qr_code_hash=full_hash,
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.CRIADA,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200, resp.json()
+    data = resp.json()
+    assert data["prova"]["nro_requerimento"] == nro_req
+    assert data["prova"]["status"] == "CRIADA"
+    assert data["transicoes_permitidas"] == ["RETIRADA_PELO_VENDEDOR"]
+    assert data["motivo_obrigatorio_em"] == []
+    # Audit via log_audit -> db.add + commit
+    mock_db.add.assert_called()
+    mock_db.commit.assert_awaited_once()
+
+
+async def test_scan_vendedor_matriz_em_retirada_retorna_aprovada_e_reprovada(
+    vendedor_matriz, mock_db
+):
+    """No estado RETIRADA_PELO_VENDEDOR, vendedor pode APROVAR ou REPROVAR.
+    Reprovada exige motivo, entao aparece em `motivo_obrigatorio_em`."""
+    _setup(mock_db, user=vendedor_matriz)
+    full_hash, payload = _gerar_hash_e_payload("REQ-SCAN-R-01")
+    prova = _make_prova_com_hash(
+        nro_requerimento="REQ-SCAN-R-01",
+        qr_code_hash=full_hash,
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert sorted(data["transicoes_permitidas"]) == [
+        "APROVADA_PELO_VENDEDOR",
+        "REPROVADA_PELO_VENDEDOR",
+    ]
+    assert data["motivo_obrigatorio_em"] == ["REPROVADA_PELO_VENDEDOR"]
+
+
+async def test_scan_vendedor_matriz_em_aprovada_retorna_so_de_volta(
+    vendedor_matriz, mock_db
+):
+    """MATRIZ em APROVADA → so pode DE_VOLTA_3STUDIO (RF-009).
+    ENCAMINHADA_A_CLICHERIA e FILIAL-only — deve ser filtrada."""
+    _setup(mock_db, user=vendedor_matriz)
+    full_hash, payload = _gerar_hash_e_payload("REQ-SCAN-AM-01")
+    prova = _make_prova_com_hash(
+        nro_requerimento="REQ-SCAN-AM-01",
+        qr_code_hash=full_hash,
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        rota=RotaEnum.PADRAO,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200
+    assert resp.json()["transicoes_permitidas"] == ["DE_VOLTA_3STUDIO"]
+
+
+async def test_scan_vendedor_filial_em_aprovada_retorna_so_encaminhada(
+    vendedor_filial, mock_db
+):
+    """FILIAL em APROVADA → so pode ENCAMINHADA_A_CLICHERIA."""
+    _setup(mock_db, user=vendedor_filial)
+    full_hash, payload = _gerar_hash_e_payload("REQ-SCAN-AF-01")
+    prova = _make_prova_com_hash(
+        nro_requerimento="REQ-SCAN-AF-01",
+        qr_code_hash=full_hash,
+        vendedor_id=vendedor_filial.id,
+        status_prova=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        rota=RotaEnum.DIRETA,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_filial.nome, vendedor_filial.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200
+    assert resp.json()["transicoes_permitidas"] == ["ENCAMINHADA_A_CLICHERIA"]
+
+
+async def test_scan_estado_terminal_recebida_retorna_lista_vazia(
+    admin_user, mock_db
+):
+    """Prova em RECEBIDA_PELA_CLICHERIA (terminal) → zero transicoes.
+    O scan em si e permitido (admin ve tudo), so nao ha acoes para
+    oferecer."""
+    _setup(mock_db, admin=admin_user)
+    full_hash, payload = _gerar_hash_e_payload("REQ-SCAN-T-01")
+    prova = _make_prova_com_hash(
+        nro_requerimento="REQ-SCAN-T-01",
+        qr_code_hash=full_hash,
+        status_prova=StatusProvaEnum.RECEBIDA_PELA_CLICHERIA,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200
+    assert resp.json()["transicoes_permitidas"] == []
+
+
+async def test_scan_reprovada_para_criada_filtrada_gancho_c14(
+    admin_user, mock_db
+):
+    """REPROVADA_PELO_VENDEDOR → CRIADA existe na state_machine (reinicio
+    de ciclo, gancho C14) mas e FILTRADA do response do scan porque o
+    endpoint POST /transicoes do Lote A rejeita CRIADA como destino."""
+    _setup(mock_db, admin=admin_user)
+    full_hash, payload = _gerar_hash_e_payload("REQ-SCAN-RE-01")
+    prova = _make_prova_com_hash(
+        nro_requerimento="REQ-SCAN-RE-01",
+        qr_code_hash=full_hash,
+        status_prova=StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200
+    # CANCELADA e CRIADA ambos filtrados — lista vazia
+    assert resp.json()["transicoes_permitidas"] == []
+
+
+# ─── POST /scan: cenarios de rejeicao ───────────────────────────────
+
+
+async def test_scan_payload_formato_invalido_retorna_422(admin_user, mock_db):
+    """Payload sem prefixo `3SD|` e rejeitado pelo Pydantic."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": "abc|123|xyz"})
+    assert resp.status_code == 422
+
+
+async def test_scan_payload_poucos_campos_retorna_422(admin_user, mock_db):
+    """Payload com menos de 3 campos e rejeitado pelo Pydantic."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": "3SD|REQ-001"})
+    assert resp.status_code == 422
+
+
+async def test_scan_payload_hash_tamanho_errado_retorna_422(admin_user, mock_db):
+    """Hash truncado com tamanho diferente de 16 chars e rejeitado pelo Pydantic."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": "3SD|REQ-001|abcdef"})
+    assert resp.status_code == 422
+
+
+async def test_scan_payload_nro_req_vazio_retorna_422(admin_user, mock_db):
+    """Payload `3SD||xxxxxxxxxxxxxxxx` com nro_requerimento vazio e rejeitado."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/scan", json={"payload": "3SD|   |aaaaaaaaaaaaaaaa"}
+        )
+    assert resp.status_code == 422
+
+
+async def test_scan_payload_so_whitespace_retorna_422(admin_user, mock_db):
+    """Payload com so espacos (apos strip, vira vazio). Cobre branch
+    `if not v` apos `v.strip()` no validator Pydantic."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": "   "})
+    assert resp.status_code == 422
+
+
+async def test_scan_prova_nao_encontrada_retorna_404(admin_user, mock_db):
+    """Payload valido mas `nro_requerimento` inexistente → 404."""
+    _setup(mock_db, admin=admin_user)
+    _, payload = _gerar_hash_e_payload("REQ-INEXISTENTE")
+
+    mock_db.execute.side_effect = [_detail_row_none()]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 404
+    assert "nao encontrada" in resp.json()["detail"].lower()
+    # Nao chegou a chamar log_audit
+    mock_db.commit.assert_not_awaited()
+
+
+async def test_scan_hash_nao_bate_retorna_422(admin_user, mock_db):
+    """Payload com `nro_requerimento` correto mas hash errado → 422.
+
+    Cenario: alguem adulterou o QR Code impresso ou o payload do frontend
+    e o hash truncado nao bate com o qr_code_hash armazenado. A validacao
+    e constant-time via `validar_payload_qr`.
+    """
+    _setup(mock_db, admin=admin_user)
+    nro_req = "REQ-SCAN-BAD"
+    # Gera o payload com um hash — mas a prova no banco tem hash diferente
+    _hash_correto, payload = _gerar_hash_e_payload(nro_req)
+    prova = _make_prova_com_hash(
+        nro_requerimento=nro_req,
+        qr_code_hash="f" * 64,  # hash armazenado DIFERENTE
+        status_prova=StatusProvaEnum.CRIADA,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 422
+    assert "nao corresponde" in resp.json()["detail"].lower()
+    # Nao grava audit em caso de hash invalido
+    mock_db.commit.assert_not_awaited()
+
+
+async def test_scan_vendedor_escapando_outra_prova_retorna_404(
+    vendedor_matriz, mock_db
+):
+    """Vendedor escaneando prova de outro vendedor → 404 por scoping.
+
+    O `_scoping_filter(vendedor)` adiciona `vendedor_id == user.id` na
+    clausula WHERE, entao o SELECT retorna None mesmo sendo uma prova
+    valida e com hash batendo. O handler nao distingue ausencia de
+    escondida-por-scoping — ambos viram 404 (ADR-049).
+    """
+    _setup(mock_db, user=vendedor_matriz)
+    _, payload = _gerar_hash_e_payload("REQ-SCAN-OUTRO")
+
+    # O scoping impede de carregar — simulamos com _detail_row_none.
+    mock_db.execute.side_effect = [_detail_row_none()]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 404
+
+
+async def test_scan_motorista_fora_status_retorna_404(mock_db):
+    """Motorista escaneando prova em CRIADA → scoping esconde (so ve
+    COM_MOTORISTA). 404."""
+    motorista = make_user(
+        setor=SetorEnum.MOTORISTA, localizacao=None, nome="Motorista Test"
+    )
+    _setup(mock_db, user=motorista)
+    _, payload = _gerar_hash_e_payload("REQ-SCAN-FORA-M")
+
+    mock_db.execute.side_effect = [_detail_row_none()]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 404
+
+
+async def test_scan_db_error_retorna_502(admin_user, mock_db):
+    """Erro transitorio no SELECT retorna 502 acionavel (padrao ADR-074)."""
+    _setup(mock_db, admin=admin_user)
+    _, payload = _gerar_hash_e_payload("REQ-SCAN-DB")
+    mock_db.execute.side_effect = RuntimeError("connection lost")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 502
+    assert "carregar prova" in resp.json()["detail"].lower()
+
+
+async def test_scan_audit_commit_failure_retorna_502(admin_user, mock_db):
+    """Erro no commit do audit_log retorna 502 + rollback."""
+    _setup(mock_db, admin=admin_user)
+    nro_req = "REQ-SCAN-COM"
+    full_hash, payload = _gerar_hash_e_payload(nro_req)
+    prova = _make_prova_com_hash(
+        nro_requerimento=nro_req,
+        qr_code_hash=full_hash,
+        status_prova=StatusProvaEnum.CRIADA,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+    mock_db.commit.side_effect = RuntimeError("commit failure")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 502
+    assert "registrar scan" in resp.json()["detail"].lower()
+    mock_db.rollback.assert_awaited()
+
+
+async def test_scan_sem_auth_retorna_401(mock_db):
+    """Scan sem token → 401 (herdado de `get_current_user`)."""
+    _setup(mock_db)
+    _, payload = _gerar_hash_e_payload("REQ-NO-AUTH")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 401
+
+
+async def test_scan_vendedor_em_prova_com_motorista_retorna_lista_vazia(
+    vendedor_matriz, mock_db
+):
+    """Vendedor escaneando sua propria prova em COM_MOTORISTA (cenario
+    real: prova do vendedor ja virou responsabilidade do motorista, mas
+    ele ainda consegue escanear por scoping de vendedor_id).
+
+    Todos os destinos da state_machine para COM_MOTORISTA exigem ator
+    MOTORISTA (ou cancelamento pelo STUDIO — filtrado). O vendedor nao
+    e MOTORISTA, entao `validar_transicao` levanta `AtorNaoAutorizadoError`
+    e o destino candidato e filtrado. Resultado: `transicoes_permitidas=[]`.
+
+    Cobre o except `(TransicaoInvalidaError, AtorNaoAutorizadoError)`
+    de `_computar_transicoes_permitidas`.
+    """
+    _setup(mock_db, user=vendedor_matriz)
+    full_hash, payload = _gerar_hash_e_payload("REQ-SCAN-CM-01")
+    prova = _make_prova_com_hash(
+        nro_requerimento="REQ-SCAN-CM-01",
+        qr_code_hash=full_hash,
+        vendedor_id=vendedor_matriz.id,  # prova do proprio vendedor
+        status_prova=StatusProvaEnum.COM_MOTORISTA,
+        rota=RotaEnum.PADRAO,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200
+    # Unica transicao saindo de COM_MOTORISTA (exceto CANCELADA, que
+    # filtramos) e ENVIADA_PARA_CLICHERIA por MOTORISTA — vendedor nao
+    # pode executar.
+    assert resp.json()["transicoes_permitidas"] == []
+
+
+async def test_scan_audit_log_contem_acao_e_status_atual(
+    vendedor_matriz, mock_db
+):
+    """Verifica que o audit_log e chamado com `acao="escanear_prova"` e
+    inclui `nro_requerimento` + `status_atual` + `transicoes_permitidas`
+    em `detalhes_json`."""
+    _setup(mock_db, user=vendedor_matriz)
+    nro_req = "REQ-SCAN-AU-01"
+    full_hash, payload = _gerar_hash_e_payload(nro_req)
+    prova = _make_prova_com_hash(
+        nro_requerimento=nro_req,
+        qr_code_hash=full_hash,
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.CRIADA,
+    )
+
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    with patch(
+        "app.api.v1.provas.log_audit", new_callable=AsyncMock
+    ) as mock_log:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200
+    mock_log.assert_awaited_once()
+    kwargs = mock_log.call_args.kwargs
+    assert kwargs["acao"] == "escanear_prova"
+    assert kwargs["usuario_id"] == vendedor_matriz.id
+    assert kwargs["prova_id"] == prova.id
+    assert kwargs["detalhes"]["nro_requerimento"] == nro_req
+    assert kwargs["detalhes"]["status_atual"] == "CRIADA"
+    assert kwargs["detalhes"]["transicoes_permitidas"] == [
+        "RETIRADA_PELO_VENDEDOR"
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# POST /api/v1/provas/{prova_id}/transicoes  — Componente 11 (sub-bloco A.4)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Padrao de mock:
+#   - 1 execute = `_carregar_prova_com_scoping` (com lock=True interno,
+#     mas o mock nao se importa com isso — ve apenas um `execute` call).
+#   - `executar_transicao` e importada em `app.api.v1.provas` — o real e
+#     chamado, entao precisamos mockar `db.add` + `db.flush` (ja sao
+#     MagicMock/AsyncMock no `mock_db` fixture) + verificar efeitos em
+#     `prova.status` etc.
+#   - Para testes de tracing especifico (audit, exceptions), patchamos
+#     `app.services.state_machine.log_audit` porque `state_machine`
+#     importa `log_audit` la.
+
+
+# Assinatura de teste: PNG valido minimo em base64.
+# Geramos uma vez em runtime para garantir validade + usar um valor realista.
+ASSINATURA_B64 = base64.b64encode(
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rfake-signature-data-not-real-png"
+).decode("ascii")
+
+
+def _transicao_body(
+    *,
+    status_novo: str,
+    motivo_reprovacao: str | None = None,
+    assinatura_base64: str | None = None,
+) -> dict:
+    """Helper para construir um payload valido de TransicaoRequest."""
+    body = {
+        "status_novo": status_novo,
+        "assinatura_base64": assinatura_base64 or ASSINATURA_B64,
+    }
+    if motivo_reprovacao is not None:
+        body["motivo_reprovacao"] = motivo_reprovacao
+    return body
+
+
+# ─── POST /{id}/transicoes: happy paths (9 HUs do Lote A) ─────────────
+
+
+async def test_transicao_happy_criada_para_retirada_vendedor_matriz(
+    vendedor_matriz, mock_db
+):
+    """US-002 — vendedor MATRIZ escaneia CRIADA e retira. Verifica
+    efeitos: status atualizado, movimentacao criada, response 201."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id, status_prova=StatusProvaEnum.CRIADA
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+        )
+
+    assert resp.status_code == 201, resp.json()
+    data = resp.json()
+    assert data["prova"]["status"] == "RETIRADA_PELO_VENDEDOR"
+    assert data["prova"]["rota"] is None  # ainda sem rota (so na aprovacao)
+    assert data["movimentacao"]["status_anterior"] == "CRIADA"
+    assert data["movimentacao"]["status_novo"] == "RETIRADA_PELO_VENDEDOR"
+    assert data["movimentacao"]["ciclo"] == 1
+    assert data["movimentacao"]["rota_no_momento"] is None
+    assert data["movimentacao"]["motivo_reprovacao"] is None
+    assert data["movimentacao"]["usuario_nome"] == vendedor_matriz.nome
+    assert data["movimentacao"]["usuario_setor"] == "VENDEDOR"
+    # In-memory: o objeto prova teve seu status mutado
+    assert prova.status == StatusProvaEnum.RETIRADA_PELO_VENDEDOR
+    mock_db.commit.assert_awaited_once()
+
+
+async def test_transicao_happy_retirada_para_aprovada_matriz_persiste_rota_padrao(
+    vendedor_matriz, mock_db
+):
+    """US-003 — vendedor MATRIZ aprova prova retirada. Rota PADRAO
+    persiste na `prova.rota` (RN-007)."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="APROVADA_PELO_VENDEDOR"),
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["prova"]["rota"] == "PADRAO"
+    assert data["movimentacao"]["rota_no_momento"] == "PADRAO"
+    assert prova.rota == RotaEnum.PADRAO
+
+
+async def test_transicao_happy_retirada_para_aprovada_filial_persiste_rota_direta(
+    vendedor_filial, mock_db
+):
+    """US-003 (filial) — vendedor FILIAL aprova prova retirada. Rota
+    DIRETA persiste."""
+    _setup(mock_db, user=vendedor_filial)
+    prova = _make_prova(
+        vendedor_id=vendedor_filial.id,
+        status_prova=StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_filial.nome, vendedor_filial.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="APROVADA_PELO_VENDEDOR"),
+        )
+
+    assert resp.status_code == 201
+    assert resp.json()["prova"]["rota"] == "DIRETA"
+    assert prova.rota == RotaEnum.DIRETA
+
+
+async def test_transicao_happy_reprovacao_com_motivo(vendedor_matriz, mock_db):
+    """US-004 — reprovacao exige motivo (RF-007). Valor eh normalizado
+    (strip) e propagado para a movimentacao."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(
+                status_novo="REPROVADA_PELO_VENDEDOR",
+                motivo_reprovacao="  Cor do logo errada  ",
+            ),
+        )
+
+    assert resp.status_code == 201
+    assert resp.json()["movimentacao"]["motivo_reprovacao"] == "Cor do logo errada"
+    assert prova.status == StatusProvaEnum.REPROVADA_PELO_VENDEDOR
+
+
+async def test_transicao_happy_aprovada_matriz_para_de_volta_3studio(
+    vendedor_matriz, mock_db
+):
+    """US-005 — vendedor MATRIZ devolve a 3Studio (rota padrao)."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        rota=RotaEnum.PADRAO,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="DE_VOLTA_3STUDIO"),
+        )
+
+    assert resp.status_code == 201
+    assert resp.json()["prova"]["status"] == "DE_VOLTA_3STUDIO"
+
+
+async def test_transicao_happy_aprovada_filial_para_encaminhada_clicheria(
+    vendedor_filial, mock_db
+):
+    """US-006 — vendedor FILIAL encaminha direto a clicheria."""
+    _setup(mock_db, user=vendedor_filial)
+    prova = _make_prova(
+        vendedor_id=vendedor_filial.id,
+        status_prova=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        rota=RotaEnum.DIRETA,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_filial.nome, vendedor_filial.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="ENCAMINHADA_A_CLICHERIA"),
+        )
+
+    assert resp.status_code == 201
+    assert resp.json()["prova"]["status"] == "ENCAMINHADA_A_CLICHERIA"
+
+
+async def test_transicao_happy_de_volta_para_com_motorista_studio(mock_db):
+    """US-007 — 3Studio recebe devolucao e envia ao motorista."""
+    studio = make_user(
+        setor=SetorEnum.STUDIO, localizacao=None, nome="Studio Ops"
+    )
+    _setup(mock_db, user=studio)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.DE_VOLTA_3STUDIO, rota=RotaEnum.PADRAO
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="COM_MOTORISTA"),
+        )
+
+    assert resp.status_code == 201
+    assert resp.json()["prova"]["status"] == "COM_MOTORISTA"
+
+
+async def test_transicao_happy_com_motorista_para_enviada_motorista(mock_db):
+    """US-008 — motorista confirma transporte."""
+    motorista = make_user(
+        setor=SetorEnum.MOTORISTA, localizacao=None, nome="Motorista Test"
+    )
+    _setup(mock_db, user=motorista)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.COM_MOTORISTA, rota=RotaEnum.PADRAO
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="ENVIADA_PARA_CLICHERIA"),
+        )
+
+    assert resp.status_code == 201
+    assert resp.json()["prova"]["status"] == "ENVIADA_PARA_CLICHERIA"
+
+
+async def test_transicao_happy_enviada_para_recebida_clicheria(mock_db):
+    """US-009 (rota padrao) — clicheria recebe via motorista."""
+    clicheria = make_user(
+        setor=SetorEnum.CLICHERIA, localizacao=None, nome="Clicheria Test"
+    )
+    _setup(mock_db, user=clicheria)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.ENVIADA_PARA_CLICHERIA,
+        rota=RotaEnum.PADRAO,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="RECEBIDA_PELA_CLICHERIA"),
+        )
+
+    assert resp.status_code == 201
+    assert resp.json()["prova"]["status"] == "RECEBIDA_PELA_CLICHERIA"
+
+
+async def test_transicao_happy_encaminhada_para_recebida_clicheria(mock_db):
+    """US-009 (rota direta) — clicheria recebe pela filial."""
+    clicheria = make_user(
+        setor=SetorEnum.CLICHERIA, localizacao=None, nome="Clicheria Test"
+    )
+    _setup(mock_db, user=clicheria)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.ENCAMINHADA_A_CLICHERIA,
+        rota=RotaEnum.DIRETA,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.FILIAL),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="RECEBIDA_PELA_CLICHERIA"),
+        )
+
+    assert resp.status_code == 201
+    assert resp.json()["prova"]["status"] == "RECEBIDA_PELA_CLICHERIA"
+
+
+# ─── POST /{id}/transicoes: validacoes Pydantic (ganchos C13/C14) ─────
+
+
+async def test_transicao_rejeita_cancelada_como_destino_422(
+    admin_user, mock_db
+):
+    """CANCELADA rejeitada pelo validator — gancho C13."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json=_transicao_body(status_novo="CANCELADA"),
+        )
+    assert resp.status_code == 422
+
+
+async def test_transicao_rejeita_criada_como_destino_422(admin_user, mock_db):
+    """CRIADA rejeitada pelo validator — gancho C14."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json=_transicao_body(status_novo="CRIADA"),
+        )
+    assert resp.status_code == 422
+
+
+async def test_transicao_assinatura_vazia_422(admin_user, mock_db):
+    """String vazia rejeitada pelo min_length=1 do Pydantic."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json={
+                "status_novo": "RETIRADA_PELO_VENDEDOR",
+                "assinatura_base64": "",
+            },
+        )
+    assert resp.status_code == 422
+
+
+async def test_transicao_assinatura_base64_invalido_422(
+    vendedor_matriz, mock_db
+):
+    """Input com caracteres que nao sao base64 validos → 422 do handler
+    (nao do Pydantic — Pydantic aceita qualquer string nao vazia)."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id, status_prova=StatusProvaEnum.CRIADA
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json={
+                "status_novo": "RETIRADA_PELO_VENDEDOR",
+                "assinatura_base64": "!!!not-base64!!!",
+            },
+        )
+
+    assert resp.status_code == 422
+    assert "base64 invalida" in resp.json()["detail"].lower()
+    # db.execute nem chega a ser chamado porque o decode falha antes
+    mock_db.execute.assert_not_called()
+
+
+async def test_transicao_assinatura_muito_grande_422(admin_user, mock_db):
+    """max_length=700000 rejeita payloads maiores."""
+    _setup(mock_db, admin=admin_user)
+    big_b64 = "A" * 700_001  # acima do limite
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json={
+                "status_novo": "RETIRADA_PELO_VENDEDOR",
+                "assinatura_base64": big_b64,
+            },
+        )
+    assert resp.status_code == 422
+
+
+# ─── POST /{id}/transicoes: rejeicoes do handler/dominio ──────────────
+
+
+async def test_transicao_reprovacao_sem_motivo_422(vendedor_matriz, mock_db):
+    """Reprovacao sem motivo → state_machine levanta ValueError → 422."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(
+                status_novo="REPROVADA_PELO_VENDEDOR",
+                motivo_reprovacao=None,
+            ),
+        )
+
+    assert resp.status_code == 422
+    assert "motivo da reprovacao" in resp.json()["detail"].lower()
+    mock_db.rollback.assert_awaited()
+
+
+async def test_transicao_reprovacao_motivo_whitespace_422(
+    vendedor_matriz, mock_db
+):
+    """Motivo so-whitespace → Pydantic normaliza para None → state_machine
+    levanta ValueError → 422."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(
+                status_novo="REPROVADA_PELO_VENDEDOR",
+                motivo_reprovacao="   \t  ",
+            ),
+        )
+
+    assert resp.status_code == 422
+
+
+async def test_transicao_ator_errado_422(vendedor_matriz, mock_db):
+    """Vendedor tentando executar transicao de MOTORISTA → 422."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.COM_MOTORISTA,
+        rota=RotaEnum.PADRAO,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="ENVIADA_PARA_CLICHERIA"),
+        )
+
+    assert resp.status_code == 422
+    assert "nao autorizado" in resp.json()["detail"].lower()
+    mock_db.rollback.assert_awaited()
+
+
+async def test_transicao_aprovada_matriz_tentando_encaminhada_422(
+    vendedor_matriz, mock_db
+):
+    """RF-009 — MATRIZ tentando rota direta (ENCAMINHADA) → 422 pelo
+    AtorNaoAutorizadoError da regra extra de localizacao."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        rota=RotaEnum.PADRAO,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="ENCAMINHADA_A_CLICHERIA"),
+        )
+
+    assert resp.status_code == 422
+    assert "filial" in resp.json()["detail"].lower()
+
+
+async def test_transicao_aprovada_filial_tentando_de_volta_422(
+    vendedor_filial, mock_db
+):
+    """RF-009 — FILIAL tentando rota padrao (DE_VOLTA) → 422."""
+    _setup(mock_db, user=vendedor_filial)
+    prova = _make_prova(
+        vendedor_id=vendedor_filial.id,
+        status_prova=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        rota=RotaEnum.DIRETA,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_filial.nome, vendedor_filial.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="DE_VOLTA_3STUDIO"),
+        )
+
+    assert resp.status_code == 422
+    assert "matriz" in resp.json()["detail"].lower()
+
+
+async def test_transicao_admin_sem_localizacao_aprovando_422(
+    admin_user, mock_db
+):
+    """Admin STUDIO tentando aprovar diretamente → RotaIndeterminavelError
+    → 422. RN-007: rota precisa da localizacao do vendedor, mas o admin
+    nao e vendedor."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.RETIRADA_PELO_VENDEDOR
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(
+            prova, "Admin Master", None, vendedor_setor=SetorEnum.VENDEDOR
+        ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="APROVADA_PELO_VENDEDOR"),
+        )
+
+    assert resp.status_code == 422
+    assert "rota" in resp.json()["detail"].lower()
+
+
+async def test_transicao_ilegal_pos_lock_retorna_409(admin_user, mock_db):
+    """ADR-084: TransicaoInvalidaError apos FOR UPDATE → 409 + mensagem.
+
+    Cenario: admin tenta forcar transicao ilegal (CRIADA → COM_MOTORISTA).
+    A state_machine levanta TransicaoInvalidaError. O handler traduz
+    para 409 assumindo "status mudou". Na pratica pode tambem ser cliente
+    malicioso — em ambos os casos, o cliente deve recarregar o scan.
+    """
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(status_prova=StatusProvaEnum.CRIADA)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="COM_MOTORISTA"),
+        )
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"].lower()
+    assert "mudou" in detail
+    assert "recarregue" in detail
+    mock_db.rollback.assert_awaited()
+
+
+async def test_transicao_estado_terminal_recebida_retorna_409(
+    admin_user, mock_db
+):
+    """Prova em RECEBIDA (terminal) nao aceita transicao →
+    TransicaoInvalidaError → 409."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.RECEBIDA_PELA_CLICHERIA
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="ENVIADA_PARA_CLICHERIA"),
+        )
+
+    assert resp.status_code == 409
+
+
+async def test_transicao_prova_inexistente_404(admin_user, mock_db):
+    """UUID valido mas prova nao encontrada → 404."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = [_detail_row_none()]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+        )
+
+    assert resp.status_code == 404
+
+
+async def test_transicao_uuid_invalido_404(admin_user, mock_db):
+    """Path param nao-UUID → 404 via `parse_prova_id` (C08 M3 pattern)."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/abc-not-uuid/transicoes",
+            json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+        )
+    assert resp.status_code == 404
+
+
+async def test_transicao_scoping_esconde_prova_404(vendedor_matriz, mock_db):
+    """Vendedor tentando transitar prova de outro vendedor → scoping
+    devolve None → 404."""
+    _setup(mock_db, user=vendedor_matriz)
+    mock_db.execute.side_effect = [_detail_row_none()]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+        )
+
+    assert resp.status_code == 404
+
+
+async def test_transicao_db_error_carregamento_502(admin_user, mock_db):
+    """Erro transitorio no SELECT → 502 (padrao ADR-074)."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = RuntimeError("connection lost")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+        )
+
+    assert resp.status_code == 502
+    assert "carregar prova" in resp.json()["detail"].lower()
+
+
+async def test_transicao_db_error_commit_502(vendedor_matriz, mock_db):
+    """Erro transitorio no commit → 502 + rollback."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id, status_prova=StatusProvaEnum.CRIADA
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+    mock_db.commit.side_effect = RuntimeError("commit failure")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+        )
+
+    assert resp.status_code == 502
+    assert "persistir transicao" in resp.json()["detail"].lower()
+    mock_db.rollback.assert_awaited()
+
+
+async def test_transicao_erro_inesperado_em_executar_502(
+    vendedor_matriz, mock_db
+):
+    """Exception nao-dominio dentro de `executar_transicao` (ex: falha
+    de log_audit) → 502 + rollback."""
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id, status_prova=StatusProvaEnum.CRIADA
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    # Patch log_audit (importado dentro do modulo state_machine) para falhar
+    with patch(
+        "app.services.state_machine.log_audit",
+        new=AsyncMock(side_effect=RuntimeError("audit failure")),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(
+                f"{PREFIX}/{prova.id}/transicoes",
+                json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+            )
+
+    assert resp.status_code == 502
+    assert "executar transicao" in resp.json()["detail"].lower()
+    mock_db.rollback.assert_awaited()
+
+
+async def test_transicao_sem_auth_retorna_401(mock_db):
+    """Transicao sem token → 401."""
+    _setup(mock_db)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+        )
+    assert resp.status_code == 401
+
+
+async def test_transicao_admin_bypass_setor(admin_user, mock_db):
+    """Admin bypassa validacao de setor — pode executar qualquer
+    transicao valida. Mesmo padrao do sub-bloco A.1."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.COM_MOTORISTA, rota=RotaEnum.PADRAO
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/transicoes",
+            json=_transicao_body(status_novo="ENVIADA_PARA_CLICHERIA"),
+        )
+
+    assert resp.status_code == 201
+
+
+async def test_transicao_payload_sem_status_novo_422(admin_user, mock_db):
+    """Request sem `status_novo` → 422 do Pydantic (campo obrigatorio)."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json={"assinatura_base64": ASSINATURA_B64},
+        )
+    assert resp.status_code == 422
+
+
+async def test_transicao_status_novo_enum_invalido_422(admin_user, mock_db):
+    """Valor fora do StatusProvaEnum → 422."""
+    _setup(mock_db, admin=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/transicoes",
+            json={
+                "status_novo": "ESTADO_INVENTADO",
+                "assinatura_base64": ASSINATURA_B64,
+            },
+        )
+    assert resp.status_code == 422
+
+
+# ─── Unit tests / defensive paths (cobertura 100% do A.4) ─────────────
+
+
+async def test_decode_assinatura_vazia_apos_decode_raise_422():
+    """Unit test do helper `_decode_assinatura`. Cenario: base64 que
+    decodifica para zero bytes (ex: string vazia, normalmente bloqueada
+    pelo Pydantic `min_length=1`, mas o helper defende defensivamente).
+
+    Cobre as linhas 1580-1583 de `provas.py`.
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    from app.api.v1.provas import _decode_assinatura
+
+    try:
+        _decode_assinatura("")  # base64 vazio decodifica para b""
+    except _HTTPException as exc:
+        assert exc.status_code == 422
+        assert "vazia apos decode" in exc.detail.lower()
+    else:
+        raise AssertionError("_decode_assinatura nao levantou HTTPException")
+
+
+async def test_transicao_httpexception_no_carregamento_propaga(
+    admin_user, mock_db
+):
+    """Defensive: se `_carregar_prova_com_scoping` levantar HTTPException
+    diretamente (hipotetico no futuro), o handler propaga o status
+    original em vez de virar 502.
+
+    Cobre o `except HTTPException: raise` pos-carregamento (linhas 1618-1619).
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    _setup(mock_db, admin=admin_user)
+
+    with patch(
+        "app.api.v1.provas._carregar_prova_com_scoping",
+        side_effect=_HTTPException(status_code=418, detail="I am a teapot"),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(
+                f"{PREFIX}/{uuid.uuid4()}/transicoes",
+                json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+            )
+
+    assert resp.status_code == 418
+    assert resp.json()["detail"] == "I am a teapot"
+
+
+async def test_transicao_httpexception_em_executar_propaga(
+    vendedor_matriz, mock_db
+):
+    """Defensive: se `executar_transicao` levantar HTTPException, o
+    handler propaga em vez de virar 502.
+
+    Cobre o `except HTTPException: raise` pos-executar_transicao
+    (linhas 1691-1694).
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    _setup(mock_db, user=vendedor_matriz)
+    prova = _make_prova(
+        vendedor_id=vendedor_matriz.id, status_prova=StatusProvaEnum.CRIADA
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    with patch(
+        "app.api.v1.provas.executar_transicao",
+        side_effect=_HTTPException(status_code=418, detail="I am a teapot"),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(
+                f"{PREFIX}/{prova.id}/transicoes",
+                json=_transicao_body(status_novo="RETIRADA_PELO_VENDEDOR"),
+            )
+
+    assert resp.status_code == 418
+
+
+def test_transicao_request_strip_motivo_aceita_none_explicito():
+    """Unit test do validator `_strip_motivo` do TransicaoRequest.
+
+    Cobre a linha `return None` (schemas/prova.py:400) que e exercitada
+    quando o campo `motivo_reprovacao` vem explicitamente como `None`.
+    """
+    from app.domain.schemas.prova import TransicaoRequest
+
+    req = TransicaoRequest(
+        status_novo=StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
+        assinatura_base64="QUFBQQ==",  # "AAAA" em base64
+        motivo_reprovacao=None,
+    )
+    assert req.motivo_reprovacao is None

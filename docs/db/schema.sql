@@ -1,13 +1,13 @@
 -- =============================================================================
 -- SNAPSHOT DO SCHEMA ATUAL — Rastreio de Provas Digitais
--- Atualizado em: 2026-04-09 (pos-Wave 2 COMPLETA, alembic_version = 009)
+-- Atualizado em: 2026-04-10 (Wave 3 Lote A sub-bloco A.2, alembic_version = 009)
 -- =============================================================================
 -- Este arquivo e referencia rapida. A fonte de verdade sao as migrations Alembic
 -- em backend/migrations/versions/ e os .sql em backend/migrations/rls/.
 --
--- Estado apos Wave 2 (Componentes 06, 07, 08, 09):
+-- Estado apos Wave 3 Lote A sub-bloco A.2 (RLS 006 aplicada):
 --   - 6 tabelas de dominio + alembic_version (todas RLS on)
---   - 11 policies RLS, todas usando `is_admin=true` com `(SELECT auth.uid())`
+--   - 12 policies RLS, todas usando `is_admin=true` com `(SELECT auth.uid())`
 --   - 30 indexes cobrindo queries de filtro/paginacao/scoping
 --   - 6 triggers (3 imutabilidade + 3 updated_at) com search_path=''
 --   - Seeds: tempo_atraso_horas_uteis + template_etiqueta (JSONB estruturado)
@@ -24,11 +24,16 @@
 --   009  evolve_template_etiqueta_schema (ADR-036)
 --
 -- Policies RLS em producao:
---   001_enable_rls.sql                (RLS ligado nas 6 tabelas)
---   002_policies_por_perfil.sql       (legacy — substituida em partes pela 004)
---   003_policies_wave1_usuarios.sql   (is_admin-based em usuarios)
---   004_unify_rls_is_admin.sql        (ADR-018 — is_admin em todas as 6 tabelas)
---   005_initplan_optimization.sql     (ADR-029 — (SELECT auth.uid()) em 11 policies)
+--   001_enable_rls.sql                         (RLS ligado nas 6 tabelas)
+--   002_policies_por_perfil.sql                (legacy — substituida pela 004)
+--   003_policies_wave1_usuarios.sql            (is_admin-based em usuarios)
+--   004_unify_rls_is_admin.sql                 (ADR-018 — is_admin em todas)
+--   005_initplan_optimization.sql              (ADR-029 — (SELECT auth.uid()))
+--   006_movimentacoes_insert_and_expand_select.sql
+--                                              (ADR-082 — Wave 3 A.2; adiciona
+--                                               pol_movimentacoes_insert +
+--                                               expande SELECT para MOTORISTA/
+--                                               CLICHERIA, resolve F03 Sessao 22)
 -- =============================================================================
 
 
@@ -235,18 +240,25 @@ ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE configuracoes_sistema ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alembic_version ENABLE ROW LEVEL SECURITY;  -- migration 007 (ADR-025)
 
--- Policies pos Wave 2 (apos RLS 004 e 005):
--- 11 policies no schema public, todas com `(SELECT auth.uid())` para otimizacao
--- de initplan (ADR-029). Fonte de verdade: backend/migrations/rls/005_initplan_optimization.sql
+-- Policies pos Wave 3 Lote A sub-bloco A.2 (apos RLS 004, 005 e 006):
+-- 12 policies no schema public, todas com `(SELECT auth.uid())` para otimizacao
+-- de initplan (ADR-029). Fonte de verdade:
+--   - 11 policies base: backend/migrations/rls/005_initplan_optimization.sql
+--   - movimentacoes INSERT + SELECT expandida: backend/migrations/rls/006_movimentacoes_insert_and_expand_select.sql
 --
--- Semantica:
+-- Semantica (apos RLS 006):
 --   usuarios             SELECT (self ou is_admin), INSERT (is_admin), UPDATE (is_admin)
 --   provas_digitais      SELECT (is_admin + vendedor own + motorista by status + clicheria by status),
 --                        INSERT (is_admin), UPDATE (is_admin)
---   movimentacoes        SELECT (is_admin + vendedor das suas provas + proprias)
+--   movimentacoes        SELECT (is_admin + vendedor das suas provas + autor + MOTORISTA quando
+--                                prova em COM_MOTORISTA + CLICHERIA quando prova em status de clicheria),
+--                        INSERT (is_admin)                       -- novo em RLS 006 (ADR-082)
 --   etiquetas            SELECT (is_admin + vendedor das suas provas)
 --   audit_logs           SELECT (is_admin only)
 --   configuracoes_sistema SELECT (is_admin), UPDATE (is_admin)
+--
+-- UPDATE/DELETE em movimentacoes, etiquetas e audit_logs continuam bloqueados
+-- pelos triggers de imutabilidade (RNF-005) — nao ha policy necessaria.
 --
 -- Backend usa service_role e BYPASSA RLS por design. O scoping real no backend
 -- e implementado via `_scoping_filter(user)` em app/api/v1/provas.py (ADR-046, ADR-049).

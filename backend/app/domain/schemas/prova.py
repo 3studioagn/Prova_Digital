@@ -251,6 +251,177 @@ class ImagemUrlResponse(BaseModel):
     expires_at: datetime
 
 
+# ─── Scan + Transicao (Componentes 10 e 11 — Wave 3 Lote A) ──────────────
+#
+# O payload do QR Code tem formato fixo definido em `qrcode_service.py`:
+#   "3SD|{nro_requerimento}|{hash_truncado}"
+# onde `hash_truncado = qr_code_hash_completo[:16]` (16 chars hex).
+#
+# `validar_payload_qr` (ja existente desde Wave 2) faz a comparacao
+# constant-time do hash. Aqui no schema validamos apenas o formato
+# estrutural (prefixo + separadores + 3 partes) — a verificacao real
+# contra o hash armazenado acontece no handler depois do SELECT por
+# nro_requerimento.
+
+
+class ScanRequest(BaseModel):
+    """Payload recebido de `POST /api/v1/provas/scan` (Componente 10).
+
+    Vem do frontend `/escanear` apos o html5-qrcode decodificar a imagem
+    da camera. O `payload` ja vem como string UTF-8 — a lib devolve o
+    conteudo literal do QR Code que foi gerado pelo backend no Componente 06.
+
+    Validacao Pydantic aqui cobre apenas o formato estrutural (prefixo
+    correto + 3 campos separados por `|`). A verificacao do hash contra
+    `provas_digitais.qr_code_hash` acontece no handler via
+    `qrcode_service.validar_payload_qr` (constant-time).
+    """
+
+    payload: str = Field(..., min_length=1, max_length=256)
+
+    @field_validator("payload")
+    @classmethod
+    def _valida_payload(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Payload vazio")
+        # Import local para evitar ciclo (qrcode_service nao importa schemas).
+        from app.services.qrcode_service import (
+            HASH_TRUNCADO_LEN,
+            QR_PAYLOAD_PREFIX,
+            QR_PAYLOAD_SEPARATOR,
+        )
+
+        prefixo_esperado = f"{QR_PAYLOAD_PREFIX}{QR_PAYLOAD_SEPARATOR}"
+        if not v.startswith(prefixo_esperado):
+            raise ValueError(
+                f"Formato de QR Code invalido "
+                f"(esperado prefixo '{QR_PAYLOAD_PREFIX}')"
+            )
+        parts = v.split(QR_PAYLOAD_SEPARATOR)
+        if len(parts) != 3:
+            raise ValueError(
+                "QR Code mal formado (esperado 3 campos separados por '|')"
+            )
+        _prefix, nro_req, hash_trunc = parts
+        if not nro_req.strip():
+            raise ValueError("Numero de requerimento vazio no QR Code")
+        if len(hash_trunc) != HASH_TRUNCADO_LEN:
+            raise ValueError(
+                f"Hash truncado com tamanho invalido "
+                f"(esperado {HASH_TRUNCADO_LEN} chars)"
+            )
+        return v
+
+
+class ScanResponse(BaseModel):
+    """Resposta de `POST /api/v1/provas/scan`.
+
+    Contem:
+      - `prova`: dados completos da prova (mesmo schema do detalhe).
+      - `transicoes_permitidas`: lista de estados destino validos PARA
+        ESTE usuario corrente executar a partir do status atual da prova.
+        Calculada via iteracao sobre `TRANSICOES[prova.status]` +
+        `validar_transicao` (captura exceptions) + aplicacao da regra extra
+        de rota por localizacao em `APROVADA_PELO_VENDEDOR -> *`.
+      - `motivo_obrigatorio_em`: subset de `transicoes_permitidas` onde o
+        usuario deve informar motivo no submit da transicao (apenas
+        REPROVADA_PELO_VENDEDOR na Wave 3 Lote A — RF-007).
+
+    Se a prova esta em estado terminal (CANCELADA, RECEBIDA_PELA_CLICHERIA)
+    ou o usuario nao tem permissao para nenhuma transicao do estado atual,
+    `transicoes_permitidas` retorna `[]` e o frontend exibe mensagem
+    "Voce nao tem permissao para movimentar esta prova no estado atual".
+    """
+
+    prova: ProvaResponse
+    transicoes_permitidas: list[StatusProvaEnum]
+    motivo_obrigatorio_em: list[StatusProvaEnum]
+
+
+# ─── Transicao (Componente 11 — Wave 3 Lote A sub-bloco A.4) ─────────────
+#
+# Limite do base64 da assinatura: ~700 KB ≈ 500 KB de PNG decodificado
+# (base64 adiciona ~33% de overhead). Generoso para um signature-pad
+# tipico em celular (stroke medio gera 30-100 KB). Se device de alto DPI
+# com stroke grosso estourar, o frontend deve comprimir via
+# `toDataURL("image/png")` em canvas menor antes de enviar.
+ASSINATURA_BASE64_MAX_BYTES = 700_000
+
+
+class TransicaoRequest(BaseModel):
+    """Payload de `POST /api/v1/provas/{prova_id}/transicoes` (Componente 11).
+
+    Enviado pelo frontend `/escanear` apos o usuario escolher uma das
+    `transicoes_permitidas` retornadas pelo `/scan` e assinar no canvas.
+
+    Campos:
+      - `status_novo`: destino da transicao. Rejeita `CANCELADA` e `CRIADA`
+        via validator — sao ganchos para os endpoints admin dedicados dos
+        Componentes 13 (cancelamento) e 14 (reinicio de ciclo). Ver
+        `state_machine.executar_transicao` que suporta ambos, apenas este
+        endpoint nao os expoe.
+      - `assinatura_base64`: PNG do canvas do `react-signature-canvas`
+        codificado em base64 (sem o prefixo `data:image/png;base64,` — o
+        frontend deve fazer `toDataURL("image/png").split(",")[1]`).
+      - `motivo_reprovacao`: obrigatorio sse `status_novo =
+        REPROVADA_PELO_VENDEDOR` (RF-007). A validacao cruzada motivo x
+        destino e feita no handler, nao aqui, porque envolve dois campos
+        e fica mais coeso junto do try/except de dominio.
+    """
+
+    status_novo: StatusProvaEnum
+    assinatura_base64: str = Field(
+        ..., min_length=1, max_length=ASSINATURA_BASE64_MAX_BYTES
+    )
+    motivo_reprovacao: str | None = Field(None, max_length=1000)
+
+    @field_validator("status_novo")
+    @classmethod
+    def _rejeita_cancelada_e_criada(
+        cls, v: StatusProvaEnum
+    ) -> StatusProvaEnum:
+        if v == StatusProvaEnum.CANCELADA:
+            raise ValueError(
+                "Cancelamento nao e permitido por este endpoint "
+                "(sera endpoint admin dedicado — Componente 13, Lote C)"
+            )
+        if v == StatusProvaEnum.CRIADA:
+            raise ValueError(
+                "Reinicio de ciclo nao e permitido por este endpoint "
+                "(sera endpoint admin dedicado — Componente 14, Lote C)"
+            )
+        return v
+
+    @field_validator("motivo_reprovacao")
+    @classmethod
+    def _strip_motivo(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None  # string so de whitespace vira None
+
+
+class TransicaoResponse(BaseModel):
+    """Resposta de `POST /api/v1/provas/{prova_id}/transicoes`.
+
+    Retornada com HTTP 201 apos a transicao ser efetivada e commitada.
+    Contem:
+      - `prova`: dados completos da prova com o NOVO status/rota/ciclo
+        aplicados.
+      - `movimentacao`: a linha recem-inserida em `movimentacoes`, com
+        todos os campos populados (exceto `assinatura_digital` que fica
+        server-side, conforme `MovimentacaoResponse`).
+
+    O frontend usa a `movimentacao` para atualizar a timeline localmente
+    sem precisar fazer refetch, e a `prova` para atualizar o card da tela
+    atual.
+    """
+
+    prova: ProvaResponse
+    movimentacao: MovimentacaoResponse
+
+
 # ─── Helpers publicos ────────────────────────────────────────────────────
 
 

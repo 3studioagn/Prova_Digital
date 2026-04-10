@@ -193,3 +193,66 @@ export interface ImagemUrlResponse {
   url: string;
   expires_at: string;
 }
+
+// ─── Scan + Transicao (Componentes 10 e 11 — Wave 3 Lote A) ──────────
+
+/** Request de `POST /api/v1/provas/scan` (sub-bloco A.3).
+ *
+ * Formato esperado do `payload`: "3SD|{nro_requerimento}|{hash_truncado}"
+ * (hash truncado = 16 chars hex). O backend valida estrutura + integridade
+ * (hash HMAC constant-time) e retorna os dados da prova + as transicoes
+ * que o usuario corrente pode executar.
+ */
+export interface ScanRequest {
+  payload: string;
+}
+
+/** Response de `POST /api/v1/provas/scan`.
+ *
+ * `transicoes_permitidas` e a lista de destinos validos para o usuario
+ * corrente — a UI renderiza um botao por item. `motivo_obrigatorio_em`
+ * e subset de `transicoes_permitidas` onde o usuario deve informar motivo
+ * (Wave 3 Lote A: apenas `REPROVADA_PELO_VENDEDOR`, via RF-007).
+ *
+ * Contrato garantido pelo backend: toda transicao em
+ * `transicoes_permitidas` tambem passa no endpoint de transicao para
+ * este usuario — nao renderizamos botao que seria rejeitado no submit.
+ */
+export interface ScanResponse {
+  prova: ProvaResponse;
+  transicoes_permitidas: StatusProva[];
+  motivo_obrigatorio_em: StatusProva[];
+}
+
+/** Request de `POST /api/v1/provas/{prova_id}/transicoes` (sub-bloco A.4).
+ *
+ * - `status_novo` nao pode ser `CANCELADA` (gancho Componente 13) nem
+ *   `CRIADA` (gancho Componente 14) — o backend rejeita com 422 via
+ *   validator Pydantic.
+ * - `assinatura_base64` e o PNG do canvas do `react-signature-canvas`
+ *   com o prefixo `data:image/png;base64,` removido (use
+ *   `.split(",")[1]`). Max 700_000 chars ≈ 525 KB de PNG decodificado.
+ * - `motivo_reprovacao` eh obrigatorio sse `status_novo ===
+ *   "REPROVADA_PELO_VENDEDOR"` (RF-007). A validacao cruzada acontece
+ *   no handler backend, nao no schema.
+ */
+export interface TransicaoRequest {
+  status_novo: StatusProva;
+  assinatura_base64: string;
+  motivo_reprovacao?: string | null;
+}
+
+/** Response de `POST /api/v1/provas/{prova_id}/transicoes`.
+ *
+ * Retornado com HTTP 201 apos a transicao ser efetivada. O frontend usa
+ * `prova` para atualizar o card exibido e `movimentacao` para exibir
+ * sucesso (ou para atualizar a timeline localmente sem refetch).
+ */
+export interface TransicaoResponse {
+  prova: ProvaResponse;
+  movimentacao: MovimentacaoResponse;
+}
+
+/** Limite canonico de bytes do base64 da assinatura — espelho de
+ * `ASSINATURA_BASE64_MAX_BYTES` em schemas/prova.py. */
+export const ASSINATURA_BASE64_MAX_BYTES = 700_000;

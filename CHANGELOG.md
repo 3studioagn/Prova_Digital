@@ -2,6 +2,690 @@
 
 ---
 
+## [2026-04-10 — Wave 3 Lote A · Sub-bloco A.5] — Frontend `/escanear` (Componentes 10+11 UI)
+
+### Contexto
+
+Quinto sub-bloco do Lote A e **primeiro sub-bloco de frontend** do Lote A.
+Entrega a interface `/escanear` que consome os endpoints backend dos
+sub-blocos A.3 (`POST /scan`) e A.4 (`POST /{id}/transicoes`). Esta pagina
+completa a UX dos Componentes 10 (Leitura de QR) e 11 (Assinatura + Transicao)
+do Backlog v3.0.
+
+Entrega o fluxo completo: abrir camera → decodificar QR → resolver prova →
+escolher transicao → assinar no canvas → confirmar → sucesso. Tudo numa
+unica pagina com maquina de estados client-side.
+
+### Entregue
+
+**Dependencias novas (`frontend/package.json`):**
+- `html5-qrcode@^2.3.8` — leitura de QR Code pela camera do browser.
+- `react-signature-canvas@^1.0.7` — canvas de assinatura com suporte touch/mouse.
+- `@types/react-signature-canvas@^1.0.7` — tipos TS.
+
+**Tipos (`frontend/src/lib/types/prova.ts`):**
+- `ScanRequest` — `{ payload: string }`.
+- `ScanResponse` — `{ prova, transicoes_permitidas, motivo_obrigatorio_em }`.
+- `TransicaoRequest` — `{ status_novo, assinatura_base64, motivo_reprovacao? }`.
+- `TransicaoResponse` — `{ prova, movimentacao }`.
+- `ASSINATURA_BASE64_MAX_BYTES = 700_000` — espelho do backend.
+
+**Hooks novos (`frontend/src/hooks/`):**
+- `useScanProva(getToken)` → `{ escanear, loading, error, result, reset }`.
+  POST `/api/v1/provas/scan` com mapeamento HTTP→mensagem pt-BR
+  (404 "Prova nao encontrada", 422 propaga mensagem do backend, etc).
+- `useExecutarTransicao(getToken)` → `{ executar, loading, error, result, reset }`.
+  POST `/api/v1/provas/{id}/transicoes`. Trata 409 "O status da prova mudou"
+  distinto de 422 "ator errado".
+- `useScanner({ enabled, onDetect, onError })` → `{ divId, ready, error }`.
+  Wrapper SSR-safe do `html5-qrcode` com:
+  - Lazy import dentro de `useEffect` (evita quebrar SSR).
+  - Cleanup defensivo `.stop().catch(...).finally(() => .clear())` —
+    contorna bug conhecido da lib onde `stop()` pode rejeitar.
+  - Callbacks em `useRef` para nao re-montar a camera em cada render.
+  - `useId()` com sanitizacao para evitar `:` no `querySelector` interno
+    da lib.
+  - Config: `facingMode: "environment"` (camera traseira), `fps: 10`,
+    `qrbox: 250x250`.
+
+**Pagina `/escanear` (`frontend/src/app/(dashboard)/escanear/`):**
+- `page.tsx` — 463 linhas, maquina de estados client-side com union
+  discriminada de 8 variantes:
+  ```typescript
+  type PageState =
+    | { kind: "idle" }
+    | { kind: "scanning" }
+    | { kind: "scan-loading"; payload: string }
+    | { kind: "scan-ready"; scan: ScanResponse }
+    | { kind: "signing"; scan; statusNovo; precisaMotivo }
+    | { kind: "submitting" }
+    | { kind: "done"; scan; statusAplicado }
+    | { kind: "scan-error"; message };
+  ```
+  Sub-componentes: `IdleView`, `ScanningView`, `ScanReadyView`,
+  `AssinaturaModal`, `DoneView`, `ErrorView`.
+
+  Features:
+  - Botao "Reprovar" usa `dangerButton` (vermelho); outros botoes usam
+    `primaryButton` (amarelo).
+  - Labels de acao em portugues: `ACTION_LABELS` local com entradas como
+    `RETIRADA_PELO_VENDEDOR: "Retirar prova"`, `DE_VOLTA_3STUDIO:
+    "Devolver a 3Studio"`. Fallback para `STATUS_LABELS`.
+  - Modal de assinatura renderiza **sobre** o `ScanReadyView` (readOnly),
+    preservando contexto da prova enquanto o usuario assina.
+  - `AssinaturaModal` valida 3 coisas no submit (defesa em profundidade):
+    (1) canvas nao vazio, (2) motivo obrigatorio na reprovacao, (3) base64
+    <= `ASSINATURA_BASE64_MAX_BYTES`.
+  - Mensagem de erro de rede vem do hook; mensagem de validacao local
+    vem do proprio componente.
+
+- `escanear.module.css` — 376 linhas com tokens `--color-card-*` e
+  `--radius-*` existentes. Zero CSS novo global.
+
+**Layout (`frontend/src/app/(dashboard)/layout.tsx`):**
+- **1 linha alterada:** adicionado `href: "/escanear"` ao item "Escanear"
+  do `MAIN_NAV`. Antes era placeholder inativo (span); agora e Link.
+- **Zero mudanca em qualquer outro aspecto do layout.** Zero mudanca em
+  outras paginas.
+
+### Detalhes tecnicos
+
+Ver **ADR-085** para as 8 decisoes de desenho:
+1. Maquina de estados com union discriminada (vs `useReducer` / libs externas)
+2. `useScanner` como hook isolado para encapsular cleanup defensivo da camera
+3. Config do `html5-qrcode` (`facingMode`, `fps`, `qrbox`)
+4. 2 hooks separados (`useScanProva` + `useExecutarTransicao`) em vez de um unico
+5. Export de assinatura via `.toDataURL("image/png").split(",")[1]`
+6. Modal de assinatura renderiza **sobre** o `ScanReadyView`
+7. `ACTION_LABELS` local na pagina (nao em `types/prova.ts`)
+8. `dangerButton` (vermelho) so para REPROVADA
+
+### Metricas
+
+| | Antes (A.4) | Depois (A.5) | Delta |
+|---|---|---|---|
+| **Arquivos novos no frontend** | — | **5** (3 hooks + page + CSS) | — |
+| **Dependencias npm** | 7 prod | **10 prod** | +3 |
+| **`tsc --noEmit`** | limpo | **limpo** | — |
+| **`next lint`** | limpo | **limpo** | — |
+| **`next build`** | limpo (1 warning pre-Wave 2) | **limpo (mesmo warning)** | — |
+| **Bundle `/escanear`** | — | **11.4 kB / 161 kB First Load JS** | novo |
+| **Rotas frontend** | 6 | **7** | +1 |
+| **Itens ativos do menu** | 5 (home placeholder, provas, nova, usuarios, config) | **6** (+escanear) | +1 |
+
+### Debito pre-existente observado: B-02
+
+Durante `npm install`, o `npm audit` reportou **4 high severity em `next@14.2`**
+(DoS via Image Optimizer, HTTP smuggling em rewrites, unbounded cache).
+**Nao sao regressao do A.5** — existem desde a Wave 1 quando o Next 14
+foi instalado. Fix exige upgrade para Next 16 (breaking change major).
+
+**Decisao (apos autorizacao):** aceito como **TODO Wave 6** (auditoria final).
+Registrado em `WAVE3_BLOCKERS.md` secao **B-02**. Zero acao no Lote A.
+
+### Smoke validation
+
+- `preview_start frontend` sobe na porta 56052 (3000 ocupada).
+- `GET /escanear` retorna 200 via middleware.
+- Middleware redireciona nao-autenticado para `/login` (esperado — mesma
+  protecao das outras rotas do dashboard).
+- Zero erros no console.
+- Zero erros no servidor.
+- Screenshot do login confirma visual correto.
+
+O smoke E2E completo (com usuario logado + camera real + fluxo completo
+de transicao) fica para o **sub-bloco A.6** em staging, conforme §9.3 P1
+do plano.
+
+### Arquivos alterados
+
+- `frontend/package.json` — +3 deps
+- `frontend/package-lock.json` — atualizado
+- `frontend/src/lib/types/prova.ts` — +66 linhas (tipos Scan*/Transicao*)
+- `frontend/src/hooks/useScanProva.ts` — novo (94 linhas)
+- `frontend/src/hooks/useExecutarTransicao.ts` — novo (115 linhas)
+- `frontend/src/hooks/useScanner.ts` — novo (152 linhas)
+- `frontend/src/app/(dashboard)/escanear/page.tsx` — novo (463 linhas)
+- `frontend/src/app/(dashboard)/escanear/escanear.module.css` — novo (376 linhas)
+- `frontend/src/app/(dashboard)/layout.tsx` — 1 linha (href do menu)
+- `DECISIONS.md` — adicionado **ADR-085** com 8 decisoes
+- `WAVE3_BLOCKERS.md` — adicionada secao **B-02** (next@14.2 vulnerabilities)
+- `CHANGELOG.md` — esta entrada
+
+### Gate para Sub-bloco A.6
+
+Pre-requisitos do smoke E2E (§9.3 P1 do plano):
+- Seed de 3 usuarios de teste (Vendedor MATRIZ, Motorista, Clicheria) via
+  `POST /api/v1/users/` logado como admin.
+- Vendedor FILIAL ja existe (Mario Souza).
+
+Validacoes do A.6:
+- Smoke manual em staging com 10 cenarios (§8.3 do plano):
+  - Fluxo MATRIZ completo (Criada → Retirada → Aprovada → De Volta → Com
+    Motorista → Enviada → Recebida)
+  - Fluxo FILIAL completo (Criada → Retirada → Aprovada → Encaminhada →
+    Recebida)
+  - Reprovacao com motivo
+  - Erros de validacao (QR invalido, scoping)
+  - Teste de cleanup de camera ao navegar fora
+  - Teste em Safari (desktop/iOS)
+- `WAVE3_LOTE_A_CLOSEOUT.md` com DoD C10 + C11 item por item.
+- Atualizacao de `CLAUDE.md` (tabela de waves, rotas, menu).
+- Metricas finais consolidadas.
+
+---
+
+## [2026-04-10 — Wave 3 Lote A · Sub-bloco A.4] — `POST /api/v1/provas/{id}/transicoes` (Componente 11)
+
+### Contexto
+
+Quarto e ultimo sub-bloco **backend** do Lote A. Entrega o **endpoint de
+transicao de status** (Componente 11 do Backlog v3.0) que conecta:
+  - O scan do sub-bloco A.3 ("quais botoes mostrar")
+  - A execucao de dominio do sub-bloco A.1 (`executar_transicao`)
+  - A infraestrutura RLS do sub-bloco A.2 (INSERT em `movimentacoes`)
+
+Apos este sub-bloco, o **backend do Lote A esta completo**. Proximo passo
+e o frontend `/escanear` (A.5) + smoke E2E em staging (A.6).
+
+### Entregue
+
+**Schemas (`backend/app/domain/schemas/prova.py`):**
+- Constante `ASSINATURA_BASE64_MAX_BYTES = 700_000` (~525 KB de PNG
+  decodificado, base64 tem overhead de ~33%).
+- `TransicaoRequest`:
+  - `status_novo: StatusProvaEnum` com validator `_rejeita_cancelada_e_criada`
+    que bloqueia `CANCELADA` (gancho C13) e `CRIADA` (gancho C14).
+  - `assinatura_base64: str` com `min_length=1, max_length=700_000`.
+  - `motivo_reprovacao: str | None` com validator `_strip_motivo` que
+    normaliza whitespace-only para `None`.
+- `TransicaoResponse`: `{ prova: ProvaResponse, movimentacao: MovimentacaoResponse }`.
+
+**Handler (`backend/app/api/v1/provas.py`):**
+- `POST /api/v1/provas/{prova_id}/transicoes` — 145 linhas:
+  1. `parse_prova_id` → 404 se UUID invalido (padrao C08 M3).
+  2. `_decode_assinatura(body.assinatura_base64)` → 422 se base64 invalido
+     ou decodifica para zero bytes.
+  3. `_carregar_prova_com_scoping(..., lock=True)` — novo parametro
+     keyword-only aplica `.with_for_update(of=ProvaDigital)`. 404 se ausente
+     ou escondida por scoping. 502 em erro transitorio de DB.
+  4. Chama `state_machine.executar_transicao(...)` — delega toda a logica
+     de dominio (validacao, motivos, rota, ciclo, INSERT + UPDATE, audit).
+  5. Mapeamento de exceptions de dominio para HTTP (ver ADR-084):
+     - `TransicaoInvalidaError` → **409** "Status da prova mudou. Recarregue
+       e tente novamente." (assume race condition ou cliente com estado
+       stale)
+     - `AtorNaoAutorizadoError` → **422** (setor/localizacao errada)
+     - `ValueError` → **422** (motivo ausente, assinatura vazia pos-decode)
+     - `RotaIndeterminavelError` → **422** (admin STUDIO aprovando sem vendedor)
+     - `Exception` → **502** + rollback + logger.exception
+  6. Commit — 502 + rollback se falhar.
+  7. Retorna 201 com `TransicaoResponse` completo.
+
+**Helper `_decode_assinatura(str) -> bytes`:**
+- Usa `base64.b64decode(v, validate=True)` — rejeita chars nao-base64.
+- Defensive: 422 se decode retorna zero bytes (bloqueado normalmente pelo
+  Pydantic `min_length=1`, mas o helper protege se alguem chamar direto).
+
+**Extensao de `_carregar_prova_com_scoping`:**
+- Novo parametro keyword-only `lock: bool = False`. Default preserva os
+  5 callers Wave 2 sem impacto. Quando `True`, aplica
+  `.with_for_update(of=ProvaDigital)` — trava apenas a linha de
+  `provas_digitais`, nao as linhas de `usuarios` do JOIN (evita contencao
+  cruzada com PATCH de usuario).
+
+**Mudanca no state_machine (ADR-081 implicitamente atualizado):**
+- `state_machine.executar_transicao` agora gera `id = uuid.uuid4()` e
+  `created_at = datetime.now(tz=timezone.utc)` explicitamente ao criar a
+  Movimentacao, em vez de confiar nos server_defaults do banco.
+- Motivo: durante o desenvolvimento do handler A.4, os 11 happy paths
+  falharam com `pydantic_core.ValidationError: UUID input should be a
+  string, ... input_value=None` porque `mock_db.flush()` nao popula
+  server_defaults. Consistente com o padrao do `create_prova` da Wave 2.
+- Consequencia: nenhuma mudanca em producao (o banco tambem aceita id
+  gerado no Python) + testes ficam limpos + logs mostram o ID antes do
+  commit.
+
+**Testes (`backend/tests/test_provas_api.py`) — 37 novos:**
+
+Happy paths das 9 HUs do Lote A (10 testes — 2 de aprovacao):
+1. `test_transicao_happy_criada_para_retirada_vendedor_matriz` — US-002
+2. `test_transicao_happy_retirada_para_aprovada_matriz_persiste_rota_padrao` — US-003
+3. `test_transicao_happy_retirada_para_aprovada_filial_persiste_rota_direta` — US-003
+4. `test_transicao_happy_reprovacao_com_motivo` — US-004
+5. `test_transicao_happy_aprovada_matriz_para_de_volta_3studio` — US-005
+6. `test_transicao_happy_aprovada_filial_para_encaminhada_clicheria` — US-006
+7. `test_transicao_happy_de_volta_para_com_motorista_studio` — US-007
+8. `test_transicao_happy_com_motorista_para_enviada_motorista` — US-008
+9. `test_transicao_happy_enviada_para_recebida_clicheria` — US-009 padrao
+10. `test_transicao_happy_encaminhada_para_recebida_clicheria` — US-009 direta
+
+Validacoes Pydantic (5):
+11. CANCELADA rejeitada (gancho C13) — 422
+12. CRIADA rejeitada (gancho C14) — 422
+13. Assinatura vazia (min_length) — 422
+14. Assinatura base64 malformado — 422
+15. Assinatura > 700 KB — 422
+
+Rejeicoes de dominio (14):
+16. Reprovacao sem motivo — 422
+17. Reprovacao com motivo whitespace — 422
+18. Ator errado (vendedor tentando ENVIADA) — 422
+19. RF-009 MATRIZ tentando ENCAMINHADA — 422
+20. RF-009 FILIAL tentando DE_VOLTA — 422
+21. Admin STUDIO aprovando sem localizacao — 422
+22. **Transicao ilegal pos-lock → 409** (decisao ADR-084)
+23. **Estado terminal RECEBIDA → 409**
+24. Prova inexistente — 404
+25. UUID invalido — 404 (via `parse_prova_id`)
+26. Scoping esconde — 404
+27. DB error no carregamento — 502
+28. DB error no commit — 502 + rollback
+29. Erro inesperado em `executar_transicao` — 502 + rollback
+
+Autenticacao + autorizacao (2):
+30. Sem auth — 401
+31. Admin bypass setor em transicao valida
+
+Validacao adicional de payload (2):
+32. Request sem `status_novo` — 422
+33. Enum invalido como `status_novo` — 422
+
+Unit tests + defensive (4):
+34. `_decode_assinatura("")` direto — cobre linhas 1580-1583 (decode vazio)
+35. HTTPException no `_carregar_prova_com_scoping` propaga — cobre 1618-1619
+36. HTTPException em `executar_transicao` propaga — cobre 1691-1694
+37. `TransicaoRequest._strip_motivo(None)` — cobre `return None` do validator
+
+### Metricas
+
+| | Antes (A.3) | Depois (A.4) | Delta |
+|---|---|---|---|
+| **Testes backend (total)** | 352 | **389** | +37 |
+| **Testes de transicao** | 0 | **37** | +37 |
+| **Cobertura `provas.py`** | 96% | **96%** (430 stmts, 17 missing) | — |
+| **Cobertura `schemas/prova.py`** | 96% | **97%** (134 stmts, 4 missing) | +1pp |
+| **Cobertura `state_machine.py`** | 100% | **100%** | — |
+| **Cobertura das linhas novas do A.4** | — | **100%** | — |
+| **Rotas publicas backend** | 25 | **26** | +1 (meta do Lote A: 24→26 ✅) |
+| **Ruff `.` (full backend)** | limpo | **limpo** | — |
+
+### Arquivos alterados
+
+- `backend/app/domain/schemas/prova.py` — +84 linhas (`TransicaoRequest`, `TransicaoResponse`, constante max bytes)
+- `backend/app/api/v1/provas.py` — +178 linhas (imports, `_decode_assinatura`, extensao de `_carregar_prova_com_scoping`, handler)
+- `backend/app/services/state_machine.py` — +3 linhas (id/created_at no Python)
+- `backend/tests/test_provas_api.py` — +~700 linhas (37 testes + helpers `_transicao_body`, `ASSINATURA_B64`)
+- `DECISIONS.md` — adicionado **ADR-084** com 8 decisoes de desenho
+- `CHANGELOG.md` — esta entrada
+
+### Backend do Lote A — completo
+
+| Sub-bloco | Status | Entrega |
+|---|---|---|
+| A.1 | ✅ | `state_machine.executar_transicao` + 24 testes |
+| A.2 | ✅ | RLS 006 aplicada (12 policies, F03 resolvido) |
+| A.3 | ✅ | `POST /scan` + 20 testes |
+| **A.4** | **✅** | **`POST /{id}/transicoes` + 37 testes** |
+| A.5 | 🔜 | Frontend `/escanear` |
+| A.6 | ⏳ | Smoke E2E + closeout |
+
+### Gate para Sub-bloco A.5
+
+Prosseguir com o frontend `/escanear`:
+- Instalar `html5-qrcode` + `react-signature-canvas` + types.
+- Adicionar tipos `ScanRequest/Response` e `TransicaoRequest/Response` em
+  `frontend/src/lib/types/prova.ts` (espelho dos schemas Pydantic).
+- Hooks `useScanProva`, `useExecutarTransicao`, `useScanner`.
+- Pagina `/escanear` com scanner, preview, assinatura e modal de transicao.
+- Ativar item "Escanear" do menu em `(dashboard)/layout.tsx` (1 linha).
+
+---
+
+## [2026-04-10 — Wave 3 Lote A · Sub-bloco A.3] — `POST /api/v1/provas/scan` (Componente 10)
+
+### Contexto
+
+Terceiro sub-bloco do Lote A. Entrega o **endpoint de leitura de QR Code**
+(Componente 10 do Backlog v3.0). Recebe o payload decodificado pela camera
+(via html5-qrcode no frontend do sub-bloco A.5), resolve qual prova ele
+aponta, verifica integridade via hash HMAC constant-time e retorna os dados
+da prova + a lista de transicoes que o usuario corrente pode executar.
+
+O contrato exposto e o seguinte: a `transicoes_permitidas` retornada e um
+**subconjunto garantidamente aceitavel pelo endpoint de transicao** do
+sub-bloco A.4 (Componente 11). A UI nunca mostra botao que seria rejeitado
+na execucao.
+
+Escopo estrito: `CANCELADA` e `CRIADA` (reinicio de ciclo) ficam fora da
+lista — sao ganchos para os endpoints admin dedicados que os Componentes 13
+e 14 criarao no Lote C futuro. A state_machine suporta os dois, apenas nao
+sao expostos via `/scan`.
+
+### Entregue
+
+**Schemas (`backend/app/domain/schemas/prova.py`):**
+- `ScanRequest` — `payload: str` + validator Pydantic que checa 5 coisas
+  estruturais: nao vazio, prefixo `3SD|`, exatamente 3 campos separados por
+  `|`, `nro_requerimento` nao vazio, hash truncado com 16 chars.
+- `ScanResponse` — `{ prova: ProvaResponse, transicoes_permitidas:
+  list[StatusProvaEnum], motivo_obrigatorio_em: list[StatusProvaEnum] }`.
+
+**Handler (`backend/app/api/v1/provas.py`):**
+- `POST /api/v1/provas/scan` — 85 linhas, fluxo completo:
+  1. Parse `nro_requerimento` do payload.
+  2. SELECT prova via novo helper `_carregar_prova_por_nro_req_com_scoping`
+     — aplica `_scoping_filter` como os endpoints de detalhe (ADR-049).
+  3. 404 se None (ausencia ou scoping — mesma mensagem, nao vaza existencia).
+  4. `qrcode_service.validar_payload_qr(payload, prova.qr_code_hash)` —
+     constant-time. 422 se nao bate.
+  5. `_computar_transicoes_permitidas(prova, usuario)` — itera
+     `TRANSICOES[prova.status]` + `validar_transicao` + aplica regra RF-009
+     de rota por localizacao.
+  6. Audit log `acao="escanear_prova"` com
+     `{nro_requerimento, status_atual, transicoes_permitidas}` em detalhes.
+  7. Commit. 502 + rollback se falhar.
+  8. Retorna 200 com `ScanResponse`.
+
+**Helper `_computar_transicoes_permitidas(prova, usuario)`:**
+- Itera os destinos candidatos de `TRANSICOES[prova.status]`.
+- **Filtra** `CANCELADA` sempre (gancho C13).
+- **Filtra** `CRIADA` quando origem e `REPROVADA_PELO_VENDEDOR` (gancho C14).
+- Testa cada destino com `validar_transicao` e captura
+  `(TransicaoInvalidaError, AtorNaoAutorizadoError)`.
+- Em `APROVADA_PELO_VENDEDOR`, aplica RF-009:
+  - MATRIZ → so `DE_VOLTA_3STUDIO`
+  - FILIAL → so `ENCAMINHADA_A_CLICHERIA`
+  - Admin bypassa.
+- Ordenacao alfabetica estavel.
+- Calcula `motivo_obrigatorio_em` como o subset `[REPROVADA_PELO_VENDEDOR]`
+  (ou `[]` se reprovada nao esta na lista).
+
+**Helper `_carregar_prova_por_nro_req_com_scoping`:**
+- Variante do `_carregar_prova_com_scoping` (por id) que seleciona por
+  `nro_requerimento` UNIQUE. Retorna 4-tupla
+  `(prova, vendedor_nome, vendedor_localizacao, vendedor_setor)` ou None.
+
+**Testes (`backend/tests/test_provas_api.py`) — 20 novos:**
+
+Happy paths (6):
+1. `test_scan_happy_vendedor_matriz_retorna_transicoes_corretas` —
+   `CRIADA` por vendedor MATRIZ → `[RETIRADA_PELO_VENDEDOR]`.
+2. `test_scan_vendedor_matriz_em_retirada_retorna_aprovada_e_reprovada` —
+   `RETIRADA` → ambas aprovar/reprovar + `motivo_obrigatorio_em =
+   [REPROVADA_PELO_VENDEDOR]`.
+3. `test_scan_vendedor_matriz_em_aprovada_retorna_so_de_volta` — RF-009.
+4. `test_scan_vendedor_filial_em_aprovada_retorna_so_encaminhada` — RF-009.
+5. `test_scan_estado_terminal_recebida_retorna_lista_vazia` — terminal.
+6. `test_scan_reprovada_para_criada_filtrada_gancho_c14` — `CRIADA`
+   filtrada.
+
+Rejeicao / Pydantic validator (5):
+7. `test_scan_payload_formato_invalido_retorna_422` — sem prefixo `3SD|`.
+8. `test_scan_payload_poucos_campos_retorna_422` — menos de 3 campos.
+9. `test_scan_payload_hash_tamanho_errado_retorna_422` — hash != 16 chars.
+10. `test_scan_payload_nro_req_vazio_retorna_422` — nro_req so whitespace.
+11. `test_scan_payload_so_whitespace_retorna_422` — payload so whitespace.
+
+Rejeicao / handler (6):
+12. `test_scan_prova_nao_encontrada_retorna_404`.
+13. `test_scan_hash_nao_bate_retorna_422` — hash truncado errado,
+    constant-time.
+14. `test_scan_vendedor_escapando_outra_prova_retorna_404` — scoping.
+15. `test_scan_motorista_fora_status_retorna_404` — scoping por setor.
+16. `test_scan_db_error_retorna_502` — padrao ADR-074.
+17. `test_scan_audit_commit_failure_retorna_502` — commit fail + rollback.
+
+Coberturas extras (3):
+18. `test_scan_vendedor_em_prova_com_motorista_retorna_lista_vazia` —
+    cobre o `except (TransicaoInvalidaError, AtorNaoAutorizadoError)` em
+    `_computar_transicoes_permitidas`.
+19. `test_scan_sem_auth_retorna_401` — herdado de `get_current_user`.
+20. `test_scan_audit_log_contem_acao_e_status_atual` — valida `detalhes_json`
+    com `acao`, `nro_requerimento`, `status_atual`, `transicoes_permitidas`.
+
+Helpers novos locais: `_make_prova_com_hash` (ProvaDigital com hash
+controlado) + `_gerar_hash_e_payload` (gera par consistente para
+validacao).
+
+### Metricas
+
+| | Antes (A.2) | Depois (A.3) | Delta |
+|---|---|---|---|
+| **Testes backend (total)** | 332 | **352** | +20 |
+| **Testes de scan** | 0 | **20** | +20 |
+| **Cobertura `provas.py`** | 95% | **96%** (378 stmts, 17 missing) | +1pp |
+| **Cobertura `schemas/prova.py`** | 96% | **96%** (114 stmts, 4 missing) | — |
+| **Cobertura das linhas novas do A.3** | — | **100%** | — |
+| **Rotas publicas backend** | 24 | **25** | +1 |
+| **Ruff** | limpo | **limpo** | — |
+
+### Arquivos alterados
+
+- `backend/app/domain/schemas/prova.py` — +66 linhas (`ScanRequest`, `ScanResponse`)
+- `backend/app/api/v1/provas.py` — +231 linhas (imports + 3 helpers/handler)
+- `backend/tests/test_provas_api.py` — +~380 linhas (20 testes + 2 helpers)
+- `DECISIONS.md` — adicionado **ADR-083** com 8 decisoes de desenho
+- `CHANGELOG.md` — esta entrada
+
+### Gate para Sub-bloco A.4
+
+- Revisao do handler `scan_prova` + `_computar_transicoes_permitidas`.
+- Confirmacao de prosseguir para **A.4** (endpoint
+  `POST /api/v1/provas/{id}/transicoes` — Componente 11: recebe
+  `{status_novo, assinatura_base64, motivo_reprovacao}`, carrega prova com
+  `FOR UPDATE`, chama `executar_transicao` do sub-bloco A.1, traduz
+  excecoes de dominio para HTTP, retorna 201 com prova atualizada +
+  movimentacao criada).
+
+---
+
+## [2026-04-10 — Wave 3 Lote A · Sub-bloco A.2] — RLS `movimentacoes` INSERT + SELECT expandido
+
+### Contexto
+
+Com o sub-bloco A.1 implementando `executar_transicao` (que passa a inserir
+linhas reais em `movimentacoes`), a camada RLS precisou ser ajustada antes de
+o endpoint `POST /provas/{id}/transicoes` (sub-bloco A.4) entrar no ar.
+
+Duas mudancas em `movimentacoes`:
+  1. **Nova** `pol_movimentacoes_insert` admin-only (defesa em profundidade,
+     consistente com `pol_provas_insert`).
+  2. **Expansao** de `pol_movimentacoes_select` para cobrir MOTORISTA e
+     CLICHERIA — resolve o debito **F03 da auditoria externa da Sessao 22**
+     que estava aceito como TODO para a Wave 3.
+
+Ambas idempotentes (DROP IF EXISTS + CREATE). Versionadas em
+`006_movimentacoes_insert_and_expand_select.sql`. ADR-082 documenta as 5
+decisoes de desenho.
+
+### Entregue
+
+**Migration RLS versionada:**
+- `backend/migrations/rls/006_movimentacoes_insert_and_expand_select.sql` —
+  novo arquivo, 130 linhas incluindo docstring.
+  - Nova `pol_movimentacoes_insert` admin-only.
+  - `pol_movimentacoes_select` expandida de 3 para 5 casos:
+    1. Admin ve tudo (inalterado)
+    2. Vendedor ve movimentacoes das suas proprias provas (inalterado)
+    3. Autor sempre ve suas proprias movimentacoes (inalterado)
+    4. **[NOVO]** MOTORISTA ve movimentacoes de provas atualmente em
+       `COM_MOTORISTA`
+    5. **[NOVO]** CLICHERIA ve movimentacoes de provas em
+       `ENVIADA_PARA_CLICHERIA`, `ENCAMINHADA_A_CLICHERIA` ou
+       `RECEBIDA_PELA_CLICHERIA`
+  - Mantem padrao `(SELECT auth.uid())` para initplan optimization (ADR-029).
+  - Semantica alinhada com `pol_provas_select`: se um ator pode ver a prova,
+    pode ver o historico de movimentacoes dela.
+- `backend/migrations/rls/apply_rls.py` — **nao tocado**. O script aplica
+  `sorted(glob("*.sql"))` automaticamente, entao 006 entra sozinho no pipeline.
+
+**Aplicacao em producao:**
+- Aplicado via MCP `execute_sql` no projeto Supabase `rwxlpwmnkekzuurgthkr` em
+  2026-04-10.
+- Validado:
+  - `SELECT COUNT(*) FROM pg_policies WHERE schemaname='public'` retorna **12**
+    (era 11).
+  - `pol_movimentacoes_insert` e `pol_movimentacoes_select` ambas presentes.
+  - `get_advisors type=security`: zero novos lints (continua com 1 INFO +
+    1 WARN ja aceitos).
+  - `get_advisors type=performance`: zero novos lints (9 `unused_index`
+    pre-existentes — esperado ate o Lote A comecar a mover dados).
+
+**Documentacao:**
+- `docs/db/schema.sql` — header atualizado para Wave 3 A.2 + alembic_version
+  inalterado em 009; lista de RLS scripts inclui o 006; secao "ROW LEVEL
+  SECURITY" atualizada para 12 policies + semantica correta de movimentacoes
+  (INSERT admin-only + SELECT com 5 casos).
+- `DECISIONS.md` — adicionado **ADR-082** com 5 decisoes de desenho:
+  1. Policy INSERT admin-only em vez de "sem policy" ou permissiva
+  2. Expansao do SELECT espelhando `pol_provas_select`
+  3. Status atual da prova (nao status_anterior/novo da movimentacao) como
+     criterio para o JOIN (semantica "ve agora o que pode ver agora")
+  4. Ordem de aplicacao em relacao ao 005 via `apply_rls.py` (glob sorted)
+  5. Decisao de nao tocar no comment TODO do 005 (regra "nao tocar em Waves
+     anteriores")
+
+### Metricas
+
+| | Antes (A.1) | Depois (A.2) | Delta |
+|---|---|---|---|
+| **Policies RLS em producao** | 11 | **12** | +1 (INSERT) |
+| **Casos em `pol_movimentacoes_select`** | 3 | **5** | +2 (MOTORISTA + CLICHERIA) |
+| **Testes backend** | 332 | **332** | — (RLS nao e testada via pytest) |
+| **Advisors security** | 2 aceitos | 2 aceitos | — |
+| **Advisors performance** | 9 INFO | 9 INFO | — |
+| **Debito F03 da Sessao 22** | aceito como TODO | **RESOLVIDO** | — |
+
+### Arquivos alterados
+
+- `backend/migrations/rls/006_movimentacoes_insert_and_expand_select.sql` — novo
+- `docs/db/schema.sql` — modificado (header + secao RLS)
+- `DECISIONS.md` — adicionado ADR-082
+- `CHANGELOG.md` — esta entrada
+
+### Gate para Sub-bloco A.3
+
+- Revisao do SQL do 006 + validacoes de `pg_policies` pos-aplicacao.
+- Confirmacao de prosseguir para **A.3** (endpoint `POST /api/v1/provas/scan`
+  — Componente 10: recebe payload QR, valida formato + hash HMAC via
+  `qrcode_service.validar_payload_qr`, aplica scoping via
+  `_carregar_prova_com_scoping`, retorna `ScanResponse` com prova +
+  transicoes permitidas + indicacao de motivo obrigatorio).
+
+---
+
+## [2026-04-10 — Wave 3 Lote A · Sub-bloco A.1] — `executar_transicao` (state_machine)
+
+### Contexto
+
+Inicio da Wave 3. Lote A cobre os Componentes 10 (Leitura de QR Code) e 11
+(Assinatura Digital e Transicao) do Backlog v3.0. Este sub-bloco (A.1) entrega
+a primeira parte: a funcao de dominio `executar_transicao` que orquestra
+validacao + persistencia + audit log de uma transicao completa.
+
+O Componente 11 depende de 4 sub-blocos: A.1 (state_machine), A.2 (RLS em
+movimentacoes), A.3 (endpoint `POST /provas/scan`), A.4 (endpoint
+`POST /provas/{id}/transicoes`). A.5 e o frontend `/escanear` e A.6 e o smoke
+E2E.
+
+O plano completo esta em `WAVE3_LOTE_A_ANALYSIS.md` Rev 2.
+
+### Entregue
+
+**Backend:**
+- `backend/app/services/state_machine.py`:
+  - Removido stub `executar_transicao` (`NotImplementedError`).
+  - Implementada funcao real `async def executar_transicao(db, *, prova,
+    status_novo, usuario, assinatura_digital, motivo_reprovacao=None,
+    motivo_cancelamento=None, request=None) -> Movimentacao`.
+  - Orquestra: validacao de assinatura nao-vazia (RN-003) → `validar_transicao`
+    → motivo obrigatorio (RF-007 reprovacao, RN-005 cancelamento) → regra extra
+    de rota por localizacao (RF-009) → determinacao de rota na aprovacao
+    (RN-007) → incremento de ciclo + zerar rota no reinicio (gancho C14) →
+    gravar `motivo_cancelamento` (gancho C13) → INSERT movimentacao + UPDATE
+    implicito da prova → log_audit estruturado → return sem commit.
+  - Caller (sub-bloco A.4) e responsavel por FOR UPDATE, commit e traducao de
+    excecoes para HTTP.
+  - Ver ADR-081 para as 8 decisoes de desenho nao obvias.
+
+**Testes:**
+- `backend/tests/test_state_machine.py`:
+  - Removido `test_executar_transicao_e_stub`.
+  - Adicionados **24 testes novos** (23 do `executar_transicao` + 1 teste de
+    cobertura defensive do `determinar_rota`):
+    1. Happy path CRIADA → RETIRADA (vendedor MATRIZ)
+    2. Happy path aprovacao MATRIZ persiste rota=PADRAO
+    3. Happy path aprovacao FILIAL persiste rota=DIRETA
+    4. Reprovacao com motivo (normalizacao strip)
+    5. Reprovacao sem motivo → ValueError
+    6. Reprovacao com motivo whitespace → ValueError
+    7. Transicao ilegal → TransicaoInvalidaError
+    8. Ator errado → AtorNaoAutorizadoError
+    9. Assinatura vazia → ValueError
+    10. APROVADA → DE_VOLTA_3STUDIO com vendedor MATRIZ OK
+    11. APROVADA → DE_VOLTA_3STUDIO com vendedor FILIAL rejeita (RF-009)
+    12. APROVADA → ENCAMINHADA_A_CLICHERIA com vendedor FILIAL OK
+    13. APROVADA → ENCAMINHADA_A_CLICHERIA com vendedor MATRIZ rejeita
+    14. COM_MOTORISTA → ENVIADA (motorista)
+    15. ENVIADA → RECEBIDA (clicheria, rota padrao)
+    16. ENCAMINHADA → RECEBIDA (clicheria, rota direta)
+    17. DE_VOLTA_3STUDIO → COM_MOTORISTA (studio)
+    18. Reinicio de ciclo REPROVADA → CRIADA: incrementa `ciclo_atual`, zera
+        `rota`, usa `acao="reiniciar_ciclo"` no audit
+    19. Admin bypassa setor em transicao valida
+    20. Movimentacao copia `ciclo_atual` vigente no momento
+    21. Cancelamento sem motivo → ValueError
+    22. Cancelamento com motivo normaliza e persiste em `prova.motivo_cancelamento`
+    23. Admin STUDIO tentando aprovar sem localizacao → RotaIndeterminavelError
+    24. Parametro `request` e forwarded para `log_audit`
+  - Adicionado helper local `make_prova()` + constante `ASSINATURA_FAKE` +
+    fixture `mock_log_audit` que patcha `app.services.state_machine.log_audit`.
+  - Adicionado `test_determinar_rota_rejeita_localizacao_desconhecida` para
+    fechar 100% de cobertura em `state_machine.py` (linha defensive da Wave 2).
+
+### Metricas
+
+| | Antes (Sessao 22) | Depois (Sub-bloco A.1) | Delta |
+|---|---|---|---|
+| Testes backend (total) | 308 | **332** | +24 |
+| Testes em `test_state_machine.py` | 32 | **56** | +24 |
+| Cobertura `state_machine.py` | n/d (stub) | **100%** (90 stmts) | — |
+| Linhas em `state_machine.py` | 226 | **376** | +150 |
+| Linhas em `test_state_machine.py` | 267 | **734** | +467 |
+| Ruff `app/ tests/` | limpo | **limpo** | — |
+| Ruff `.` (backend inteiro) | ? | 6 erros pre-existentes em `migrations/` | ver B-01 |
+
+### Debitos observados e resolvidos no proprio sub-bloco
+
+**B-01** — `ruff check .` reportava 6 erros em `backend/migrations/`
+pre-existentes em `main` (confirmado via `git stash` + run no estado limpo
+do commit `a8d8f7f`). **Nao sao regressao do A.1.** Detalhes + 3 opcoes em
+`WAVE3_BLOCKERS.md` secao B-01.
+
+✅ **Resolvido na mesma sessao apos autorizacao do Mario (opcao B):**
+adicionado `extend-exclude = ["migrations"]` em `backend/pyproject.toml`
+secao `[tool.ruff]` (padrao Python + Alembic). Zero arquivo de `migrations/`
+tocado — a regra "nao tocar em Waves anteriores" foi preservada. `ruff check .`
+passa limpo apos o fix.
+
+### Arquivos alterados
+
+- `backend/app/services/state_machine.py` — modificado
+- `backend/tests/test_state_machine.py` — modificado
+- `DECISIONS.md` — adicionado ADR-081 (8 decisoes de desenho documentadas)
+- `WAVE3_BLOCKERS.md` — criado (reporta B-01)
+- `CHANGELOG.md` — esta entrada
+
+### Gate para Sub-bloco A.2
+
+- Revisao do codigo de `executar_transicao` + testes.
+- Decisao do Mario sobre B-01 (opcao A/B/C).
+- Confirmacao de prosseguir para A.2 (RLS: `pol_movimentacoes_insert` +
+  expansao de `pol_movimentacoes_select` para MOTORISTA/CLICHERIA).
+
+---
+
 ## [2026-04-10 — Sessao 22] — Auditoria externa Wave 2 + hardening
 
 ### Contexto

@@ -77,6 +77,10 @@ from app.domain.schemas.prova import (
     ProvaListItem,
     ProvaListResponse,
     ProvaResponse,
+    ScanRequest,
+    ScanResponse,
+    TransicaoRequest,
+    TransicaoResponse,
     UploadUrlRequest,
     UploadUrlResponse,
     sanitize_filename,
@@ -84,7 +88,15 @@ from app.domain.schemas.prova import (
 from app.services import qrcode_service, r2_signed
 from app.services.audit_service import log_audit
 from app.services.etiqueta_service import TEMPLATE_PADRAO, gerar_pdf
-from app.services.state_machine import RotaIndeterminavelError, determinar_rota
+from app.services.state_machine import (
+    TRANSICOES,
+    AtorNaoAutorizadoError,
+    RotaIndeterminavelError,
+    TransicaoInvalidaError,
+    determinar_rota,
+    executar_transicao,
+    validar_transicao,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -830,7 +842,11 @@ async def list_provas(
 
 
 async def _carregar_prova_com_scoping(
-    db: AsyncSession, prova_id: uuid.UUID, user: Usuario
+    db: AsyncSession,
+    prova_id: uuid.UUID,
+    user: Usuario,
+    *,
+    lock: bool = False,
 ) -> tuple[ProvaDigital, str, LocalizacaoEnum | None, SetorEnum] | None:
     """Carrega a prova + dados do vendedor respeitando o scoping por setor.
 
@@ -841,6 +857,15 @@ async def _carregar_prova_com_scoping(
     para que `get_prova_detail` possa calcular `rota_projetada` sem fazer uma
     segunda query por request. Os outros 4 endpoints de detalhe nao usam
     setor — fazem unpacking com `_` para o 4o elemento.
+
+    Wave 3 Lote A (sub-bloco A.4): adicionado parametro keyword-only `lock`
+    (default `False` — zero impacto nos callers de Wave 2). Quando `True`,
+    aplica `.with_for_update(of=ProvaDigital)` para serializar transicoes
+    concorrentes. Usado exclusivamente pelo handler
+    `POST /api/v1/provas/{id}/transicoes` (ADR-084). Sem o lock, dois
+    usuarios escaneando a mesma prova simultaneamente poderiam fazer dois
+    INSERTs em `movimentacoes` e dois UPDATEs em `provas_digitais.status`,
+    corrompendo o historico.
     """
     stmt = (
         select(
@@ -855,6 +880,12 @@ async def _carregar_prova_com_scoping(
     base = _scoping_filter(user)
     if base is not None:
         stmt = stmt.where(base)
+
+    if lock:
+        # FOR UPDATE apenas na `provas_digitais`. Nao travamos `usuarios`
+        # (o JOIN) porque o vendedor nao precisa ser exclusivo para a
+        # transicao — so a prova. Evita contencao cruzada desnecessaria.
+        stmt = stmt.with_for_update(of=ProvaDigital)
 
     row = (await db.execute(stmt)).first()
     if row is None:
@@ -1241,4 +1272,482 @@ async def get_qr_code_png(
             # QR code e imutavel apos criacao (RN-001). Cache privado 5min.
             "Cache-Control": "private, max-age=300",
         },
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# POST /api/v1/provas/scan  — Componente 10 (Wave 3 Lote A sub-bloco A.3)
+# ───────────────────────────────────────────────────────────────────────
+#
+# Recebe um payload escaneado pelo frontend (html5-qrcode), resolve qual
+# prova esse payload aponta, verifica a integridade via hash HMAC
+# (qrcode_service.validar_payload_qr — constant-time), aplica scoping
+# (mesmo helper usado pelo detalhe) e retorna os dados da prova + a lista
+# de transicoes que o usuario corrente pode executar a partir do estado
+# atual. A UI do `/escanear` (sub-bloco A.5) consome essa lista para
+# renderizar os botoes de acao.
+#
+# Por que POST e nao GET:
+#   1. Request body (payload) simplifica encoding de chars especiais.
+#   2. O scan grava audit log — e uma acao, nao uma consulta pura.
+#   3. Consistencia com POST /upload-url (outro "request de acao").
+#
+# Transicoes_permitidas e computada iterando TRANSICOES[prova.status] e
+# testando cada destino candidato com `validar_transicao`, mais a regra
+# extra RF-009 (rota por localizacao) espelhando o que `executar_transicao`
+# faz no A.1. Isso garante que a UI nunca mostra um botao que seria
+# rejeitado pelo endpoint de transicao.
+#
+# Cancelamento e Reinicio de ciclo sao **filtrados** da lista: o endpoint
+# do sub-bloco A.4 vai rejeitar CANCELADA e CRIADA como destino (ganchos
+# para C13/C14), entao e coerente nao sugerir via UI.
+#
+# Quando o usuario nao tem permissao para nenhuma transicao do estado
+# atual (ex: vendedor escaneando uma prova em COM_MOTORISTA),
+# `transicoes_permitidas` vem vazia e o frontend exibe "sem acoes
+# disponiveis" — sem erro HTTP. O proprio scan e permitido (visibilidade
+# via _scoping_filter) mesmo sem acao subsequente, para debugging e para
+# que admin possa auditar estado.
+
+
+def _computar_transicoes_permitidas(
+    prova: ProvaDigital, usuario: Usuario
+) -> tuple[list[StatusProvaEnum], list[StatusProvaEnum]]:
+    """Determina quais transicoes o `usuario` pode executar na `prova`.
+
+    Retorna `(transicoes_permitidas, motivo_obrigatorio_em)`. Itera os
+    destinos candidatos de `TRANSICOES[prova.status]`, testa cada um com
+    `validar_transicao` (captura exceptions) e aplica as mesmas regras
+    extras que `executar_transicao` do sub-bloco A.1:
+
+      - Filtra `CANCELADA` (gancho C13, sera endpoint admin dedicado).
+      - Filtra `CRIADA` quando origem e REPROVADA_PELO_VENDEDOR (gancho
+        C14 — reinicio de ciclo via endpoint admin).
+      - Em `APROVADA_PELO_VENDEDOR`, filtra destinos conforme localizacao
+        do vendedor (RF-009):
+          - MATRIZ → so `DE_VOLTA_3STUDIO`
+          - FILIAL → so `ENCAMINHADA_A_CLICHERIA`
+        Admin bypassa essa regra (consistente com `executar_transicao`).
+
+    `motivo_obrigatorio_em` contem a subset de `transicoes_permitidas`
+    onde o usuario vai precisar informar motivo no submit — Wave 3 Lote
+    A: apenas `REPROVADA_PELO_VENDEDOR` (RF-007). Cancelamento tambem
+    exige motivo mas esta filtrado.
+    """
+    permitidas: list[StatusProvaEnum] = []
+    destinos_candidatos = TRANSICOES.get(prova.status, set())
+
+    for destino in destinos_candidatos:
+        # Filtro de escopo do Lote A — CANCELADA e CRIADA nao sao expostos
+        # pelo endpoint de transicao (ganchos C13 / C14).
+        if destino == StatusProvaEnum.CANCELADA:
+            continue
+        if (
+            destino == StatusProvaEnum.CRIADA
+            and prova.status == StatusProvaEnum.REPROVADA_PELO_VENDEDOR
+        ):
+            continue
+
+        # Teste de autorizacao via state_machine.
+        try:
+            validar_transicao(prova.status, destino, usuario)
+        except (TransicaoInvalidaError, AtorNaoAutorizadoError):
+            continue
+
+        # Regra extra RF-009 para APROVADA_PELO_VENDEDOR.
+        if (
+            prova.status == StatusProvaEnum.APROVADA_PELO_VENDEDOR
+            and not usuario.is_admin
+        ):
+            if destino == StatusProvaEnum.DE_VOLTA_3STUDIO:
+                if usuario.localizacao != LocalizacaoEnum.MATRIZ:
+                    continue
+            elif destino == StatusProvaEnum.ENCAMINHADA_A_CLICHERIA:
+                if usuario.localizacao != LocalizacaoEnum.FILIAL:
+                    continue
+
+        permitidas.append(destino)
+
+    # Ordenacao estavel e previsivel para facilitar testes e UI.
+    permitidas.sort(key=lambda s: s.value)
+
+    motivo_obrigatorio_em = [
+        s for s in permitidas if s == StatusProvaEnum.REPROVADA_PELO_VENDEDOR
+    ]
+    return permitidas, motivo_obrigatorio_em
+
+
+async def _carregar_prova_por_nro_req_com_scoping(
+    db: AsyncSession, nro_requerimento: str, user: Usuario
+) -> tuple[ProvaDigital, str, LocalizacaoEnum | None, SetorEnum] | None:
+    """Carrega prova por `nro_requerimento` aplicando scoping por setor.
+
+    Versao do scan do `_carregar_prova_com_scoping` que e por `prova_id`:
+    aqui o seletor e `nro_requerimento` (UNIQUE). Mesma semantica de
+    retorno 4-tupla ou None.
+
+    Nao e feito FOR UPDATE — o scan e apenas leitura. O FOR UPDATE vira
+    no sub-bloco A.4 (endpoint de transicao) quando for efetivar a
+    mudanca de estado.
+    """
+    stmt = (
+        select(
+            ProvaDigital,
+            Usuario.nome.label("vendedor_nome"),
+            Usuario.localizacao.label("vendedor_localizacao"),
+            Usuario.setor.label("vendedor_setor"),
+        )
+        .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
+        .where(ProvaDigital.nro_requerimento == nro_requerimento)
+    )
+    base = _scoping_filter(user)
+    if base is not None:
+        stmt = stmt.where(base)
+
+    row = (await db.execute(stmt)).first()
+    if row is None:
+        return None
+    prova, vendedor_nome, vendedor_localizacao, vendedor_setor = row
+    return prova, vendedor_nome, vendedor_localizacao, vendedor_setor
+
+
+@router.post("/scan", response_model=ScanResponse)
+async def scan_prova(
+    body: ScanRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> ScanResponse:
+    """Resolve um payload de QR Code escaneado (Componente 10).
+
+    Fluxo:
+      1. Pydantic valida formato estrutural do payload (prefixo `3SD|`,
+         3 campos, hash com 16 chars). Rejeita 422 se malformado.
+      2. Parseia `nro_requerimento` e `hash_truncado` do payload.
+      3. SELECT prova por `nro_requerimento` com scoping aplicado. Se
+         nao encontra OU o scoping esconde, retorna 404 "Prova nao
+         encontrada" (mesma mensagem para nao vazar existencia — padrao
+         ADR-049).
+      4. Verifica o hash via `qrcode_service.validar_payload_qr` —
+         constant-time. Se nao bate, 422 "QR Code nao corresponde a
+         prova esperada". Essa checagem e **apos** o SELECT porque
+         precisamos do `qr_code_hash` armazenado para comparar.
+      5. Calcula `transicoes_permitidas` via
+         `_computar_transicoes_permitidas` (iterando TRANSICOES +
+         validar_transicao + regra RF-009).
+      6. Log audit `acao="escanear_prova"` com detalhes basicos
+         (nro_requerimento, status_atual). Commit.
+      7. Retorna 200 com `ScanResponse`.
+
+    Codigos HTTP:
+      200: happy path. `transicoes_permitidas` pode ser `[]` se a prova
+           esta em estado terminal ou se o usuario nao tem nenhuma
+           transicao permitida a partir do estado atual.
+      401: token ausente/invalido (herdado de `get_current_user`).
+      403: usuario desativado.
+      404: prova nao encontrada OU escondida por scoping.
+      422: formato de payload invalido OR hash nao bate (integridade).
+      502: erro transitorio de DB (padrao ADR-074).
+    """
+    # Parseia nro_requerimento do payload ja validado pelo Pydantic.
+    _prefix, nro_requerimento, _hash_trunc = body.payload.split(
+        qrcode_service.QR_PAYLOAD_SEPARATOR
+    )
+
+    try:
+        scoped = await _carregar_prova_por_nro_req_com_scoping(
+            db, nro_requerimento, current_user
+        )
+    except Exception:
+        logger.exception(
+            "Falha ao resolver scan (user=%s, nro_req=%s)",
+            current_user.id,
+            nro_requerimento,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar prova",
+        )
+
+    if scoped is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
+        )
+    prova, vendedor_nome, vendedor_localizacao, vendedor_setor = scoped
+
+    # Verificacao do hash (constant-time). Feita APOS o scoping para nao
+    # dar pistas sobre existencia da prova via timing.
+    if not qrcode_service.validar_payload_qr(body.payload, prova.qr_code_hash):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="QR Code nao corresponde a prova esperada",
+        )
+
+    # Calcula transicoes permitidas para este usuario neste estado.
+    transicoes_permitidas, motivo_obrigatorio_em = _computar_transicoes_permitidas(
+        prova, current_user
+    )
+
+    # Audit log: scan e uma acao auditada (RNF-005 + rastreabilidade de
+    # quem olhou qual prova). Mesmo que o scan nao mude estado, saber
+    # quem escaneou o que e util para investigacao.
+    try:
+        await log_audit(
+            db,
+            acao="escanear_prova",
+            usuario_id=current_user.id,
+            prova_id=prova.id,
+            detalhes={
+                "nro_requerimento": prova.nro_requerimento,
+                "status_atual": prova.status.value,
+                "transicoes_permitidas": [s.value for s in transicoes_permitidas],
+            },
+            request=request,
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "Falha ao persistir audit do scan (user=%s, prova=%s)",
+            current_user.id,
+            prova.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao registrar scan",
+        )
+
+    logger.info(
+        "Scan OK: user=%s prova=%s status=%s transicoes=%d",
+        current_user.id,
+        prova.id,
+        prova.status.value,
+        len(transicoes_permitidas),
+    )
+
+    return ScanResponse(
+        prova=_build_prova_response(
+            prova, vendedor_nome, vendedor_localizacao, vendedor_setor
+        ),
+        transicoes_permitidas=transicoes_permitidas,
+        motivo_obrigatorio_em=motivo_obrigatorio_em,
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# POST /api/v1/provas/{prova_id}/transicoes  — Componente 11 (sub-bloco A.4)
+# ───────────────────────────────────────────────────────────────────────
+#
+# Executa uma transicao de status end-to-end — o endpoint espelha o que o
+# sub-bloco A.5 (frontend `/escanear`) vai chamar apos o usuario:
+#   1. escanear o QR (POST /scan, sub-bloco A.3),
+#   2. escolher uma das `transicoes_permitidas`,
+#   3. assinar digitalmente no canvas.
+#
+# Fluxo do handler:
+#   a. Pydantic valida: formato do payload, status_novo not in
+#      {CANCELADA, CRIADA} (ganchos C13/C14), assinatura nao vazia,
+#      tamanho <= 700 KB.
+#   b. Decode base64 da assinatura — 422 se malformado.
+#   c. Carrega a prova com `_carregar_prova_com_scoping(..., lock=True)`.
+#      FOR UPDATE serializa transicoes concorrentes (R3 do plano).
+#   d. 404 se scoping esconde ou ausente.
+#   e. Chama `state_machine.executar_transicao(...)` (sub-bloco A.1).
+#   f. Traduz excecoes de dominio para HTTP (ADR-084):
+#      - TransicaoInvalidaError → 409 (status da prova mudou — race ou
+#        cliente enviou destino invalido). Mensagem "Status da prova mudou.
+#        Recarregue e tente novamente."
+#      - AtorNaoAutorizadoError → 422 (setor/localizacao nao bate)
+#      - ValueError → 422 (motivo ausente / assinatura vazia pos-decode)
+#      - RotaIndeterminavelError → 422 (aprovacao sem localizacao)
+#   g. Commit — se falhar, rollback + 502.
+#   h. Retorna 201 com `TransicaoResponse` contendo a prova atualizada
+#      e a movimentacao criada.
+
+
+def _decode_assinatura(assinatura_base64: str) -> bytes:
+    """Decodifica o base64 da assinatura, levantando HTTPException(422)
+    se o input nao e base64 valido ou resulta em zero bytes apos decode."""
+    try:
+        decoded = base64.b64decode(assinatura_base64, validate=True)
+    except (base64.binascii.Error, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Assinatura base64 invalida",
+        )
+    if not decoded:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Assinatura vazia apos decode",
+        )
+    return decoded
+
+
+@router.post(
+    "/{prova_id}/transicoes",
+    response_model=TransicaoResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def executar_transicao_prova(
+    body: TransicaoRequest,
+    request: Request,
+    prova_id: uuid.UUID = Depends(parse_prova_id),
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> TransicaoResponse:
+    """Executa uma transicao de status para a prova indicada (Componente 11).
+
+    O grosso da logica vive em `state_machine.executar_transicao` (sub-bloco
+    A.1 / ADR-081). Este handler e uma camada fina de:
+      - orquestracao de transacao (load com FOR UPDATE, commit, rollback),
+      - traducao de exceptions de dominio para HTTP,
+      - montagem do response com `MovimentacaoResponse`.
+
+    Ver ADR-084 para as decisoes de desenho (409 para race, separacao de
+    bloco de rendering vs bloco de DB, mapeamento de excecoes).
+    """
+    # (a) Decode base64 da assinatura (422 se malformado).
+    assinatura_bytes = _decode_assinatura(body.assinatura_base64)
+
+    # (b) Carrega a prova com FOR UPDATE + scoping (ADR-084).
+    try:
+        scoped = await _carregar_prova_com_scoping(
+            db, prova_id, current_user, lock=True
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha ao carregar prova %s com FOR UPDATE (user=%s)",
+            prova_id,
+            current_user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar prova",
+        )
+
+    if scoped is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
+        )
+    prova, vendedor_nome, vendedor_localizacao, vendedor_setor = scoped
+
+    # (c) Executa transicao via state_machine. Traduz exceptions para HTTP.
+    try:
+        movimentacao = await executar_transicao(
+            db,
+            prova=prova,
+            status_novo=body.status_novo,
+            usuario=current_user,
+            assinatura_digital=assinatura_bytes,
+            motivo_reprovacao=body.motivo_reprovacao,
+            request=request,
+        )
+    except TransicaoInvalidaError as exc:
+        # ADR-084: toda TransicaoInvalidaError apos FOR UPDATE vira 409.
+        # Pode ser race (outro usuario ja transicionou) ou cliente enviando
+        # destino invalido — em ambos os casos, o cliente deve recarregar e
+        # tentar de novo a partir do estado atual.
+        logger.info(
+            "Transicao invalida apos FOR UPDATE para prova %s (user=%s): %s",
+            prova.id,
+            current_user.id,
+            exc,
+        )
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Status da prova mudou. Recarregue e tente novamente. "
+                f"(detalhe: {exc})"
+            ),
+        )
+    except AtorNaoAutorizadoError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+    except RotaIndeterminavelError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        # Motivo ausente na reprovacao, assinatura vazia (pre-decode).
+        # Nota: TransicaoInvalidaError herda de ValueError, mas por estar
+        # em except mais cedo na cadeia, nao cai aqui. Esse except pega
+        # apenas ValueError "puro" (motivo, assinatura) levantado pelo
+        # `executar_transicao`.
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+    except HTTPException:
+        # Possivel raise do proprio log_audit (fora de escopo, mas evita
+        # que vire 500 silencioso).
+        raise
+    except Exception:
+        logger.exception(
+            "Falha inesperada em executar_transicao para prova %s (user=%s)",
+            prova.id,
+            current_user.id,
+        )
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao executar transicao",
+        )
+
+    # (d) Commit — erro aqui tambem e 502 + rollback.
+    try:
+        await db.commit()
+    except Exception:
+        logger.exception(
+            "Falha ao commitar transicao da prova %s (user=%s)",
+            prova.id,
+            current_user.id,
+        )
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao persistir transicao",
+        )
+
+    logger.info(
+        "Transicao OK: prova=%s de=%s para=%s user=%s ciclo=%d rota=%s",
+        prova.id,
+        movimentacao.status_anterior.value,
+        movimentacao.status_novo.value,
+        current_user.id,
+        movimentacao.ciclo,
+        prova.rota.value if prova.rota else None,
+    )
+
+    # (e) Monta response. `prova` esta mutado in-place (status/rota/ciclo
+    # ja atualizados). `movimentacao.id` pode vir None se o driver nao
+    # retornou RETURNING — mas como fizemos flush antes do commit, o
+    # SQLAlchemy preenche o id automaticamente via server_default.
+    return TransicaoResponse(
+        prova=_build_prova_response(
+            prova, vendedor_nome, vendedor_localizacao, vendedor_setor
+        ),
+        movimentacao=MovimentacaoResponse(
+            id=movimentacao.id,
+            prova_id=movimentacao.prova_id,
+            usuario_id=movimentacao.usuario_id,
+            usuario_nome=current_user.nome,
+            usuario_setor=current_user.setor,
+            status_anterior=movimentacao.status_anterior,
+            status_novo=movimentacao.status_novo,
+            motivo_reprovacao=movimentacao.motivo_reprovacao,
+            ciclo=movimentacao.ciclo,
+            rota_no_momento=movimentacao.rota_no_momento,
+            created_at=movimentacao.created_at or datetime.now(tz=timezone.utc),
+        ),
     )
