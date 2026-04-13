@@ -97,26 +97,6 @@
   cursor: not-allowed;
 }
 
-/* ── Divisor "ou" ─────────────────────────────────────────────────────── */
-
-.divider {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  width: 100%;
-  max-width: 360px;
-  color: var(--color-card-text-muted);
-  font-size: var(--fs-sm);
-}
-
-.divider::before,
-.divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--color-card-divider);
-}
-
 /* ── Entrada manual do codigo ─────────────────────────────────────────── */
 
 .manualInputWrapper {
@@ -128,27 +108,54 @@
   max-width: 420px;
 }
 
-.manualInput {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  font-size: var(--fs-base);
-  font-family: monospace;
-  color: var(--color-card-text);
-  background: var(--color-card-bg);
-  border: 1px solid var(--color-card-border);
-  border-radius: var(--radius-card);
+.manualLabel {
+  font-size: var(--fs-sm);
+  color: var(--color-card-text-muted);
   text-align: center;
 }
 
-.manualInput::placeholder {
-  color: var(--color-card-text-muted);
-  font-family: monospace;
-  font-size: var(--fs-sm);
+.manualInput {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-pill);
+  text-align: center;
 }
 
 .manualInput:focus {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
+}
+
+/* ── Botao escuro (buscar) ────────────────────────────────────────────── */
+
+.darkButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.85rem 2rem;
+  background: var(--color-card-text);
+  color: var(--color-card-bg);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  min-width: 140px;
+}
+
+.darkButton:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.darkButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ── Botao secundario (outline) ────────────────────────────────────────── */

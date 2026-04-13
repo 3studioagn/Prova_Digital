@@ -43,18 +43,23 @@
 | `tsc --noEmit` | limpo | **limpo** |
 | `next lint` | 0 warnings | **0 warnings** |
 | `next build` | OK | **OK** |
-| Bundle `/escanear` | 11.4 kB / 161 kB FL JS | **11.7 kB / 161 kB FL JS** |
+| Bundle `/escanear` | 11.4 kB / 161 kB FL JS | **11.9 kB / 162 kB FL JS** |
+| Bundle `/provas/[id]` | 47.2 kB / 206 kB FL JS | **47.5 kB / 206 kB FL JS** |
 
-Nenhum teste novo adicionado — as mudancas foram frontend-only (UX/fluidez) e backend
-cosmetic (log + remocao de dead code). Os 407 testes existentes cobrem toda a logica
-de dominio sem regressao.
+### Funcionalidade adicional (pos-review, mesma sessao)
+
+| Feature | Descricao | ADR |
+|---------|-----------|-----|
+| Entrada manual de codigo QR | Campo de texto na IdleView do `/escanear` — alternativa a camera | ADR-089 |
+| Codigo copiavel no modal | Payload do QR exibido no modal de etiqueta com botao "Copiar" | ADR-089 |
+| Helper `buildQrPayload()` | Computa payload client-side a partir de dados ja expostos | ADR-089 |
+| Layout Figma | Label + input pill + botao escuro conforme design do Mario | — |
 
 ---
 
 ## 4. Confirmacao de escopo
 
 - Nenhum outro componente foi tocado (C10, C12, C13, C14 intactos).
-- Nenhuma alteracao visual (paleta, tipografia, espacamentos, layout geral).
 - Nenhuma migration, policy RLS ou endpoint adicionado/removido.
 - `alembic_version` permanece `009`.
 - 12 policies RLS intactas.

@@ -13,7 +13,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **0 — Infra** | ✅ **COMPLETA** | Schema Postgres (6 tabelas de dominio + enums + triggers imutabilidade), RLS inicial, R2 bucket, keep-alive cron, CI/CD | 1 |
 | **1 — Auth + RBAC** | ✅ **COMPLETA** (sign-off Sessao 6) | Supabase Auth (ES256 JWKS), CRUD de usuarios com saga auth↔DB, RLS `is_admin=true`, tela `/usuarios` | 1-6 |
 | **2 — Nucleo do Dominio** | ✅ **COMPLETA** (sign-off Sessao 22 pos-auditoria externa) | Cadastro de prova + etiqueta + QR Code (C06), Listagem com filtros (C07), Detalhe + modal etiqueta/QR (C08), Configuracoes do sistema (C09) | 7-22 |
-| **3 — Scanner + Transicoes** | ✅ **COMPLETA** | Camera HTML5, scanner QR, assinatura digital, maquina de estados, reprovacao, roteamento, timeline visual (C12), cancelamento admin (C13), reinicio de ciclo admin (C14) | 23+ |
+| **3 — Scanner + Transicoes** | ✅ **COMPLETA** + Review C11 | Camera HTML5, scanner QR, assinatura digital, maquina de estados, reprovacao, roteamento, timeline visual (C12), cancelamento admin (C13), reinicio de ciclo admin (C14). Review C11: bugs stale error, canvas responsivo, modal fluido, entrada manual de codigo QR | 23+ |
 | **4 — Dashboard + Atrasos** | ⏳ | Dashboard tempo real, contadores, calculo de atraso (RN-008), Realtime via Supabase | — |
 | **5 — Relatorios + Export** | ⏳ | CSV export, metricas por vendedor, dashboards gerenciais | — |
 | **6 — Auditoria + Polish** | ⏳ | Tela de audit_log, cleanup de orfaos R2, rotacao de secrets, hardening final | — |
@@ -43,7 +43,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 - `/provas` — Wave 2 C07 (listagem + filtros URL-persisted + paginacao)
 - `/provas/[id]` — Wave 2 C08 (detalhe + modal etiqueta/QR + timeline placeholder)
 - `/configuracoes` — Wave 2 C09 (tempo atraso + template etiqueta)
-- `/escanear` — Wave 3 C10+C11 (scanner QR + assinatura digital + transicao de status)
+- `/escanear` — Wave 3 C10+C11 (scanner QR + assinatura digital + transicao de status + entrada manual de codigo QR)
 
 **Itens do menu ainda inativos (placeholders para Waves futuras):**
 - "Dashboard" — Wave 4
@@ -181,8 +181,8 @@ provaDigital/
 │       │   ├── useProvaDetail.ts        # Wave 2 C08 — GET detail + imagem-url + movimentacoes
 │       │   ├── useConfiguracoes.ts      # Wave 2 C09 — GET list + PATCH por chave
 │       │   ├── useScanner.ts            # Wave 3 C10 — wrapper html5-qrcode (SSR-safe + cleanup)
-│       │   ├── useScanProva.ts          # Wave 3 C10 — POST /scan wrapper
-│       │   ├── useExecutarTransicao.ts  # Wave 3 C11 — POST /{id}/transicoes wrapper
+│       │   ├── useScanProva.ts          # Wave 3 C10 — POST /scan wrapper (retorna {data,error})
+│       │   ├── useExecutarTransicao.ts  # Wave 3 C11 — POST /{id}/transicoes wrapper (retorna {data,error,isConflict})
 │       │   ├── useCurrentUser.ts        # Wave 3 C13 — GET /users/me para detectar admin
 │       │   ├── useCancelarProva.ts      # Wave 3 C13 — POST /{id}/cancelar wrapper
 │       │   └── useReiniciarCiclo.ts     # Wave 3 C14 — POST /{id}/reiniciar-ciclo wrapper

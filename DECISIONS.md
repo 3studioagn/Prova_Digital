@@ -2544,3 +2544,22 @@ A constante `ASSINATURA_BASE64_MAX_BYTES` e exportada de `lib/types/prova.ts` �
 **Decisao:** Ambos os endpoints fazem validacao previa (cancelar: `pode_cancelar(status)`, reiniciar: `status != REPROVADA`) ANTES de chamar `executar_transicao`. Retornam 409 diretamente se a condicao falha.
 **Por que:** Evita entrar na logica completa de `executar_transicao` para rejeitar estados obvios. O 409 com mensagem especifica ("nao pode ser cancelada" / "so permitido para provas reprovadas") e mais informativo que o generico "Transicao invalida" da state machine.
 **Consequencia:** Dupla validacao (endpoint + state_machine), mas o custo e negligivel e a UX e melhor.
+
+---
+
+## ADR-089 — Entrada manual de codigo QR + payload copiavel (Review C11)
+**Data:** 2026-04-13 (Review C11)
+**Contexto:** O scan por camera e o unico metodo para identificar provas no fluxo de transicao. Em cenarios onde a camera nao funciona, o QR esta danificado, ou o usuario esta em desktop, nao ha alternativa. Mario solicitou uma segunda opcao de entrada.
+
+### Decisao 1 — Computar payload client-side via `buildQrPayload()`
+**Decisao:** Helper frontend `buildQrPayload(nroRequerimento, qrCodeHash)` computa `3SD|{nro}|{hash[:16]}` usando dados ja expostos no `ProvaResponse`. Zero mudanca no backend.
+**Por que:** O `POST /scan` ja aceita o payload como texto. O payload e deterministic: `nro_requerimento` e `qr_code_hash` sao publicos no response. Adicionar um campo novo no backend seria desnecessario.
+**Risco aceito:** Constantes `3SD`, `|` e `16` sao hardcoded no frontend, acoplando ao formato do backend. Aceitavel: o formato e estavel desde a Wave 2 e documentado no ADR-033.
+
+### Decisao 2 — Exibir payload copiavel no modal de etiqueta
+**Decisao:** O modal `VisualizarEtiquetaModal` mostra o payload em input readonly + botao "Copiar" com feedback "Copiado!". Fallback `document.execCommand("copy")` para browsers sem Clipboard API.
+**Por que:** O usuario precisa de acesso ao codigo para poder digita-lo em outro dispositivo. O modal de etiqueta e o local natural — ja mostra o QR Code visual.
+
+### Decisao 3 — Input manual na IdleView do /escanear
+**Decisao:** Campo de texto abaixo do botao "Abrir camera" com label "Inserir codigo manual:" e botao "Buscar". Ao submeter, transiciona direto para `scan-loading` com o payload digitado — mesmo fluxo do scan por camera.
+**Por que:** Reusa 100% do backend existente. O `POST /scan` valida formato + hash constant-time. Se o codigo for invalido, o usuario ve o erro especifico do backend (B-01 ja corrigido nesta sessao).

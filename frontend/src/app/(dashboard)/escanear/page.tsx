@@ -331,24 +331,20 @@ function IdleView({
         Abrir camera
       </button>
 
-      <div className={styles.divider}>
-        <span>ou</span>
-      </div>
-
       <form className={styles.manualInputWrapper} onSubmit={handleManual}>
+        <label className={styles.manualLabel}>Inserir codigo manual:</label>
         <input
           type="text"
           className={styles.manualInput}
-          placeholder="Ex: 3SD|REQ-001|a1b2c3d4e5f67890"
           value={codigoManual}
           onChange={(e) => setCodigoManual(e.target.value)}
         />
         <button
           type="submit"
-          className={styles.secondaryButton}
+          className={styles.darkButton}
           disabled={!codigoManual.trim()}
         >
-          Buscar prova
+          Buscar
         </button>
       </form>
     </div>

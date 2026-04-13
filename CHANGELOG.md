@@ -2,6 +2,35 @@
 
 ---
 
+## [2026-04-13 — Wave 3 Review C11] — Entrada manual de codigo QR + ajuste layout Figma
+
+### Contexto
+
+Apos a revisao critica, Mario solicitou entrada manual de codigo QR como alternativa
+a camera e ajuste de layout conforme design Figma (mobile-first).
+
+### Entregue
+
+- **Entrada manual:** Campo de texto na tela `/escanear` para digitar o codigo do QR
+  (`3SD|REQ-001|hash`). Usa o mesmo `POST /scan` do backend — zero mudancas backend.
+- **Codigo copiavel:** Modal de etiqueta (`/provas/[id]`) agora exibe o codigo do QR
+  com botao "Copiar" + feedback "Copiado!".
+- **Helper `buildQrPayload()`:** Computa o payload client-side a partir de
+  `nro_requerimento` + `qr_code_hash` (ja expostos pela API).
+- **Layout Figma:** Label "Inserir codigo manual:" + input pill + botao "Buscar" escuro.
+  Removido divisor "ou".
+
+### Arquivos modificados
+
+- `frontend/src/lib/types/prova.ts` — +`buildQrPayload()` helper
+- `frontend/src/app/(dashboard)/provas/[id]/VisualizarEtiquetaModal.tsx` — +codigo copiavel
+- `frontend/src/app/(dashboard)/provas/[id]/page.tsx` — +props `qrCodeHash` ao modal
+- `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css` — +estilos payload box
+- `frontend/src/app/(dashboard)/escanear/page.tsx` — +IdleView com input manual + layout Figma
+- `frontend/src/app/(dashboard)/escanear/escanear.module.css` — +estilos manual input + dark button
+
+---
+
 ## [2026-04-13 — Wave 3 Review C11] — Revisao critica do Componente 11
 
 ### Contexto
