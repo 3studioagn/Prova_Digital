@@ -468,3 +468,26 @@ def sanitize_filename(filename: str) -> str:
         stem = stem[:max_stem]
         return f"{stem}.{ext}"
     return stem[:max_total]
+
+
+# ─── Cancelamento + Reinicio de Ciclo (Componentes 13 e 14 — Wave 3 Lote C) ─
+
+
+class CancelarRequest(BaseModel):
+    """Payload de POST /api/v1/provas/{id}/cancelar (Componente 13).
+
+    Apenas o motivo e obrigatorio (RF-010). A assinatura e gerada como
+    marcador administrativo pelo endpoint — sem canvas de assinatura.
+    """
+
+    motivo_cancelamento: str = Field(
+        ..., min_length=1, max_length=500, description="Motivo do cancelamento (RF-010)"
+    )
+
+    @field_validator("motivo_cancelamento")
+    @classmethod
+    def _strip_motivo(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Motivo do cancelamento nao pode ser vazio")
+        return v

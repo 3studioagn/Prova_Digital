@@ -6,10 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 import { useProvaDetail } from "@/hooks/useProvaDetail";
 import {
   ROTA_LABELS,
-  STATUS_LABELS,
   type Rota,
 } from "@/lib/types/prova";
+import { AdminActions } from "./AdminActions";
 import { VisualizarEtiquetaModal } from "./VisualizarEtiquetaModal";
+import { Timeline } from "./Timeline";
 import styles from "./detalhe.module.css";
 
 function formatDate(iso: string): string {
@@ -211,6 +212,7 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                     >
                       Baixar etiqueta
                     </button>
+                    <AdminActions prova={prova} onActionComplete={reload} />
                   </div>
                 </div>
 
@@ -251,43 +253,7 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                 <h2 className={styles.timelineTitle}>
                   Historico de movimentacoes
                 </h2>
-                {movimentacoes && movimentacoes.total === 0 && (
-                  <div className={styles.timelineEmpty}>
-                    <p>Esta prova ainda nao teve movimentacoes.</p>
-                    <p className={styles.timelineHint}>
-                      A timeline visual fica disponivel quando a prova for
-                      escaneada pela primeira vez.
-                    </p>
-                  </div>
-                )}
-                {movimentacoes && movimentacoes.total > 0 && (
-                  <ul className={styles.timelineList}>
-                    {movimentacoes.items.map((m) => (
-                      <li key={m.id} className={styles.timelineItem}>
-                        <div className={styles.timelineHeader}>
-                          <span className={styles.timelineStatus}>
-                            {STATUS_LABELS[m.status_anterior]} →{" "}
-                            {STATUS_LABELS[m.status_novo]}
-                          </span>
-                          <span className={styles.timelineDate}>
-                            {formatDate(m.created_at)}
-                          </span>
-                        </div>
-                        <div className={styles.timelineMeta}>
-                          Por <strong>{m.usuario_nome}</strong> ({m.usuario_setor})
-                          · Ciclo {m.ciclo}
-                          {m.rota_no_momento &&
-                            ` · ${ROTA_LABELS[m.rota_no_momento]}`}
-                        </div>
-                        {m.motivo_reprovacao && (
-                          <div className={styles.timelineMotivo}>
-                            Motivo: {m.motivo_reprovacao}
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <Timeline movimentacoes={movimentacoes} prova={prova} />
               </section>
             </section>
 

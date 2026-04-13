@@ -2473,3 +2473,74 @@ A constante `ASSINATURA_BASE64_MAX_BYTES` e exportada de `lib/types/prova.ts` �
 - **Backend:** `https://provadigital-production.up.railway.app`
 - **Frontend:** `https://prova-digital-five.vercel.app`
 - **Health check:** `https://provadigital-production.up.railway.app/health`
+
+---
+
+## ADR-087 — Timeline Visual: Framer Motion + componente extraido + buildTimelineNodes puro (Wave 3 Lote B / Componente 12)
+**Data:** 2026-04-13 (Wave 3 Lote B)
+**Contexto:** Componente 12 substitui o placeholder `<ul>` de movimentacoes na pagina `/provas/[id]` por uma timeline visual animada. O DAT v2.0 especifica Framer Motion como lib de animacao.
+
+### Decisao 1 — Componente `Timeline.tsx` extraido (nao inline na page.tsx)
+**Decisao:** Criar `Timeline.tsx` como componente separado no mesmo diretorio, recebendo `movimentacoes` e `prova` como props.
+**Alternativa rejeitada:** Manter tudo inline na `page.tsx` como o placeholder fazia.
+**Por que extrair:**
+  - A page.tsx ja tem ~280 linhas (dados + arte + modal + breadcrumb). Adicionar ~180 linhas de timeline inline ultrapassaria 400 linhas.
+  - O componente Timeline tem logica de transformacao de dados (`buildTimelineNodes`) que se beneficia do isolamento.
+  - Passivo para Lote C: se C13/C14 quiserem renderizar timeline em outro contexto (ex: modal de confirmacao de cancelamento), o componente e importavel.
+**Consequencia:** 2 arquivos novos (`Timeline.tsx` + `timeline.module.css`) em vez de editar 1 arquivo existente.
+
+### Decisao 2 — `buildTimelineNodes` como funcao pura (nao hook)
+**Decisao:** Funcao pura `buildTimelineNodes(movimentacoes, prova) -> TimelineNode[]` que transforma os dados da API em nos renderizaveis. Chamada diretamente no corpo do componente (sem `useMemo` — o custo e desprezivel para <50 nos).
+**Alternativa rejeitada:** `useMemo` com deps em movimentacoes/prova. Rejeitado porque a referencia de `movimentacoes` muda a cada re-render do `useProvaDetail` (shallow equality falha), e o custo da transformacao e O(n) com n < 50.
+**Por que pura:** testavel sem DOM, deterministica, sem side effects. O modelo de dados `TimelineNode` facilita o mapeamento para JSX com flags booleanas (`isCurrent`, `isReprovacao`, `isCancelamento`, `isTerminal`, `isRoteamento`).
+
+### Decisao 3 — No implicito "Criada" no inicio do ciclo 1
+**Decisao:** Adicionar um no "Criada" com `id="initial-criada"`, `usuarioSetor="STUDIO"` e `createdAt=prova.created_at` no inicio da timeline. Este no nao corresponde a uma movimentacao — representa o estado inicial da prova quando foi criada via `POST /provas`.
+**Por que:** A primeira movimentacao real (CRIADA→RETIRADA) nao captura o momento da criacao — apenas o momento da retirada. Sem o no implicito, o usuario nao veria quando a prova entrou no sistema. Para ciclos subsequentes (reinicio), o no CRIADA ja existe como `status_novo` de uma movimentacao real (REPROVADA→CRIADA).
+**Consequencia:** `usuarioNome: "3Studio"` e uma aproximacao — o sistema nao retorna quem criou a prova em `ProvaResponse`. Suficiente porque apenas admins 3Studio criam provas.
+
+### Decisao 4 — Agrupamento por `ciclo` da movimentacao (nao por `ciclo_atual` da prova)
+**Decisao:** Agrupar nos por `movimentacao.ciclo`, nao por `prova.ciclo_atual`. Cada grupo recebe um separador "Ciclo N" quando ha mais de um ciclo.
+**Por que:** `prova.ciclo_atual` e o ciclo corrente (escalar). `movimentacao.ciclo` e o ciclo no momento daquela transicao — permite reconstruir o historico. Semantica de ciclo no backend (ADR-081): a movimentacao de reinicio (REPROVADA→CRIADA) recebe `ciclo=N+1` (o novo ciclo), agrupando-se com as movimentacoes subsequentes do novo ciclo.
+
+### Decisao 5 — Framer Motion `motion.div` com staggered entrance
+**Decisao:** Cada no da timeline e um `motion.div` com variantes `hidden → visible`, delay incremental de 70ms por no (`delay: i * 0.07`). O no atual recebe um `motion.div` interno para a animacao de pulso do ponto (`scale + opacity` em loop infinito).
+**Alternativa rejeitada:** CSS `@keyframes` para o pulso. Rejeitado porque Framer Motion ja esta no bundle e oferece mais controle (ex: parar animacao quando nao visivel).
+**Alternativa rejeitada:** `AnimatePresence` para animacao de saida. Rejeitado — a timeline nao remove nos dinamicamente; uma vez renderizada, so atualiza via refetch completo.
+**Impacto no bundle:** `/provas/[id]` foi de ~11 kB (Wave 2) para 46 kB. O delta (~35 kB) e primariamente Framer Motion (tree-shaken). Aceitavel para uma pagina com animacoes.
+
+### Decisao 6 — CSS Module separado (`timeline.module.css`)
+**Decisao:** Criar `timeline.module.css` em vez de adicionar classes ao `detalhe.module.css` existente.
+**Por que:** As classes antigas do placeholder (`timelineList`, `timelineItem`, `timelineHeader`, `timelineStatus`, `timelineDate`, `timelineMeta`, `timelineMotivo`) foram removidas do `detalhe.module.css`. O novo CSS e semanticamente distinto (nos verticais, conectores, badges, pulso) e nao compartilha classes com o restante do detalhe. Separar mantém cada CSS Module focado.
+**Consequencia:** `detalhe.module.css` mantem `timelineCard` e `timelineTitle` (container e titulo do card preto). `timeline.module.css` cuida de tudo dentro.
+
+---
+
+## ADR-088 — Cancelamento + Reinicio de Ciclo: endpoints admin dedicados com assinatura sintetica (Wave 3 Lote C / Componentes 13+14)
+**Data:** 2026-04-13 (Wave 3 Lote C)
+**Contexto:** Componentes 13 (RF-010, RN-005) e 14 (RF-008, RN-006) implementam acoes administrativas que nao passam pelo fluxo de scan + assinatura visual do Componente 11. A `executar_transicao` (Lote A) suporta ambas as transicoes mecanicamente, mas requer `assinatura_digital` nao-vazia e rejeita CANCELADA/CRIADA via `TransicaoRequest` no endpoint de transicao generico.
+
+### Decisao 1 — Endpoints dedicados em vez de estender POST /transicoes
+**Decisao:** Criar `POST /{id}/cancelar` e `POST /{id}/reiniciar-ciclo` como endpoints separados, ambos usando `get_admin_user`.
+**Alternativa rejeitada:** Estender `POST /{id}/transicoes` para aceitar CANCELADA e CRIADA. Rejeitado porque: (a) misturaria acoes admin com acoes de scan/assinatura, (b) o `TransicaoRequest` exige `assinatura_base64` obrigatorio, (c) o Lote A explicitamente rejeita esses destinos como gancho para endpoints dedicados.
+**Consequencia:** 28 rotas backend (26 → 28). Contratos do Lote A intactos.
+
+### Decisao 2 — Assinatura sintetica `ACAO_ADMINISTRATIVA:{acao}:{nome}`
+**Decisao:** Os endpoints geram `f"ACAO_ADMINISTRATIVA:{acao}:{usuario.nome}".encode("utf-8")` e passam para `executar_transicao` como `assinatura_digital`.
+**Alternativa rejeitada:** Tornar `assinatura_digital` nullable (requer migration Alembic + alteracao da `executar_transicao`).
+**Alternativa rejeitada:** Exigir assinatura visual mesmo para admin (adiciona friccao UX sem beneficio — admin ja esta autenticado + audit log registra tudo).
+**Por que sintetica:**
+  1. `executar_transicao` nao e modificada — contrato Lote A preservado.
+  2. `movimentacoes.assinatura_digital BYTEA NOT NULL` satisfeito sem migration.
+  3. O marcador e semanticamente util: identifica que foi acao admin, quem executou.
+  4. O `audit_log.detalhes_json` ja registra o contexto completo (acao, usuario, prova).
+
+### Decisao 3 — `useCurrentUser` hook dedicado (nao React Context do layout)
+**Decisao:** Criar `useCurrentUser()` que chama `GET /api/v1/users/me` e retorna `{ user, loading }`. Usado na detail page para condicionar botoes admin.
+**Alternativa rejeitada:** Criar React Context no layout e prover `user` para children. Rejeitado porque requer modificar `layout.tsx` (Wave 1) e adicionar context provider.
+**Por que hook dedicado:** Zero alteracao em codigo existente. A duplicacao da request (layout ja busca /me) e desprezivel (<1 KB response). `didFetch` ref previne re-fetches em re-renders.
+
+### Decisao 4 — Validacao rapida antes de `executar_transicao`
+**Decisao:** Ambos os endpoints fazem validacao previa (cancelar: `pode_cancelar(status)`, reiniciar: `status != REPROVADA`) ANTES de chamar `executar_transicao`. Retornam 409 diretamente se a condicao falha.
+**Por que:** Evita entrar na logica completa de `executar_transicao` para rejeitar estados obvios. O 409 com mensagem especifica ("nao pode ser cancelada" / "so permitido para provas reprovadas") e mais informativo que o generico "Transicao invalida" da state machine.
+**Consequencia:** Dupla validacao (endpoint + state_machine), mas o custo e negligivel e a UX e melhor.

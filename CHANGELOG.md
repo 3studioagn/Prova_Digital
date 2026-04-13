@@ -2,6 +2,129 @@
 
 ---
 
+## [2026-04-13 — Wave 3 Lote C] — Componentes 13+14: Cancelamento + Reinicio de Ciclo
+
+### Contexto
+
+Componentes 13 e 14 do Backlog v3.0 — acoes administrativas de cancelamento de
+prova (RF-010, RN-005) e reinicio de ciclo apos reprovacao (RF-008, RN-006).
+Endpoints dedicados admin-only que reutilizam `executar_transicao` sem modifica-la.
+
+### Entregue
+
+**Backend (2 endpoints novos):**
+- `POST /api/v1/provas/{id}/cancelar` — admin-only, motivo obrigatorio, assinatura
+  sintetica (marcador administrativo), chama `executar_transicao(CANCELADA)`.
+- `POST /api/v1/provas/{id}/reiniciar-ciclo` — admin-only, sem body, assinatura
+  sintetica, chama `executar_transicao(CRIADA)`, incrementa ciclo, reseta rota.
+- `CancelarRequest` schema (Pydantic v2, min 1 / max 500 chars + strip validator).
+- 18 testes novos (10 C13 + 8 C14): **407 passed**, 0 regressoes.
+
+**Frontend (4 arquivos novos):**
+- `useCurrentUser` — hook GET /users/me para detectar admin.
+- `useCancelarProva` — hook POST /cancelar.
+- `useReiniciarCiclo` — hook POST /reiniciar-ciclo.
+- `AdminActions.tsx` — botoes + modais de confirmacao na pagina de detalhe.
+  Visivel apenas para admins. Cancelar (vermelho) visivel quando ativa.
+  Reiniciar (amarelo) visivel apenas quando REPROVADA.
+
+**Banco de dados:** zero alteracoes. `alembic_version` = 009. 12 policies RLS intactas.
+
+### Validacoes
+
+- `tsc --noEmit`: limpo
+- `next lint`: 0 warnings
+- `next build`: OK (47.2 kB / 206 kB FL JS para `/provas/[id]`)
+- Backend: 407 passed, 1 warning pre-existente
+- Ruff: limpo
+
+### Arquivos criados
+
+- `frontend/src/hooks/useCurrentUser.ts`
+- `frontend/src/hooks/useCancelarProva.ts`
+- `frontend/src/hooks/useReiniciarCiclo.ts`
+- `frontend/src/app/(dashboard)/provas/[id]/AdminActions.tsx`
+- `WAVE3_LOTE_C_ANALYSIS.md`
+- `WAVE3_LOTE_C_CLOSEOUT.md`
+
+### Arquivos modificados
+
+- `backend/app/api/v1/provas.py` — +2 endpoints + import CancelarRequest + import pode_cancelar
+- `backend/app/domain/schemas/prova.py` — +CancelarRequest schema
+- `backend/tests/test_provas_api.py` — +18 testes
+- `frontend/src/app/(dashboard)/provas/[id]/page.tsx` — import + render AdminActions
+- `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css` — estilos admin
+- `CHANGELOG.md` — esta entrada
+- `DECISIONS.md` — ADR-088
+- `CLAUDE.md` — status Wave 3 + rotas + estrutura
+
+---
+
+## [2026-04-13 — Wave 3 Lote B] — Componente 12: Timeline Visual de Estagios
+
+### Contexto
+
+Componente 12 do Backlog v3.0 — substitui o placeholder de historico de
+movimentacoes na pagina de detalhe da prova (`/provas/[id]`) por uma timeline
+visual com Framer Motion, agrupamento por ciclo, indicacao de rota, destaque
+de reprovacao e animacoes de entrada.
+
+### Entregue
+
+**Frontend:**
+- `Timeline.tsx` — componente completo com `buildTimelineNodes()` (transformacao
+  de dados pura) + renderizacao visual: nos verticais conectados, badges de rota
+  e "Atual", destaque vermelho para reprovacao com motivo, agrupamento por ciclo
+  com separador, tratamento de cancelamento, indicador pulsante via Framer Motion.
+- `timeline.module.css` — CSS Module dedicado (~150 linhas) com design tokens
+  do projeto (fundo preto do card, cores accent/danger/success/dim).
+- `page.tsx` atualizado — placeholder `<ul>` substituido por `<Timeline>`.
+- `detalhe.module.css` atualizado — classes antigas de timeline removidas.
+- `framer-motion@12.38.0` adicionado como dependencia.
+
+**Backend:**
+- Zero alteracoes. 389 testes passando, 0 regressoes.
+
+**Banco de dados:**
+- Zero alteracoes. `alembic_version` permanece `009`. 12 policies RLS intactas.
+
+### Criterios US-011 atendidos
+
+| # | Criterio | Implementacao |
+|---|---|---|
+| 1 | Timeline exibe todos os estagios percorridos, incluindo ramificacoes | Cada movimentacao gera um no; rota padrao e direta produzem sequencias distintas |
+| 2 | Cada etapa concluida mostra responsavel e data/hora | `usuario_nome`, `usuario_setor` e `created_at` (data + hora pt-BR) em cada no |
+| 3 | Reprovacoes com motivo e destaque visual | No vermelho (`--color-danger`) + callout do motivo |
+| 4 | Rota seguida indicada | Badge "Rota padrao" ou "Rota direta" no no APROVADA_PELO_VENDEDOR |
+| 5 | Etapa atual destacada visualmente | Glow + badge "Atual" + animacao de pulso via Framer Motion |
+
+### Validacoes
+
+- `tsc --noEmit`: limpo
+- `next lint`: 0 warnings
+- `next build`: OK (46 kB page / 204 kB FL JS para `/provas/[id]`)
+- Backend: 389 passed, 1 warning pre-existente
+- Console/server errors: 0
+
+### Arquivos criados
+
+- `frontend/src/app/(dashboard)/provas/[id]/Timeline.tsx`
+- `frontend/src/app/(dashboard)/provas/[id]/timeline.module.css`
+- `WAVE3_LOTE_B_ANALYSIS.md`
+- `WAVE3_LOTE_B_CLOSEOUT.md`
+
+### Arquivos modificados
+
+- `frontend/src/app/(dashboard)/provas/[id]/page.tsx` — import Timeline + substituir placeholder
+- `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css` — remover classes antigas
+- `frontend/package.json` — +framer-motion
+- `frontend/package-lock.json` — atualizado
+- `CHANGELOG.md` — esta entrada
+- `DECISIONS.md` — ADR-087
+- `CLAUDE.md` — status Wave 3
+
+---
+
 ## [2026-04-13 — Wave 3 Lote A · Deploy] — Deploy em producao (Railway + Vercel)
 
 ### Contexto

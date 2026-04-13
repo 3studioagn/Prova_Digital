@@ -13,7 +13,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **0 — Infra** | ✅ **COMPLETA** | Schema Postgres (6 tabelas de dominio + enums + triggers imutabilidade), RLS inicial, R2 bucket, keep-alive cron, CI/CD | 1 |
 | **1 — Auth + RBAC** | ✅ **COMPLETA** (sign-off Sessao 6) | Supabase Auth (ES256 JWKS), CRUD de usuarios com saga auth↔DB, RLS `is_admin=true`, tela `/usuarios` | 1-6 |
 | **2 — Nucleo do Dominio** | ✅ **COMPLETA** (sign-off Sessao 22 pos-auditoria externa) | Cadastro de prova + etiqueta + QR Code (C06), Listagem com filtros (C07), Detalhe + modal etiqueta/QR (C08), Configuracoes do sistema (C09) | 7-22 |
-| **3 — Scanner + Transicoes** | 🟡 **LOTE A COMPLETO** | Camera HTML5, scanner QR, assinatura digital, maquina de estados (executar_transicao), reprovacao, roteamento por localizacao. Faltam: timeline visual (C12/Lote B), cancelamento (C13/Lote C), reinicio de ciclo (C14/Lote C) | 23+ |
+| **3 — Scanner + Transicoes** | ✅ **COMPLETA** | Camera HTML5, scanner QR, assinatura digital, maquina de estados, reprovacao, roteamento, timeline visual (C12), cancelamento admin (C13), reinicio de ciclo admin (C14) | 23+ |
 | **4 — Dashboard + Atrasos** | ⏳ | Dashboard tempo real, contadores, calculo de atraso (RN-008), Realtime via Supabase | — |
 | **5 — Relatorios + Export** | ⏳ | CSV export, metricas por vendedor, dashboards gerenciais | — |
 | **6 — Auditoria + Polish** | ⏳ | Tela de audit_log, cleanup de orfaos R2, rotacao de secrets, hardening final | — |
@@ -26,13 +26,13 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 - **3 usuarios ativos**: 2 admins (`admin@3studio.com.br` + `ops@3studio.com.br`) + 1 vendedor FILIAL (`mariosouza@teste.com.br`)
 - **Advisor Supabase limpo** exceto: 1 INFO `rls_enabled_no_policy` em `alembic_version` (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection` (WONTFIX plano pago, ADR-027)
 
-**Endpoints publicos em producao (26 rotas):**
+**Endpoints publicos em producao (28 rotas):**
 
 | Prefix | Endpoints | Wave |
 |---|---|---|
 | `/api/v1/users` | `GET /me`, `GET /`, `GET /{id}`, `POST /`, `PATCH /{id}`, `DELETE /{id}` | 1 |
 | `/api/v1/provas` | `POST /upload-url`, `POST /`, `GET /`, `GET /{id}`, `GET /{id}/imagem-url`, `GET /{id}/movimentacoes`, `GET /{id}/etiqueta.pdf`, `GET /{id}/qr-code.png` | 2 |
-| `/api/v1/provas` | `POST /scan`, `POST /{id}/transicoes` | 3 |
+| `/api/v1/provas` | `POST /scan`, `POST /{id}/transicoes`, `POST /{id}/cancelar`, `POST /{id}/reiniciar-ciclo` | 3 |
 | `/api/v1/configuracoes` | `GET /`, `GET /{chave}`, `PATCH /{chave}` | 2 |
 | `/health*` | `/health`, `/health/db`, `/health/r2` | 0 |
 
@@ -166,7 +166,7 @@ provaDigital/
 │       ├── test_provas_api.py   # 59 testes Wave 2 C06+C07+C08 (15+23+21)
 │       └── test_configuracoes_api.py # 26 testes Wave 2 C09 — endpoints configuracoes
 ├── frontend/
-│   ├── package.json             # Next.js 14, @supabase/ssr, @supabase/supabase-js
+│   ├── package.json             # Next.js 14, @supabase/ssr, @supabase/supabase-js, framer-motion
 │   ├── tsconfig.json            # strict, ES2017, path aliases @/*
 │   ├── next.config.js
 │   ├── public/images/
@@ -182,7 +182,10 @@ provaDigital/
 │       │   ├── useConfiguracoes.ts      # Wave 2 C09 — GET list + PATCH por chave
 │       │   ├── useScanner.ts            # Wave 3 C10 — wrapper html5-qrcode (SSR-safe + cleanup)
 │       │   ├── useScanProva.ts          # Wave 3 C10 — POST /scan wrapper
-│       │   └── useExecutarTransicao.ts  # Wave 3 C11 — POST /{id}/transicoes wrapper
+│       │   ├── useExecutarTransicao.ts  # Wave 3 C11 — POST /{id}/transicoes wrapper
+│       │   ├── useCurrentUser.ts        # Wave 3 C13 — GET /users/me para detectar admin
+│       │   ├── useCancelarProva.ts      # Wave 3 C13 — POST /{id}/cancelar wrapper
+│       │   └── useReiniciarCiclo.ts     # Wave 3 C14 — POST /{id}/reiniciar-ciclo wrapper
 │       ├── lib/
 │       │   ├── api.ts           # apiFetch wrapper (token injection, ApiError). Nao usar p/ binarios
 │       │   ├── types/
@@ -212,8 +215,11 @@ provaDigital/
 │               ├── provas/      # Wave 2 (Componentes 07 + 08)
 │               │   ├── page.tsx # C07: listagem + filtros URL-persisted + paginacao
 │               │   ├── provas.module.css
-│               │   └── [id]/    # C08: detalhe
-│               │       ├── page.tsx                     # dados + arte + timeline placeholder
+│               │   └── [id]/    # C08: detalhe + C12: timeline + C13/C14: admin actions
+│               │       ├── page.tsx                     # dados + arte + timeline + admin actions
+│               │       ├── Timeline.tsx                 # C12: timeline visual com Framer Motion
+│               │       ├── timeline.module.css          # C12: estilos da timeline
+│               │       ├── AdminActions.tsx             # C13/C14: botoes cancelar + reiniciar + modais
 │               │       ├── VisualizarEtiquetaModal.tsx  # modal PDF + QR code
 │               │       └── detalhe.module.css
 │               ├── escanear/     # Wave 3 (Componentes 10 + 11)

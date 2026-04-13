@@ -253,75 +253,114 @@
   letter-spacing: -0.015em;
 }
 
-.timelineEmpty {
-  padding: 1.5rem 0 0.5rem;
-  text-align: center;
-  color: var(--color-text-secondary);
+/* Classes de timeline movidas para timeline.module.css (Wave 3 Lote B — C12) */
+
+/* ── Acoes administrativas (Wave 3 Lote C — C13/C14) ────────────────── */
+
+.adminSection {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-card-divider);
 }
 
-.timelineEmpty p {
-  margin-bottom: 0.4rem;
-  font-size: 0.95rem;
-}
-
-.timelineHint {
-  font-size: 0.85rem;
-  color: var(--color-text-dim);
-  font-style: normal;
-}
-
-.timelineList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.timelineItem {
-  padding: 1rem 1.25rem;
-  background: var(--color-bg-surface-2, #2a2a2a);
-  border-radius: 0.75rem;
-  border-left: 3px solid var(--color-accent);
-}
-
-.timelineHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.5rem;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.timelineStatus {
-  font-weight: 600;
-  font-size: var(--fs-sm);
-  color: #ffffff;
-}
-
-.timelineDate {
+.adminDivider {
   font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-card-text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.adminButtons {
+  display: flex;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.btnDanger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.85rem 1.5rem;
+  background: var(--color-danger);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  min-width: 180px;
+}
+
+.btnDanger:hover:not(:disabled) {
+  background: var(--color-danger-hover);
+}
+
+.btnDanger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Modal de confirmacao admin ──────────────────────────────────────── */
+
+.adminModalContent {
+  width: 100%;
+  max-width: 500px;
+  background: #000;
+  border-radius: var(--radius-card-lg);
+  border: 1px solid #333;
+  padding: 2rem;
+}
+
+.adminModalTitle {
+  font-size: var(--fs-h2);
+  font-weight: 500;
+  color: #fff;
+  margin-bottom: 0.75rem;
+}
+
+.adminModalDesc {
+  font-size: var(--fs-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 1.25rem;
+}
+
+.adminModalTextarea {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  resize: vertical;
+  margin-bottom: 0.75rem;
+}
+
+.adminModalTextarea::placeholder {
   color: var(--color-text-dim);
 }
 
-.timelineMeta {
-  font-size: var(--fs-sm);
-  color: var(--color-text-secondary);
+.adminModalTextarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
 }
 
-.timelineMeta strong {
-  color: #ffffff;
+.adminModalError {
+  font-size: var(--fs-sm);
+  color: var(--color-danger);
+  margin-bottom: 0.75rem;
 }
 
-.timelineMotivo {
-  margin-top: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  background: color-mix(in srgb, var(--color-danger) 20%, transparent);
-  border-radius: 0.375rem;
-  font-size: var(--fs-sm);
-  color: #ffffff;
+.adminModalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
 }
 
 

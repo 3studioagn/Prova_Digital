@@ -3061,3 +3061,314 @@ def test_transicao_request_strip_motivo_aceita_none_explicito():
         motivo_reprovacao=None,
     )
     assert req.motivo_reprovacao is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# POST /{id}/cancelar — Componente 13 (Wave 3 Lote C)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def test_cancelar_happy_prova_criada(admin_user, mock_db):
+    """C13 — admin cancela prova em CRIADA. Motivo gravado, status=CANCELADA."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(vendedor_id=uuid.uuid4(), status_prova=StatusProvaEnum.CRIADA)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor Teste", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/cancelar",
+            json={"motivo_cancelamento": "Prova duplicada"},
+        )
+
+    assert resp.status_code == 200, resp.json()
+    data = resp.json()
+    assert data["prova"]["status"] == "CANCELADA"
+    assert data["prova"]["motivo_cancelamento"] == "Prova duplicada"
+    assert data["movimentacao"]["status_anterior"] == "CRIADA"
+    assert data["movimentacao"]["status_novo"] == "CANCELADA"
+    assert prova.status == StatusProvaEnum.CANCELADA
+    mock_db.commit.assert_awaited_once()
+
+
+async def test_cancelar_happy_prova_retirada(admin_user, mock_db):
+    """C13 — cancelar prova em RETIRADA_PELO_VENDEDOR (estado ativo)."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(status_prova=StatusProvaEnum.RETIRADA_PELO_VENDEDOR)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor X", LocalizacaoEnum.FILIAL),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/cancelar",
+            json={"motivo_cancelamento": "Solicitacao do cliente"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["prova"]["status"] == "CANCELADA"
+    assert resp.json()["movimentacao"]["status_anterior"] == "RETIRADA_PELO_VENDEDOR"
+
+
+async def test_cancelar_happy_prova_com_motorista(admin_user, mock_db):
+    """C13 — cancelar prova em COM_MOTORISTA."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(status_prova=StatusProvaEnum.COM_MOTORISTA, rota=RotaEnum.PADRAO)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "V", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/cancelar",
+            json={"motivo_cancelamento": "Erro de cadastro"},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["prova"]["status"] == "CANCELADA"
+
+
+async def test_cancelar_rejeita_motivo_vazio(admin_user, mock_db):
+    """C13 — motivo vazio retorna 422 (Pydantic min_length=1)."""
+    _setup(mock_db, admin=admin_user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/cancelar",
+            json={"motivo_cancelamento": ""},
+        )
+
+    assert resp.status_code == 422
+
+
+async def test_cancelar_rejeita_motivo_somente_espacos(admin_user, mock_db):
+    """C13 — motivo com apenas espacos retorna 422."""
+    _setup(mock_db, admin=admin_user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/cancelar",
+            json={"motivo_cancelamento": "   "},
+        )
+
+    assert resp.status_code == 422
+
+
+async def test_cancelar_rejeita_prova_ja_cancelada(admin_user, mock_db):
+    """C13 — prova ja CANCELADA retorna 409."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(status_prova=StatusProvaEnum.CANCELADA)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "V", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/cancelar",
+            json={"motivo_cancelamento": "Tentativa dupla"},
+        )
+
+    assert resp.status_code == 409
+    assert "nao pode ser cancelada" in resp.json()["detail"]
+
+
+async def test_cancelar_rejeita_prova_recebida_terminal(admin_user, mock_db):
+    """C13 — RECEBIDA_PELA_CLICHERIA e terminal, retorna 409."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(status_prova=StatusProvaEnum.RECEBIDA_PELA_CLICHERIA)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "V", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/cancelar",
+            json={"motivo_cancelamento": "Tentativa terminal"},
+        )
+
+    assert resp.status_code == 409
+
+
+async def test_cancelar_rejeita_usuario_nao_admin(mock_db):
+    """C13 — usuario nao-admin recebe 403."""
+    vendedor = make_user(setor=SetorEnum.VENDEDOR, localizacao=LocalizacaoEnum.MATRIZ)
+    _setup(mock_db, user=vendedor)
+    # get_admin_user nao e sobreescrito — usa o default que requer is_admin
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/cancelar",
+            json={"motivo_cancelamento": "Teste"},
+        )
+
+    assert resp.status_code == 403
+
+
+async def test_cancelar_prova_inexistente_404(admin_user, mock_db):
+    """C13 — prova nao encontrada retorna 404."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = [_detail_row_none()]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{uuid.uuid4()}/cancelar",
+            json={"motivo_cancelamento": "Teste"},
+        )
+
+    assert resp.status_code == 404
+
+
+async def test_cancelar_db_error_502(admin_user, mock_db):
+    """C13 — exception no commit retorna 502."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(status_prova=StatusProvaEnum.CRIADA)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "V", LocalizacaoEnum.MATRIZ),
+    ]
+    mock_db.commit.side_effect = Exception("DB down")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/{prova.id}/cancelar",
+            json={"motivo_cancelamento": "DB error test"},
+        )
+
+    assert resp.status_code == 502
+    mock_db.rollback.assert_awaited()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# POST /{id}/reiniciar-ciclo — Componente 14 (Wave 3 Lote C)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def test_reiniciar_happy_prova_reprovada(admin_user, mock_db):
+    """C14 — admin reinicia ciclo de prova REPROVADA. Status=CRIADA,
+    ciclo_atual incrementado, rota resetada."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
+        rota=RotaEnum.PADRAO,
+        ciclo_atual=1,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "Vendedor Teste", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/{prova.id}/reiniciar-ciclo")
+
+    assert resp.status_code == 200, resp.json()
+    data = resp.json()
+    assert data["prova"]["status"] == "CRIADA"
+    assert data["prova"]["ciclo_atual"] == 2
+    assert data["prova"]["rota"] is None
+    assert data["movimentacao"]["status_anterior"] == "REPROVADA_PELO_VENDEDOR"
+    assert data["movimentacao"]["status_novo"] == "CRIADA"
+    assert data["movimentacao"]["ciclo"] == 2
+    assert data["movimentacao"]["rota_no_momento"] is None
+    assert prova.ciclo_atual == 2
+    mock_db.commit.assert_awaited_once()
+
+
+async def test_reiniciar_happy_ciclo_2(admin_user, mock_db):
+    """C14 — reinicio de ciclo 2 gera ciclo 3."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
+        ciclo_atual=2,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "V", LocalizacaoEnum.FILIAL),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/{prova.id}/reiniciar-ciclo")
+
+    assert resp.status_code == 200
+    assert resp.json()["prova"]["ciclo_atual"] == 3
+
+
+async def test_reiniciar_rejeita_prova_criada(admin_user, mock_db):
+    """C14 — prova CRIADA nao pode ser reiniciada, retorna 409."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(status_prova=StatusProvaEnum.CRIADA)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "V", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/{prova.id}/reiniciar-ciclo")
+
+    assert resp.status_code == 409
+    assert "reprovadas" in resp.json()["detail"]
+
+
+async def test_reiniciar_rejeita_prova_aprovada(admin_user, mock_db):
+    """C14 — prova APROVADA nao pode ser reiniciada."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(
+        status_prova=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        rota=RotaEnum.PADRAO,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "V", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/{prova.id}/reiniciar-ciclo")
+
+    assert resp.status_code == 409
+
+
+async def test_reiniciar_rejeita_prova_cancelada(admin_user, mock_db):
+    """C14 — prova CANCELADA nao pode ser reiniciada."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(status_prova=StatusProvaEnum.CANCELADA)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "V", LocalizacaoEnum.MATRIZ),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/{prova.id}/reiniciar-ciclo")
+
+    assert resp.status_code == 409
+
+
+async def test_reiniciar_rejeita_usuario_nao_admin(mock_db):
+    """C14 — usuario nao-admin recebe 403."""
+    vendedor = make_user(setor=SetorEnum.VENDEDOR, localizacao=LocalizacaoEnum.FILIAL)
+    _setup(mock_db, user=vendedor)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/{uuid.uuid4()}/reiniciar-ciclo")
+
+    assert resp.status_code == 403
+
+
+async def test_reiniciar_prova_inexistente_404(admin_user, mock_db):
+    """C14 — prova nao encontrada retorna 404."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = [_detail_row_none()]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/{uuid.uuid4()}/reiniciar-ciclo")
+
+    assert resp.status_code == 404
+
+
+async def test_reiniciar_db_error_502(admin_user, mock_db):
+    """C14 — exception no commit retorna 502."""
+    _setup(mock_db, admin=admin_user)
+    prova = _make_prova(status_prova=StatusProvaEnum.REPROVADA_PELO_VENDEDOR)
+    mock_db.execute.side_effect = [
+        _detail_row(prova, "V", LocalizacaoEnum.MATRIZ),
+    ]
+    mock_db.commit.side_effect = Exception("DB down")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/{prova.id}/reiniciar-ciclo")
+
+    assert resp.status_code == 502
+    mock_db.rollback.assert_awaited()

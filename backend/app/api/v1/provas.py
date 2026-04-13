@@ -69,6 +69,7 @@ from app.db.session import get_db
 from app.domain.schemas.prova import (
     ALLOWED_CONTENT_TYPES,
     MAX_UPLOAD_BYTES,
+    CancelarRequest,
     ImagemUrlResponse,
     MovimentacaoListResponse,
     MovimentacaoResponse,
@@ -95,6 +96,7 @@ from app.services.state_machine import (
     TransicaoInvalidaError,
     determinar_rota,
     executar_transicao,
+    pode_cancelar,
     validar_transicao,
 )
 
@@ -1743,6 +1745,270 @@ async def executar_transicao_prova(
             usuario_id=movimentacao.usuario_id,
             usuario_nome=current_user.nome,
             usuario_setor=current_user.setor,
+            status_anterior=movimentacao.status_anterior,
+            status_novo=movimentacao.status_novo,
+            motivo_reprovacao=movimentacao.motivo_reprovacao,
+            ciclo=movimentacao.ciclo,
+            rota_no_momento=movimentacao.rota_no_momento,
+            created_at=movimentacao.created_at or datetime.now(tz=timezone.utc),
+        ),
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# POST /api/v1/provas/{id}/cancelar  — Componente 13 (Wave 3 Lote C)
+# ───────────────────────────────────────────────────────────────────────
+
+
+def _assinatura_administrativa(acao: str, usuario: Usuario) -> bytes:
+    """Gera um marcador nao-vazio para acoes admin sem canvas de assinatura.
+
+    `movimentacoes.assinatura_digital` e NOT NULL. Acoes administrativas
+    (cancelamento, reinicio de ciclo) nao passam pelo fluxo de scan +
+    signature canvas do Componente 11, mas precisam gravar algo no campo.
+
+    O marcador identifica a natureza da acao e quem a executou, servindo
+    como trilha de auditoria complementar ao `audit_log.detalhes_json`.
+    """
+    return f"ACAO_ADMINISTRATIVA:{acao}:{usuario.nome}".encode("utf-8")
+
+
+@router.post(
+    "/{prova_id}/cancelar",
+    response_model=TransicaoResponse,
+    summary="Cancelar prova digital (Componente 13)",
+    description="Cancela uma prova em qualquer estado ativo. Restrito a admin.",
+)
+async def cancelar_prova(
+    body: CancelarRequest,
+    request: Request,
+    prova_id: uuid.UUID = Depends(parse_prova_id),
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(get_admin_user),
+) -> TransicaoResponse:
+    """RF-010 + RN-005: cancelamento com motivo obrigatorio, admin-only."""
+    # (a) Carrega a prova com FOR UPDATE.
+    try:
+        scoped = await _carregar_prova_com_scoping(
+            db, prova_id, admin, lock=True
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha ao carregar prova %s para cancelamento (admin=%s)",
+            prova_id, admin.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar prova",
+        )
+
+    if scoped is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
+        )
+    prova, vendedor_nome, vendedor_localizacao, vendedor_setor = scoped
+
+    # (b) Validacao rapida antes de chamar executar_transicao.
+    if not pode_cancelar(prova.status):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Prova em estado {prova.status.value} nao pode ser cancelada"
+            ),
+        )
+
+    # (c) Executa transicao via state_machine.
+    sig = _assinatura_administrativa("cancelamento", admin)
+    try:
+        movimentacao = await executar_transicao(
+            db,
+            prova=prova,
+            status_novo=StatusProvaEnum.CANCELADA,
+            usuario=admin,
+            assinatura_digital=sig,
+            motivo_cancelamento=body.motivo_cancelamento,
+            request=request,
+        )
+    except TransicaoInvalidaError as exc:
+        logger.info("Cancelamento invalido prova %s: %s", prova.id, exc)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Status da prova mudou. Recarregue e tente novamente. (detalhe: {exc})",
+        )
+    except (AtorNaoAutorizadoError, ValueError) as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha inesperada ao cancelar prova %s (admin=%s)",
+            prova.id, admin.id,
+        )
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao cancelar prova",
+        )
+
+    # (d) Commit.
+    try:
+        await db.commit()
+    except Exception:
+        logger.exception("Falha ao commitar cancelamento da prova %s", prova.id)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao persistir cancelamento",
+        )
+
+    logger.info(
+        "Prova cancelada: id=%s admin=%s motivo=%s",
+        prova.id, admin.id, body.motivo_cancelamento[:50],
+    )
+
+    return TransicaoResponse(
+        prova=_build_prova_response(
+            prova, vendedor_nome, vendedor_localizacao, vendedor_setor
+        ),
+        movimentacao=MovimentacaoResponse(
+            id=movimentacao.id,
+            prova_id=movimentacao.prova_id,
+            usuario_id=movimentacao.usuario_id,
+            usuario_nome=admin.nome,
+            usuario_setor=admin.setor,
+            status_anterior=movimentacao.status_anterior,
+            status_novo=movimentacao.status_novo,
+            motivo_reprovacao=movimentacao.motivo_reprovacao,
+            ciclo=movimentacao.ciclo,
+            rota_no_momento=movimentacao.rota_no_momento,
+            created_at=movimentacao.created_at or datetime.now(tz=timezone.utc),
+        ),
+    )
+
+
+# ───────────────────────────────────────────────────────────────────────
+# POST /api/v1/provas/{id}/reiniciar-ciclo — Componente 14 (Wave 3 Lote C)
+# ───────────────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/{prova_id}/reiniciar-ciclo",
+    response_model=TransicaoResponse,
+    summary="Reiniciar ciclo de prova reprovada (Componente 14)",
+    description="Reinicia o ciclo de uma prova REPROVADA. Restrito a admin.",
+)
+async def reiniciar_ciclo_prova(
+    request: Request,
+    prova_id: uuid.UUID = Depends(parse_prova_id),
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(get_admin_user),
+) -> TransicaoResponse:
+    """RF-008 + RN-006: reinicio de ciclo admin-only, preserva historico."""
+    # (a) Carrega a prova com FOR UPDATE.
+    try:
+        scoped = await _carregar_prova_com_scoping(
+            db, prova_id, admin, lock=True
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha ao carregar prova %s para reinicio (admin=%s)",
+            prova_id, admin.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao carregar prova",
+        )
+
+    if scoped is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Prova nao encontrada",
+        )
+    prova, vendedor_nome, vendedor_localizacao, vendedor_setor = scoped
+
+    # (b) Validacao rapida: so pode reiniciar de REPROVADA.
+    if prova.status != StatusProvaEnum.REPROVADA_PELO_VENDEDOR:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Reinicio de ciclo so permitido para provas reprovadas. "
+                f"Status atual: {prova.status.value}"
+            ),
+        )
+
+    # (c) Executa transicao via state_machine.
+    sig = _assinatura_administrativa("reiniciar_ciclo", admin)
+    try:
+        movimentacao = await executar_transicao(
+            db,
+            prova=prova,
+            status_novo=StatusProvaEnum.CRIADA,
+            usuario=admin,
+            assinatura_digital=sig,
+            request=request,
+        )
+    except TransicaoInvalidaError as exc:
+        logger.info("Reinicio invalido prova %s: %s", prova.id, exc)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Status da prova mudou. Recarregue e tente novamente. (detalhe: {exc})",
+        )
+    except (AtorNaoAutorizadoError, RotaIndeterminavelError, ValueError) as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "Falha inesperada ao reiniciar ciclo da prova %s (admin=%s)",
+            prova.id, admin.id,
+        )
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao reiniciar ciclo",
+        )
+
+    # (d) Commit.
+    try:
+        await db.commit()
+    except Exception:
+        logger.exception("Falha ao commitar reinicio da prova %s", prova.id)
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Falha ao persistir reinicio de ciclo",
+        )
+
+    logger.info(
+        "Ciclo reiniciado: prova=%s ciclo_novo=%d admin=%s",
+        prova.id, prova.ciclo_atual, admin.id,
+    )
+
+    return TransicaoResponse(
+        prova=_build_prova_response(
+            prova, vendedor_nome, vendedor_localizacao, vendedor_setor
+        ),
+        movimentacao=MovimentacaoResponse(
+            id=movimentacao.id,
+            prova_id=movimentacao.prova_id,
+            usuario_id=movimentacao.usuario_id,
+            usuario_nome=admin.nome,
+            usuario_setor=admin.setor,
             status_anterior=movimentacao.status_anterior,
             status_novo=movimentacao.status_novo,
             motivo_reprovacao=movimentacao.motivo_reprovacao,
