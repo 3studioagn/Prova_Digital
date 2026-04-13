@@ -250,7 +250,7 @@ provaDigital/
 | DAT v2.0 | Desktop/Rastreio Prova Digital/ | Arquitetura tecnica detalhada |
 | Backlog v3.0 | Desktop/Rastreio Prova Digital/ | NAO editar — gerenciado pelo Renan fora do Claude Code |
 
-Consultar tambem: [DECISIONS.md](DECISIONS.md) | [CHANGELOG.md](CHANGELOG.md) | [docs/db/schema.sql](docs/db/schema.sql)
+Consultar tambem: [DECISIONS.md](DECISIONS.md) | [CHANGELOG.md](CHANGELOG.md) | [docs/db/schema.sql](docs/db/schema.sql) | [docs/waves/](docs/waves/) (closeouts por wave)
 
 ---
 
