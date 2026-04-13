@@ -2,6 +2,50 @@
 
 ---
 
+## [2026-04-13 — Wave 3 Lote A · Deploy] — Deploy em producao (Railway + Vercel)
+
+### Contexto
+
+Primeiro deploy do sistema completo em producao. Backend no Railway, frontend
+na Vercel. Configurado para testar os Componentes 10 e 11 (scanner QR +
+assinatura digital + transicao de status) no celular com camera real.
+
+### Entregue
+
+**Backend (Railway):**
+- URL: `https://provadigital-production.up.railway.app`
+- Root Directory: `backend`
+- Start Command: `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- 13 variaveis de ambiente configuradas no painel Variables
+- `FRONTEND_URL` = URL da Vercel (CORS)
+
+**Frontend (Vercel):**
+- URL: `https://prova-digital-five.vercel.app`
+- Root Directory: `frontend`
+- 3 variaveis: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `NEXT_PUBLIC_API_URL` (aponta para Railway)
+
+**Problemas resolvidos durante o deploy:**
+1. `setuptools` flat-layout error: `app` + `migrations` confundiam o discovery.
+   Fix: `[tool.setuptools.packages.find] include = ["app*"]` no `pyproject.toml`.
+2. `uvicorn: command not found`: pip instala o executavel fora do PATH no Railway.
+   Fix: trocar para `python -m uvicorn` no start command e Procfile.
+3. `No module named uvicorn`: `pip install -e .` via setuptools nao instalava
+   deps no runtime do Railway. Fix: criar `requirements.txt` explicito
+   (Railway detecta automaticamente via nixpacks).
+4. CORS bloqueado: `NEXT_PUBLIC_API_URL` estava como `http://localhost:8000`
+   em vez da URL do Railway. Fix: configurar a variavel na Vercel +
+   `FRONTEND_URL` no Railway.
+
+### Arquivos criados/modificados para deploy
+
+- `backend/Procfile` — criado (start command para Railway)
+- `backend/requirements.txt` — criado (deps para Railway nixpacks)
+- `backend/pyproject.toml` — adicionado `[tool.setuptools.packages.find]`
+- `CLAUDE.md` — adicionada secao "Deploy em producao" com URLs e configuracao
+
+---
+
 ## [2026-04-10 — Wave 3 Lote A · Sub-bloco A.6] — Closeout do Lote A
 
 ### Contexto

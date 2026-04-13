@@ -2445,3 +2445,31 @@ A constante `ASSINATURA_BASE64_MAX_BYTES` e exportada de `lib/types/prova.ts` �
 3. Fluxo FILIAL (rota direta) com vendedor existente (Mario Souza FILIAL).
 4. Teste de reprovacao com motivo.
 5. `WAVE3_LOTE_A_CLOSEOUT.md` com DoD dos Componentes 10 e 11 + cobertura final.
+
+---
+
+## ADR-086 — Deploy em producao: Railway (backend) + Vercel (frontend) (Wave 3 Lote A / Deploy)
+**Data:** 2026-04-13 (Wave 3 Lote A, deploy em producao)
+**Contexto:** Primeiro deploy do sistema completo. Objetivo: testar os Componentes 10 e 11 (scanner QR + assinatura + transicao) no celular com camera real em HTTPS (necessario para `getUserMedia`).
+
+### Decisao 1 — `requirements.txt` em vez de `pip install -e .` para Railway
+**Decisao:** Criar `backend/requirements.txt` explicito com as mesmas deps do `pyproject.toml`. Railway nixpacks detecta automaticamente e roda `pip install -r requirements.txt`.
+**Alternativa rejeitada:** `pip install -e .` (editavel) via setuptools. Falhou no Railway por dois motivos:
+  1. Setuptools flat-layout error: detectou `app` e `migrations` como dois pacotes top-level e recusou o build. Fix parcial: `[tool.setuptools.packages.find] include = ["app*"]`.
+  2. Mesmo apos o fix, o executavel `uvicorn` ficava fora do PATH no runtime do Railway. `python -m uvicorn` resolve, mas o `requirements.txt` e mais confiavel.
+**Consequencia:** `pyproject.toml` continua como fonte canonica das deps para desenvolvimento local (`pip install -e ".[dev]"`). `requirements.txt` e espelho simplificado para deploy. Se uma dep for adicionada/removida, atualizar ambos.
+
+### Decisao 2 — `python -m uvicorn` em vez de `uvicorn` direto
+**Decisao:** Start command usa `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+**Alternativa rejeitada:** `uvicorn app.main:app ...` direto. Falhou com `command not found` porque o nixpacks do Railway instala deps num virtualenv cujo `bin/` nao esta no PATH do shell de start.
+**Consequencia:** `python -m` sempre encontra modulos instalados no venv ativo. Procfile atualizado.
+
+### Decisao 3 — CORS via variavel `FRONTEND_URL` no Railway
+**Decisao:** O backend le `FRONTEND_URL` (env var) e configura `CORSMiddleware.allow_origins` com esse valor. No Railway, a variavel deve ser a URL exata da Vercel (ex: `https://prova-digital-five.vercel.app`), sem barra no final.
+**Por que nao `allow_origins=["*"]`:** violaria RNF-004 (seguranca) — qualquer site poderia chamar a API com o token do usuario.
+**Consequencia:** a cada mudanca de dominio da Vercel (ex: dominio customizado futuro), atualizar `FRONTEND_URL` no Railway.
+
+### URLs de producao
+- **Backend:** `https://provadigital-production.up.railway.app`
+- **Frontend:** `https://prova-digital-five.vercel.app`
+- **Health check:** `https://provadigital-production.up.railway.app/health`

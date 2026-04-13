@@ -62,7 +62,25 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | Auth | Supabase Auth (emite JWT) + PyJWT >=2.8 (verifica, nunca emite) |
 | Storage | Cloudflare R2 (bucket `rastreio-provas-artes`, account `20ab724c91f6bda669eecfe7c51c9171`) |
 | CI/CD | GitHub Actions (lint, testes, keep-alive cron 6 dias) |
-| Deploy | Railway (backend) + Vercel (frontend) — a configurar na Wave 1 |
+| Deploy | Railway (backend) + Vercel (frontend) — configurado na Wave 3 Lote A |
+
+**Deploy em producao (configurado 2026-04-13):**
+- **Backend (Railway):** `https://provadigital-production.up.railway.app`
+  - Root Directory: `backend`
+  - Start Command: `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+  - Variavel `FRONTEND_URL` deve apontar para a URL da Vercel (CORS)
+  - Todas as env vars do `backend/.env.example` configuradas no painel Variables
+  - Procfile presente em `backend/Procfile`
+  - `requirements.txt` presente em `backend/requirements.txt` (Railway detecta automaticamente)
+  - `pyproject.toml` tem `[tool.setuptools.packages.find] include = ["app*"]` para evitar flat-layout error
+- **Frontend (Vercel):** `https://prova-digital-five.vercel.app`
+  - Root Directory: `frontend`
+  - Framework: Next.js (auto-detectado)
+  - 3 env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL`
+  - `NEXT_PUBLIC_API_URL` deve apontar para a URL do Railway (sem `/` no final)
+- **Fluxo:** Celular → Vercel (frontend) → Railway (backend) → Supabase (DB) + R2 (imagens)
+- **CORS:** `FRONTEND_URL` no Railway = URL da Vercel. Sem isso, o browser bloqueia as chamadas.
+- **Redeploy automatico:** ambos redeployam quando ha push na `main` do GitHub
 
 ---
 
