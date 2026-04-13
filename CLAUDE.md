@@ -13,7 +13,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **0 — Infra** | ✅ **COMPLETA** | Schema Postgres (6 tabelas de dominio + enums + triggers imutabilidade), RLS inicial, R2 bucket, keep-alive cron, CI/CD | 1 |
 | **1 — Auth + RBAC** | ✅ **COMPLETA** (sign-off Sessao 6) | Supabase Auth (ES256 JWKS), CRUD de usuarios com saga auth↔DB, RLS `is_admin=true`, tela `/usuarios` | 1-6 |
 | **2 — Nucleo do Dominio** | ✅ **COMPLETA** (sign-off Sessao 22 pos-auditoria externa) | Cadastro de prova + etiqueta + QR Code (C06), Listagem com filtros (C07), Detalhe + modal etiqueta/QR (C08), Configuracoes do sistema (C09) | 7-22 |
-| **3 — Scanner + Transicoes** | 🔜 Proxima | Camera HTML5, scanner QR, assinatura digital, maquina de estados (executar_transicao), reprovacao, cancelamento, reiniciar ciclo | — |
+| **3 — Scanner + Transicoes** | 🟡 **LOTE A COMPLETO** | Camera HTML5, scanner QR, assinatura digital, maquina de estados (executar_transicao), reprovacao, roteamento por localizacao. Faltam: timeline visual (C12/Lote B), cancelamento (C13/Lote C), reinicio de ciclo (C14/Lote C) | 23+ |
 | **4 — Dashboard + Atrasos** | ⏳ | Dashboard tempo real, contadores, calculo de atraso (RN-008), Realtime via Supabase | — |
 | **5 — Relatorios + Export** | ⏳ | CSV export, metricas por vendedor, dashboards gerenciais | — |
 | **6 — Auditoria + Polish** | ⏳ | Tela de audit_log, cleanup de orfaos R2, rotacao de secrets, hardening final | — |
@@ -21,31 +21,32 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 **Estado atual do banco de producao:**
 - `alembic_version = 009`
 - **6 tabelas de dominio** + `alembic_version` (todas com RLS habilitada)
-- **11 policies RLS** otimizadas com `(SELECT auth.uid())` (ADR-029)
+- **12 policies RLS** otimizadas com `(SELECT auth.uid())` (ADR-029 + ADR-082: +1 `pol_movimentacoes_insert` + `pol_movimentacoes_select` expandida para MOTORISTA/CLICHERIA)
 - **30 indexes** cobrindo filtros dos Componentes 07 e futuros
-- **2 admins ativos** (`admin@3studio.com.br` + `ops@3studio.com.br` — ADR-030 executado)
+- **3 usuarios ativos**: 2 admins (`admin@3studio.com.br` + `ops@3studio.com.br`) + 1 vendedor FILIAL (`mariosouza@teste.com.br`)
 - **Advisor Supabase limpo** exceto: 1 INFO `rls_enabled_no_policy` em `alembic_version` (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection` (WONTFIX plano pago, ADR-027)
 
-**Endpoints publicos em producao (24 rotas):**
+**Endpoints publicos em producao (26 rotas):**
 
 | Prefix | Endpoints | Wave |
 |---|---|---|
 | `/api/v1/users` | `GET /me`, `GET /`, `GET /{id}`, `POST /`, `PATCH /{id}`, `DELETE /{id}` | 1 |
 | `/api/v1/provas` | `POST /upload-url`, `POST /`, `GET /`, `GET /{id}`, `GET /{id}/imagem-url`, `GET /{id}/movimentacoes`, `GET /{id}/etiqueta.pdf`, `GET /{id}/qr-code.png` | 2 |
+| `/api/v1/provas` | `POST /scan`, `POST /{id}/transicoes` | 3 |
 | `/api/v1/configuracoes` | `GET /`, `GET /{chave}`, `PATCH /{chave}` | 2 |
 | `/health*` | `/health`, `/health/db`, `/health/r2` | 0 |
 
-**Rotas frontend em producao (7 paginas):**
+**Rotas frontend em producao (8 paginas):**
 - `/login` — Wave 1
 - `/usuarios` — Wave 1 (CRUD + modais)
 - `/nova-prova` — Wave 2 C06 (form + dropzone + preview etiqueta)
 - `/provas` — Wave 2 C07 (listagem + filtros URL-persisted + paginacao)
 - `/provas/[id]` — Wave 2 C08 (detalhe + modal etiqueta/QR + timeline placeholder)
 - `/configuracoes` — Wave 2 C09 (tempo atraso + template etiqueta)
+- `/escanear` — Wave 3 C10+C11 (scanner QR + assinatura digital + transicao de status)
 
 **Itens do menu ainda inativos (placeholders para Waves futuras):**
 - "Dashboard" — Wave 4
-- "Escanear" — Wave 3
 - "Relatorios" — Wave 5
 - "Informacoes" — possivel Wave 6
 
@@ -103,15 +104,15 @@ provaDigital/
 │   │   ├── api/
 │   │   │   ├── deps.py          # Auth dependencies (get_current_user, get_admin_user, require_role)
 │   │   │   ├── v1/users.py      # 6 endpoints CRUD usuarios
-│   │   │   ├── v1/provas.py     # 8 endpoints Wave 2 C06+C07+C08: upload-url, POST, GET list, GET {id}, imagem-url, movimentacoes, etiqueta.pdf, qr-code.png
+│   │   │   ├── v1/provas.py     # 10 endpoints Wave 2+3: C06-C08 (8) + POST /scan (C10) + POST /{id}/transicoes (C11)
 │   │   │   └── v1/configuracoes.py # 3 endpoints Wave 2 C09: GET/, GET/{chave}, PATCH/{chave}
 │   │   ├── domain/
 │   │   │   └── schemas/
 │   │   │       ├── user.py      # Pydantic v2: UserCreate, UserUpdate, UserResponse
 │   │   │       ├── prova.py     # Pydantic v2 Wave 2: Upload/ProvaCreate/ProvaResponse + sanitize_filename
 │   │   │       └── configuracao.py # Pydantic v2 Wave 2 C09: whitelist + validators por chave
-│   │   └── services/            # Wave 2 (ADR-040)
-│   │       ├── state_machine.py # Transicoes + atores + determinar_rota + executar_transicao stub
+│   │   └── services/            # Wave 2 (ADR-040) + Wave 3 (ADR-081)
+│   │       ├── state_machine.py # Transicoes + atores + determinar_rota + executar_transicao (Wave 3 A.1)
 │   │       ├── qrcode_service.py # HMAC-SHA256 hash + PNG via qrcode[pil] (ADR-033/034)
 │   │       ├── etiqueta_service.py # PDF via fpdf2, templates A4/80mm (ADR-035)
 │   │       ├── audit_service.py # log_audit helper (ADR-039)
@@ -134,6 +135,7 @@ provaDigital/
 │   │       ├── 003_policies_wave1_usuarios.sql
 │   │       ├── 004_unify_rls_is_admin.sql  # ADR-018
 │   │       ├── 005_initplan_optimization.sql  # ADR-029 — (SELECT auth.uid()) em 11 policies
+│   │       ├── 006_movimentacoes_insert_and_expand_select.sql  # ADR-082 — INSERT admin + SELECT c/ MOTORISTA/CLICHERIA
 │   │       └── apply_rls.py
 │   └── tests/
 │       ├── conftest.py          # Fixtures: make_user, admin_user, mock_db, vendedor_matriz/filial
@@ -159,7 +161,10 @@ provaDigital/
 │       │   ├── useCreateProva.ts        # Wave 2 C06 — fluxo upload-url -> PUT R2 -> POST /provas
 │       │   ├── useListProvas.ts         # Wave 2 C07 — GET /provas com filtros + debounce
 │       │   ├── useProvaDetail.ts        # Wave 2 C08 — GET detail + imagem-url + movimentacoes
-│       │   └── useConfiguracoes.ts      # Wave 2 C09 — GET list + PATCH por chave
+│       │   ├── useConfiguracoes.ts      # Wave 2 C09 — GET list + PATCH por chave
+│       │   ├── useScanner.ts            # Wave 3 C10 — wrapper html5-qrcode (SSR-safe + cleanup)
+│       │   ├── useScanProva.ts          # Wave 3 C10 — POST /scan wrapper
+│       │   └── useExecutarTransicao.ts  # Wave 3 C11 — POST /{id}/transicoes wrapper
 │       ├── lib/
 │       │   ├── api.ts           # apiFetch wrapper (token injection, ApiError). Nao usar p/ binarios
 │       │   ├── types/
@@ -193,6 +198,9 @@ provaDigital/
 │               │       ├── page.tsx                     # dados + arte + timeline placeholder
 │               │       ├── VisualizarEtiquetaModal.tsx  # modal PDF + QR code
 │               │       └── detalhe.module.css
+│               ├── escanear/     # Wave 3 (Componentes 10 + 11)
+│               │   ├── page.tsx                     # scanner QR + assinatura + state machine
+│               │   └── escanear.module.css
 │               └── configuracoes/ # Wave 2 (Componente 09)
 │                   ├── page.tsx # Tempo atraso + template etiqueta
 │                   └── configuracoes.module.css

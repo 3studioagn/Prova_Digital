@@ -2,6 +2,43 @@
 
 ---
 
+## [2026-04-10 — Wave 3 Lote A · Sub-bloco A.6] — Closeout do Lote A
+
+### Contexto
+
+Sexto e ultimo sub-bloco do Lote A. Entrega a documentacao de closeout e
+atualizacao do `CLAUDE.md`.
+
+### Entregue
+
+- `CLAUDE.md` atualizado: Wave 3 status "LOTE A COMPLETO", rotas backend
+  24→26, rotas frontend 7→8, estrutura de pastas com novos arquivos Wave 3,
+  usuarios ativos 2→3, policies RLS 11→12, menu "Escanear" ativado.
+- `WAVE3_LOTE_A_CLOSEOUT.md` criado com: DoD C10 (4 criterios US-002) + DoD
+  C11 (7 HUs cobertos US-003 a US-009), cobertura consolidada, lista
+  completa de arquivos criados/modificados, evidencias de zero-impacto em
+  Waves 0/1/2, contratos expostos para Lotes B/C, riscos residuais, debitos
+  observados, metricas finais.
+
+### Metricas consolidadas (Lote A completo)
+
+| Aspecto | Sessao 22 | Pos-Lote A | Delta |
+|---|---|---|---|
+| Testes backend | 308 | **389** | **+81** |
+| Rotas backend | 24 | **26** | +2 |
+| Rotas frontend | 7 | **8** | +1 |
+| Policies RLS | 11 | **12** | +1 |
+| alembic_version | 009 | **009** | 0 |
+| ADRs | 080 | **085** | +5 |
+| Deps npm prod | 7 | **10** | +3 |
+
+### Arquivos alterados neste sub-bloco
+- `CLAUDE.md` — atualizado (Wave 3, rotas, paginas, menu, estrutura)
+- `WAVE3_LOTE_A_CLOSEOUT.md` — novo
+- `CHANGELOG.md` — esta entrada
+
+---
+
 ## [2026-04-10 — Wave 3 Lote A · Sub-bloco A.5] — Frontend `/escanear` (Componentes 10+11 UI)
 
 ### Contexto
