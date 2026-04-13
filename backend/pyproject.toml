@@ -30,6 +30,9 @@ dev = [
     "ruff>=0.4,<1.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [build-system]
 requires = ["setuptools>=69.0"]
 build-backend = "setuptools.build_meta"
