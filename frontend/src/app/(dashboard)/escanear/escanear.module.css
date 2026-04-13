@@ -328,6 +328,15 @@
   color: var(--color-card-text-muted);
 }
 
+.modalTransicao {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--color-card-text);
+  padding: 0.5rem 0.75rem;
+  background: var(--color-card-surface-alt);
+  border-radius: var(--radius-sm);
+}
+
 .modalField {
   display: flex;
   flex-direction: column;

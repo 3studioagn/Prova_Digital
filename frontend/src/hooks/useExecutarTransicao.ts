@@ -53,7 +53,11 @@ export function useExecutarTransicao(
   const executar = useCallback(
     async (
       input: ExecutarTransicaoInput,
-    ): Promise<TransicaoResponse | null> => {
+    ): Promise<{
+      data: TransicaoResponse | null;
+      error: string | null;
+      isConflict: boolean;
+    }> => {
       setState({ loading: true, error: null, result: null });
 
       let token: string | null;
@@ -63,12 +67,9 @@ export function useExecutarTransicao(
         token = null;
       }
       if (!token) {
-        setState({
-          loading: false,
-          error: "Sessao expirada. Faca login novamente.",
-          result: null,
-        });
-        return null;
+        const error = "Sessao expirada. Faca login novamente.";
+        setState({ loading: false, error, result: null });
+        return { data: null, error, isConflict: false };
       }
 
       try {
@@ -85,9 +86,10 @@ export function useExecutarTransicao(
           },
         );
         setState({ loading: false, error: null, result });
-        return result;
+        return { data: result, error: null, isConflict: false };
       } catch (err) {
         let msg = "Nao foi possivel executar a transicao.";
+        let isConflict = false;
         if (err instanceof ApiError) {
           if (err.status === 401) {
             msg = "Sessao expirada. Faca login novamente.";
@@ -95,6 +97,7 @@ export function useExecutarTransicao(
             msg = "Prova nao encontrada.";
           } else if (err.status === 409) {
             msg = "O status da prova mudou. Escaneie novamente.";
+            isConflict = true;
           } else if (err.status === 422) {
             msg = err.message;
           } else if (err.status >= 500) {
@@ -104,7 +107,7 @@ export function useExecutarTransicao(
           }
         }
         setState({ loading: false, error: msg, result: null });
-        return null;
+        return { data: null, error: msg, isConflict };
       }
     },
     [getToken],

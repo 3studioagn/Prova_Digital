@@ -2,6 +2,63 @@
 
 ---
 
+## [2026-04-13 — Wave 3 Review C11] — Revisao critica do Componente 11
+
+### Contexto
+
+Revisao pos-implementacao do Componente 11 (Assinatura Digital e Transicao de Status).
+Foco em bugs latentes, fluidez da assinatura em mobile, e clareza de fluxo.
+
+### Aplicado
+
+**Bug fixes (B-01, B-03):**
+- `useScanProva.escanear` e `useExecutarTransicao.executar` agora retornam `{ data, error }`
+  em vez de `result | null`, eliminando referencia stale de `hookState.error` dentro de
+  closures de `useEffect` e callbacks. Usuario agora ve mensagens de erro especificas do
+  backend em vez de fallback generico.
+- 409 Conflict redireciona para `scan-error` com botao "Tentar novamente" em vez de voltar
+  ao modal de assinatura com mensagem contraditoria.
+
+**Fluidez da assinatura (B-02, B-04):**
+- Canvas de assinatura agora usa `ResizeObserver` para dimensionar `width` pela largura real
+  do container. Elimina discrepancia entre coordenadas de toque e canvas em telas < 500px.
+- Modal de assinatura permanece visivel durante o submit (botoes desabilitados, texto
+  "Enviando...") em vez de desaparecer para um spinner separado. Fluxo continuo.
+
+**UX — clareza de fluxo (D-01, D-02, D-03, D-04):**
+- Modal de assinatura agora mostra a transicao explicita: "Criada -> Retirada pelo vendedor".
+- DoneView exibe badge com o novo status da prova apos confirmacao.
+- Provas em estado terminal (CANCELADA, RECEBIDA_PELA_CLICHERIA) mostram "Esta prova ja foi
+  finalizada" em vez de "Voce nao tem permissao".
+- Modal fecha com tecla Escape (WAI-ARIA).
+
+**Backend cleanup (B-07, C-03):**
+- Removido fallback morto `created_at or datetime.now()` no handler de transicao.
+- Adicionado `logger.warning` em `_decode_assinatura` para tentativas invalidas.
+
+### Arquivos modificados
+
+- `frontend/src/hooks/useScanProva.ts` — retorno `{ data, error }`
+- `frontend/src/hooks/useExecutarTransicao.ts` — retorno `{ data, error, isConflict }`
+- `frontend/src/app/(dashboard)/escanear/page.tsx` — canvas responsivo, modal durante submit,
+  transicao label, terminal state msg, escape handler, DoneView badge
+- `frontend/src/app/(dashboard)/escanear/escanear.module.css` — classe `.modalTransicao`
+- `backend/app/api/v1/provas.py` — remove fallback morto + log em decode assinatura
+- `WAVE3_REVIEW_C11_ANALYSIS.md` — analise completa (criado)
+- `WAVE3_REVIEW_C11_CLOSEOUT.md` — closeout (criado)
+
+### Metricas
+
+| Aspecto | Antes | Depois |
+|---------|-------|--------|
+| Backend testes | 407 passed | **407 passed** (0 regressoes) |
+| `tsc --noEmit` | limpo | **limpo** |
+| `next lint` | limpo | **limpo** |
+| `next build` | OK | **OK** |
+| Bundle `/escanear` | 11.4 kB | **11.7 kB** (+0.3 kB) |
+
+---
+
 ## [2026-04-13 — Wave 3 Lote C] — Componentes 13+14: Cancelamento + Reinicio de Ciclo
 
 ### Contexto

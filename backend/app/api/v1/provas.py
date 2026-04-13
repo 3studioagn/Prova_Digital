@@ -1574,11 +1574,16 @@ def _decode_assinatura(assinatura_base64: str) -> bytes:
     try:
         decoded = base64.b64decode(assinatura_base64, validate=True)
     except (base64.binascii.Error, ValueError):
+        logger.warning(
+            "Assinatura base64 invalida (tamanho=%d chars)",
+            len(assinatura_base64),
+        )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Assinatura base64 invalida",
         )
     if not decoded:
+        logger.warning("Assinatura decodificou para 0 bytes")
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Assinatura vazia apos decode",
@@ -1750,7 +1755,7 @@ async def executar_transicao_prova(
             motivo_reprovacao=movimentacao.motivo_reprovacao,
             ciclo=movimentacao.ciclo,
             rota_no_momento=movimentacao.rota_no_momento,
-            created_at=movimentacao.created_at or datetime.now(tz=timezone.utc),
+            created_at=movimentacao.created_at,
         ),
     )
 

@@ -40,7 +40,9 @@ export function useScanProva(getToken: () => Promise<string | null>) {
   const reset = useCallback(() => setState(INITIAL), []);
 
   const escanear = useCallback(
-    async (payload: string): Promise<ScanResponse | null> => {
+    async (
+      payload: string,
+    ): Promise<{ data: ScanResponse | null; error: string | null }> => {
       setState({ loading: true, error: null, result: null });
 
       let token: string | null;
@@ -50,12 +52,9 @@ export function useScanProva(getToken: () => Promise<string | null>) {
         token = null;
       }
       if (!token) {
-        setState({
-          loading: false,
-          error: "Sessao expirada. Faca login novamente.",
-          result: null,
-        });
-        return null;
+        const error = "Sessao expirada. Faca login novamente.";
+        setState({ loading: false, error, result: null });
+        return { data: null, error };
       }
 
       try {
@@ -65,7 +64,7 @@ export function useScanProva(getToken: () => Promise<string | null>) {
           body: JSON.stringify({ payload }),
         });
         setState({ loading: false, error: null, result });
-        return result;
+        return { data: result, error: null };
       } catch (err) {
         let msg = "Nao foi possivel resolver o QR Code.";
         if (err instanceof ApiError) {
@@ -82,7 +81,7 @@ export function useScanProva(getToken: () => Promise<string | null>) {
           }
         }
         setState({ loading: false, error: msg, result: null });
-        return null;
+        return { data: null, error: msg };
       }
     },
     [getToken],

@@ -40,7 +40,12 @@ type PageState =
       statusNovo: StatusProva;
       precisaMotivo: boolean;
     }
-  | { kind: "submitting" }
+  | {
+      kind: "submitting";
+      scan: ScanResponse;
+      statusNovo: StatusProva;
+      precisaMotivo: boolean;
+    }
   | {
       kind: "done";
       scan: ScanResponse;
@@ -102,16 +107,16 @@ export default function EscanearPage() {
     if (state.kind !== "scan-loading") return;
     let cancelled = false;
     (async () => {
-      const result = await scanHook.escanear(state.payload);
+      const { data, error } = await scanHook.escanear(state.payload);
       if (cancelled) return;
-      if (!result) {
+      if (!data) {
         setState({
           kind: "scan-error",
-          message: scanHook.error ?? "Nao foi possivel resolver o QR Code.",
+          message: error ?? "Nao foi possivel resolver o QR Code.",
         });
         return;
       }
-      setState({ kind: "scan-ready", scan: result });
+      setState({ kind: "scan-ready", scan: data });
     })();
     return () => {
       cancelled = true;
@@ -159,15 +164,29 @@ export default function EscanearPage() {
       const provaId = state.scan.prova.id;
       const statusNovo = state.statusNovo;
 
-      setState({ kind: "submitting" });
-      const result = await transicaoHook.executar({
+      setState({
+        kind: "submitting",
+        scan: state.scan,
+        statusNovo,
+        precisaMotivo: state.precisaMotivo,
+      });
+      const { data, error, isConflict } = await transicaoHook.executar({
         provaId,
         statusNovo,
         assinaturaBase64,
         motivoReprovacao: motivo,
       });
 
-      if (!result) {
+      if (!data) {
+        if (isConflict) {
+          // B-03: 409 = status mudou. Volta ao inicio para re-escanear.
+          setState({
+            kind: "scan-error",
+            message:
+              error ?? "O status da prova mudou. Escaneie novamente.",
+          });
+          return;
+        }
         // Volta para `signing` para o usuario poder retentar
         setState({
           kind: "signing",
@@ -182,7 +201,7 @@ export default function EscanearPage() {
         kind: "done",
         scan: {
           ...state.scan,
-          prova: result.prova,
+          prova: data.prova,
         },
         statusAplicado: statusNovo,
       });
@@ -226,7 +245,7 @@ export default function EscanearPage() {
         />
       )}
 
-      {state.kind === "signing" && (
+      {(state.kind === "signing" || state.kind === "submitting") && (
         <>
           <ScanReadyView
             scan={state.scan}
@@ -237,21 +256,14 @@ export default function EscanearPage() {
             readOnly
           />
           <AssinaturaModal
+            statusAtual={state.scan.prova.status}
             statusNovo={state.statusNovo}
             precisaMotivo={state.precisaMotivo}
-            loading={false}
+            loading={state.kind === "submitting"}
             error={transicaoHook.error}
             onCancelar={cancelarAssinatura}
             onConfirmar={submeterTransicao}
           />
-        </>
-      )}
-
-      {state.kind === "submitting" && (
-        <>
-          <div className={styles.scannerWrapper}>
-            <p className={styles.scannerStatus}>Registrando movimentacao...</p>
-          </div>
         </>
       )}
 
@@ -385,7 +397,9 @@ function ScanReadyView({
         <div className={styles.actionsTitle}>Acoes disponiveis</div>
         {transicoes_permitidas.length === 0 ? (
           <p className={styles.noActions}>
-            Voce nao tem permissao para movimentar esta prova no estado atual.
+            {prova.status === "CANCELADA" || prova.status === "RECEBIDA_PELA_CLICHERIA"
+              ? `Esta prova ja foi finalizada (${STATUS_LABELS[prova.status]}).`
+              : "Voce nao tem permissao para movimentar esta prova no estado atual."}
           </p>
         ) : (
           <>
@@ -433,6 +447,7 @@ function ScanReadyView({
  * ──────────────────────────────────────────────────────────────────── */
 
 function AssinaturaModal({
+  statusAtual,
   statusNovo,
   precisaMotivo,
   loading,
@@ -440,6 +455,7 @@ function AssinaturaModal({
   onCancelar,
   onConfirmar,
 }: {
+  statusAtual: StatusProva;
   statusNovo: StatusProva;
   precisaMotivo: boolean;
   loading: boolean;
@@ -448,8 +464,34 @@ function AssinaturaModal({
   onConfirmar: (assinaturaBase64: string, motivo: string | null) => void;
 }) {
   const sigRef = useRef<SignatureCanvas | null>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const [canvasWidth, setCanvasWidth] = useState(0);
   const [motivo, setMotivo] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // B-02: Dimensionar canvas pela largura real do container (mobile-first).
+  useEffect(() => {
+    const el = canvasContainerRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      if (w > 0) setCanvasWidth(w);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // D-04: Fechar modal com Escape (WAI-ARIA).
+  useEffect(() => {
+    if (loading) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancelar();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [loading, onCancelar]);
 
   const label = labelParaTransicao(statusNovo);
   const isReprovar = statusNovo === "REPROVADA_PELO_VENDEDOR";
@@ -457,6 +499,7 @@ function AssinaturaModal({
   const descricao = isReprovar
     ? "Descreva o motivo da reprovacao e assine para confirmar."
     : "Assine no quadro abaixo para confirmar a movimentacao.";
+  const transicaoLabel = `${STATUS_LABELS[statusAtual]} \u2192 ${STATUS_LABELS[statusNovo]}`;
 
   const handleLimpar = useCallback(() => {
     sigRef.current?.clear();
@@ -510,6 +553,7 @@ function AssinaturaModal({
           {titulo}
         </h2>
         <p className={styles.modalDescription}>{descricao}</p>
+        <p className={styles.modalTransicao}>{transicaoLabel}</p>
 
         {precisaMotivo && (
           <div className={styles.modalField}>
@@ -530,16 +574,20 @@ function AssinaturaModal({
 
         <div className={styles.signatureWrapper}>
           <label className={styles.modalLabel}>Assinatura</label>
-          <SigCanvas
-            ref={sigRef}
-            penColor="#000000"
-            backgroundColor="#ffffff"
-            canvasProps={{
-              className: styles.signatureCanvas,
-              width: 500,
-              height: 200,
-            }}
-          />
+          <div ref={canvasContainerRef}>
+            {canvasWidth > 0 && (
+              <SigCanvas
+                ref={sigRef}
+                penColor="#000000"
+                backgroundColor="#ffffff"
+                canvasProps={{
+                  className: styles.signatureCanvas,
+                  width: canvasWidth,
+                  height: 200,
+                }}
+              />
+            )}
+          </div>
           <div className={styles.signatureActions}>
             <span className={styles.signatureHint}>
               Assine com o dedo ou mouse no quadro acima.
@@ -609,6 +657,9 @@ function DoneView({
       <p className={styles.successMessage}>
         <strong>{scan.prova.nome}</strong> — {mensagem}
       </p>
+      <span className={styles.statusBadge}>
+        {STATUS_LABELS[scan.prova.status]}
+      </span>
       <button
         type="button"
         className={styles.primaryButton}
