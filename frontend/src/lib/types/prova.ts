@@ -256,3 +256,15 @@ export interface TransicaoResponse {
 /** Limite canonico de bytes do base64 da assinatura — espelho de
  * `ASSINATURA_BASE64_MAX_BYTES` em schemas/prova.py. */
 export const ASSINATURA_BASE64_MAX_BYTES = 700_000;
+
+/** Monta o payload escaneavel do QR Code a partir dos dados da prova.
+ *
+ * Formato: "3SD|{nro_requerimento}|{hash[:16]}"
+ * Espelho de `qrcode_service.gerar_payload_qr` no backend.
+ */
+export function buildQrPayload(
+  nroRequerimento: string,
+  qrCodeHash: string,
+): string {
+  return `3SD|${nroRequerimento}|${qrCodeHash.substring(0, 16)}`;
+}

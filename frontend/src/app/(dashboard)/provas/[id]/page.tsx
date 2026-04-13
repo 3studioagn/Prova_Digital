@@ -260,6 +260,7 @@ export default function ProvaDetalhePage({ params }: PageProps) {
             <VisualizarEtiquetaModal
               provaId={id}
               nroRequerimento={prova.nro_requerimento}
+              qrCodeHash={prova.qr_code_hash}
               isOpen={etiquetaModalOpen}
               onClose={() => setEtiquetaModalOpen(false)}
               getToken={getToken}

@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
+import { buildQrPayload } from "@/lib/types/prova";
 import { CloseIcon } from "@/components/icons";
 import styles from "./detalhe.module.css";
 
 interface Props {
   provaId: string;
   nroRequerimento: string;
+  qrCodeHash: string;
   isOpen: boolean;
   onClose: () => void;
   getToken: () => Promise<string | null>;
@@ -38,11 +40,33 @@ const INITIAL_BLOB: BlobState = {
 export function VisualizarEtiquetaModal({
   provaId,
   nroRequerimento,
+  qrCodeHash,
   isOpen,
   onClose,
   getToken,
 }: Props) {
   const [state, setState] = useState<BlobState>(INITIAL_BLOB);
+  const [copied, setCopied] = useState(false);
+
+  const qrPayload = buildQrPayload(nroRequerimento, qrCodeHash);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(qrPayload);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback para browsers sem Clipboard API
+      const input = document.createElement("input");
+      input.value = qrPayload;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [qrPayload]);
 
   // Carrega PDF + QR quando o modal abre.
   //
@@ -227,6 +251,29 @@ export function VisualizarEtiquetaModal({
                   <p className={styles.modalQrHint}>
                     Escaneie com a camera do sistema para movimentar a prova
                   </p>
+                  <div className={styles.qrPayloadBox}>
+                    <label className={styles.qrPayloadLabel}>
+                      Codigo do QR
+                    </label>
+                    <div className={styles.qrPayloadRow}>
+                      <input
+                        type="text"
+                        readOnly
+                        value={qrPayload}
+                        className={styles.qrPayloadInput}
+                        onClick={(e) =>
+                          (e.target as HTMLInputElement).select()
+                        }
+                      />
+                      <button
+                        type="button"
+                        className={styles.qrPayloadCopyBtn}
+                        onClick={handleCopy}
+                      >
+                        {copied ? "Copiado!" : "Copiar"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

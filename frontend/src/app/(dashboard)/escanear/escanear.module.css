@@ -97,6 +97,60 @@
   cursor: not-allowed;
 }
 
+/* ── Divisor "ou" ─────────────────────────────────────────────────────── */
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  max-width: 360px;
+  color: var(--color-card-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-card-divider);
+}
+
+/* ── Entrada manual do codigo ─────────────────────────────────────────── */
+
+.manualInputWrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 420px;
+}
+
+.manualInput {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: var(--fs-base);
+  font-family: monospace;
+  color: var(--color-card-text);
+  background: var(--color-card-bg);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-card);
+  text-align: center;
+}
+
+.manualInput::placeholder {
+  color: var(--color-card-text-muted);
+  font-family: monospace;
+  font-size: var(--fs-sm);
+}
+
+.manualInput:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
 /* ── Botao secundario (outline) ────────────────────────────────────────── */
 
 .secondaryButton {

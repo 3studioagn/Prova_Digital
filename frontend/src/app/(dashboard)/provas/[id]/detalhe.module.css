@@ -497,6 +497,57 @@
   line-height: 1.4;
 }
 
+.qrPayloadBox {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 1rem;
+  width: 100%;
+  max-width: 280px;
+}
+
+.qrPayloadLabel {
+  font-size: var(--fs-xs);
+  color: #575757;
+  font-weight: 500;
+}
+
+.qrPayloadRow {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.qrPayloadInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4rem 0.6rem;
+  font-size: var(--fs-xs);
+  font-family: monospace;
+  color: var(--color-card-text);
+  background: var(--color-card-surface-alt);
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-sm);
+  cursor: text;
+}
+
+.qrPayloadCopyBtn {
+  padding: 0.4rem 0.75rem;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  background: var(--color-accent);
+  color: var(--color-text-dark);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.qrPayloadCopyBtn:hover {
+  background: var(--color-accent-hover);
+}
+
 .modalFooter {
   display: flex;
   justify-content: flex-end;

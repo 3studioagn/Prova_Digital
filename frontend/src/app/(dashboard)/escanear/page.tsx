@@ -220,7 +220,16 @@ export default function EscanearPage() {
         </div>
       </div>
 
-      {state.kind === "idle" && <IdleView onStart={comecarScan} />}
+      {state.kind === "idle" && (
+        <IdleView
+          onStart={comecarScan}
+          onManualSubmit={(payload) => {
+            scanHook.reset();
+            transicaoHook.reset();
+            setState({ kind: "scan-loading", payload });
+          }}
+        />
+      )}
 
       {state.kind === "scanning" && (
         <ScanningView
@@ -286,7 +295,24 @@ export default function EscanearPage() {
  * Sub-componentes de estado
  * ──────────────────────────────────────────────────────────────────── */
 
-function IdleView({ onStart }: { onStart: () => void }) {
+function IdleView({
+  onStart,
+  onManualSubmit,
+}: {
+  onStart: () => void;
+  onManualSubmit: (payload: string) => void;
+}) {
+  const [codigoManual, setCodigoManual] = useState("");
+
+  const handleManual = useCallback(
+    (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      const v = codigoManual.trim();
+      if (v) onManualSubmit(v);
+    },
+    [codigoManual, onManualSubmit],
+  );
+
   return (
     <div className={styles.idleCard}>
       <div className={styles.idleIcon} aria-hidden="true">
@@ -294,8 +320,8 @@ function IdleView({ onStart }: { onStart: () => void }) {
       </div>
       <h2 className={styles.idleTitle}>Pronto para escanear</h2>
       <p className={styles.idleDescription}>
-        Clique no botao abaixo para ativar a camera. O sistema vai identificar
-        a prova pelo QR Code e mostrar as acoes disponiveis.
+        Ative a camera para ler o QR Code, ou digite o codigo da prova
+        manualmente.
       </p>
       <button
         type="button"
@@ -304,6 +330,27 @@ function IdleView({ onStart }: { onStart: () => void }) {
       >
         Abrir camera
       </button>
+
+      <div className={styles.divider}>
+        <span>ou</span>
+      </div>
+
+      <form className={styles.manualInputWrapper} onSubmit={handleManual}>
+        <input
+          type="text"
+          className={styles.manualInput}
+          placeholder="Ex: 3SD|REQ-001|a1b2c3d4e5f67890"
+          value={codigoManual}
+          onChange={(e) => setCodigoManual(e.target.value)}
+        />
+        <button
+          type="submit"
+          className={styles.secondaryButton}
+          disabled={!codigoManual.trim()}
+        >
+          Buscar prova
+        </button>
+      </form>
     </div>
   );
 }
