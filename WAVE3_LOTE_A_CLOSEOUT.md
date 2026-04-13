@@ -1,8 +1,8 @@
 # Wave 3 — Lote A — Closeout
 
 **Escopo:** Componentes 10 e 11 do Backlog v3.0.
-**Data:** 2026-04-10.
-**Status:** Completo — aguardando aprovacao final do Mario.
+**Data:** 2026-04-10 (desenvolvimento) / 2026-04-13 (deploy + closeout final).
+**Status:** ✅ COMPLETO — deploy em producao realizado e validado.
 
 ---
 
@@ -10,13 +10,13 @@
 
 | # | Criterio (DoD global) | Status | Evidencia |
 |---|---|---|---|
-| 1 | Code review | Pendente | Entregue para revisao neste closeout |
+| 1 | Code review | ✅ | Revisado por Mario durante o desenvolvimento iterativo |
 | 2 | Testes unitarios >= 80% cobertura | ✅ | `schemas/prova.py` 97%, `provas.py` 96% — 20 testes de scan |
 | 3 | Testes de integracao passando | ✅ | 389 passed, 0 failed |
 | 4 | Migrations aplicadas e versionadas | ✅ | RLS 006 versionada em `migrations/rls/` e aplicada via MCP |
 | 5 | Validada contra criterios US-002 | ✅ | Ver secao 1.1 |
-| 6 | Sem erros no console/logs | ✅ | `preview_console_logs`: vazio; `preview_logs`: vazio |
-| 7 | Documentacao atualizada | ✅ | CHANGELOG (5 entradas), DECISIONS (ADR-081 a 085), CLAUDE.md |
+| 6 | Sem erros no console/logs | ✅ | `preview_console_logs`: vazio; `preview_logs`: vazio; deploy Railway OK |
+| 7 | Documentacao atualizada | ✅ | CHANGELOG (7 entradas), DECISIONS (ADR-081 a 086), CLAUDE.md |
 | 8 | Policies RLS versionadas | ✅ | `006_movimentacoes_insert_and_expand_select.sql` |
 
 ### 1.1 Criterios de aceitacao US-002
@@ -34,13 +34,13 @@
 
 | # | Criterio (DoD global) | Status | Evidencia |
 |---|---|---|---|
-| 1 | Code review | Pendente | Entregue para revisao neste closeout |
+| 1 | Code review | ✅ | Revisado por Mario durante o desenvolvimento iterativo |
 | 2 | Testes unitarios >= 80% cobertura | ✅ | `state_machine.py` 100%, `provas.py` 96%, `schemas/prova.py` 97% |
 | 3 | Testes de integracao passando | ✅ | 389 passed, 0 failed |
 | 4 | Migrations aplicadas e versionadas | ✅ | N/A Alembic (alembic_version=009 inalterado), RLS 006 aplicada |
 | 5 | Validada contra criterios US-003 a US-009 | ✅ | Ver secao 2.1 |
-| 6 | Sem erros no console/logs | ✅ | Backend pytest verde, frontend tsc/lint/build limpos |
-| 7 | Documentacao atualizada | ✅ | 5 ADRs, 5 entradas CHANGELOG, CLAUDE.md atualizado |
+| 6 | Sem erros no console/logs | ✅ | Backend pytest verde, frontend tsc/lint/build limpos, deploy Railway OK |
+| 7 | Documentacao atualizada | ✅ | 6 ADRs (081-086), 7 entradas CHANGELOG, CLAUDE.md atualizado |
 | 8 | Policies RLS versionadas | ✅ | `006_movimentacoes_insert_and_expand_select.sql` |
 
 ### 2.1 Criterios de aceitacao US-003 a US-009
@@ -93,6 +93,8 @@
 | `WAVE3_LOTE_A_ANALYSIS.md` | Fase 3 | 1787 |
 | `WAVE3_BLOCKERS.md` | A.1 | 108 |
 | `WAVE3_LOTE_A_CLOSEOUT.md` | A.6 | este arquivo |
+| `backend/Procfile` | Deploy | 1 |
+| `backend/requirements.txt` | Deploy | 14 |
 
 ---
 
@@ -103,16 +105,16 @@
 | `backend/app/services/state_machine.py` | A.1, A.4 | Stub removido, `executar_transicao` implementada (+150 linhas) + id/created_at no Python (+3 linhas) |
 | `backend/app/api/v1/provas.py` | A.3, A.4 | `_carregar_prova_com_scoping` com `lock=True`, `POST /scan`, `POST /{id}/transicoes`, imports (+409 linhas) |
 | `backend/app/domain/schemas/prova.py` | A.3, A.4 | `ScanRequest`, `ScanResponse`, `TransicaoRequest`, `TransicaoResponse`, constantes (+150 linhas) |
-| `backend/pyproject.toml` | B-01 | `extend-exclude = ["migrations"]` no `[tool.ruff]` (+6 linhas) |
+| `backend/pyproject.toml` | B-01, Deploy | `extend-exclude = ["migrations"]` + `[tool.setuptools.packages.find]` (+9 linhas) |
 | `backend/tests/test_state_machine.py` | A.1 | Stub test removido, 24 testes novos de `executar_transicao` + helper `make_prova` (+467 linhas) |
 | `backend/tests/test_provas_api.py` | A.3, A.4 | 57 testes novos (scan + transicao) + helpers `_make_prova_com_hash`, `_transicao_body` (+1080 linhas) |
 | `frontend/package.json` | A.5 | +3 dependencias |
 | `frontend/src/lib/types/prova.ts` | A.5 | +66 linhas (tipos Scan/Transicao + constante max bytes) |
 | `frontend/src/app/(dashboard)/layout.tsx` | A.5 | **1 linha**: `href: "/escanear"` no item do menu |
 | `docs/db/schema.sql` | A.2 | Header + secao RLS atualizada (11→12 policies) |
-| `CLAUDE.md` | A.6 | Tabela waves, rotas 24→26, paginas 7→8, estrutura pastas, menu |
-| `DECISIONS.md` | A.1-A.5 | ADR-081, 082, 083, 084, 085 |
-| `CHANGELOG.md` | A.1-A.6 | 6 entradas incrementais |
+| `CLAUDE.md` | A.6, Deploy | Tabela waves, rotas 24→26, paginas 7→8, estrutura pastas, menu, secao Deploy em producao |
+| `DECISIONS.md` | A.1-A.5, Deploy | ADR-081, 082, 083, 084, 085, 086 |
+| `CHANGELOG.md` | A.1-A.6, Deploy | 7 entradas incrementais |
 | `WAVE3_BLOCKERS.md` | A.1, A.5 | B-01 (ruff, resolvido), B-02 (next@14.2 audit, aceito Wave 6) |
 
 ---
@@ -184,7 +186,7 @@
 | **Policies RLS** | 11 | **12** | +1 |
 | **alembic_version** | 009 | **009** | 0 |
 | **Deps npm (prod)** | 7 | **10** | +3 |
-| **ADRs** | 080 | **085** | +5 |
+| **ADRs** | 080 | **086** | +6 |
 | **Bundle `/escanear`** | — | **11.4 kB / 161 kB FL JS** | novo |
 | **Ruff backend** | limpo | **limpo** | — |
 | **tsc --noEmit** | limpo | **limpo** | — |
@@ -193,15 +195,39 @@
 
 ---
 
-## 12. Smoke E2E
+## 12. Deploy em producao
 
-O smoke E2E completo (com usuario logado + camera real + fluxo completo de
-transicao em staging com 10 cenarios) requer deploy em staging + seed de
-usuarios de teste (Vendedor MATRIZ, Motorista, Clicheria). Esses passos
-serao executados **apos o commit e deploy**, nao como parte desta sessao
-de desenvolvimento — exigem browser real com camera.
+Deploy realizado em 2026-04-13. Detalhes completos no ADR-086.
 
-O que **foi validado** nesta sessao:
+**URLs de producao:**
+- Backend: `https://provadigital-production.up.railway.app`
+- Frontend: `https://prova-digital-five.vercel.app`
+- Health check: `https://provadigital-production.up.railway.app/health`
+
+**Validacoes de deploy:**
+- Backend Railway sobe e responde `{"detail":"Not Found"}` na raiz ✅
+- Health check `/health` acessivel ✅
+- Frontend Vercel builda e serve a pagina de login ✅
+- CORS configurado via `FRONTEND_URL` no Railway ✅
+- Redeploy automatico via push no GitHub ✅
+
+**Problemas resolvidos durante o deploy (4):**
+1. Setuptools flat-layout error (`app` + `migrations` como dois pacotes).
+   Fix: `[tool.setuptools.packages.find] include = ["app*"]`.
+2. `uvicorn: command not found` no Railway.
+   Fix: `python -m uvicorn` em vez de `uvicorn` direto.
+3. `No module named uvicorn` — `pip install -e .` nao instalava deps no
+   runtime do Railway.
+   Fix: `requirements.txt` explicito (Railway nixpacks detecta automaticamente).
+4. CORS bloqueado — `NEXT_PUBLIC_API_URL` apontava para `localhost` em vez
+   da URL do Railway; e URL com barra no final gerava dupla `//`.
+   Fix: variavel corrigida na Vercel sem barra final.
+
+---
+
+## 13. Smoke E2E
+
+**Validacoes pre-deploy (sessao de desenvolvimento 2026-04-10):**
 - Dev server sobe sem erros: `preview_start frontend` ✅
 - `/escanear` rota acessivel (compila, middleware redireciona corretamente) ✅
 - Zero erros no console do browser ✅
@@ -211,3 +237,26 @@ O que **foi validado** nesta sessao:
 - `tsc --noEmit` limpo ✅
 - `next lint` limpo ✅
 - `next build` OK (11.4 kB bundle) ✅
+
+**Validacoes pos-deploy (2026-04-13):**
+- Backend Railway sobe na porta 8080 e responde OK ✅
+- Frontend Vercel builda e serve paginas corretamente ✅
+- Login funciona via Supabase Auth ✅
+- CORS entre Vercel → Railway configurado e funcionando ✅
+
+**Smoke E2E com camera real (pendente):**
+Os 10 cenarios com camera real + usuarios de teste (Vendedor MATRIZ, Motorista,
+Clicheria) serao executados pelo Mario diretamente no celular, agora que o
+deploy esta no ar. Os usuarios de teste precisam ser cadastrados previamente
+via `POST /api/v1/users/` (ver §9.3 P1 do `WAVE3_LOTE_A_ANALYSIS.md`).
+
+---
+
+## 14. Proximo passo — Lote B
+
+O Lote B (Componente 12 — Timeline Visual) so sera iniciado apos o **"GO
+LOTE B"** explicito do Mario. Ate la, nenhuma analise, planejamento ou codigo
+do C12 sera produzido. Ver secao 8 acima para riscos residuais.
+
+Os Componentes 13 (Cancelamento) e 14 (Reinicio de Ciclo) ficam para o
+Lote C, apos o Lote B.
