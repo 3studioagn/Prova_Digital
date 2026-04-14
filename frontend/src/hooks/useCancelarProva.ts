@@ -23,12 +23,12 @@ export function useCancelarProva(
   const cancelar = useCallback(
     async (provaId: string, motivoCancelamento: string) => {
       setState({ loading: true, error: null, result: null });
-      const token = await getToken();
-      if (!token) {
-        setState({ loading: false, error: "Sessao expirada.", result: null });
-        return null;
-      }
       try {
+        const token = await getToken();
+        if (!token) {
+          setState({ loading: false, error: "Sessao expirada.", result: null });
+          return null;
+        }
         const data = await apiFetch<TransicaoResponse>(
           `/api/v1/provas/${provaId}/cancelar`,
           {

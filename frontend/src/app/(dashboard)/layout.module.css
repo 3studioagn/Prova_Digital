@@ -341,7 +341,7 @@
   /* Container externo do mobile header: da o respiro em volta do pill */
   .mobileHeader {
     display: block;
-    padding: 1rem 1rem 0.5rem;
+    padding: 1rem 1rem 2rem;
     background: transparent;
     position: sticky;
     top: 0;
@@ -350,8 +350,8 @@
 
   /* Pill dark rounded — logo a esquerda, hamburger a direita */
   .mobileHeaderInner {
-    height: 56px;
-    padding: 0 1.5rem;
+    height: 70px;
+    padding: 0 2.25rem;
     background: var(--color-bg-input);
     border-radius: 9999px;
   }
@@ -359,7 +359,7 @@
   .mobileLogo {
     display: block;
     height: auto;
-    width: 90px;
+    width: 80px;
   }
 
   .hamburger {
@@ -468,7 +468,7 @@
      flui livre e o browser faz scroll natural). */
   .main {
     margin-left: 0;
-    padding: 0 1rem 1rem;
+    padding: 0 2rem 2rem;
     height: auto;
     min-height: 100vh;
     overflow: visible;

@@ -35,6 +35,7 @@ import base64
 import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from time import monotonic as _monotonic
 
 from botocore.exceptions import ClientError
 from fastapi import (
@@ -47,7 +48,7 @@ from fastapi import (
     Response,
     status,
 )
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,6 +67,11 @@ from app.db.models import (
     Usuario,
 )
 from app.db.session import get_db
+from app.domain.schemas.dashboard import (
+    AtrasadaPorVendedor,
+    DashboardContadores,
+    DashboardResponse,
+)
 from app.domain.schemas.prova import (
     ALLOWED_CONTENT_TYPES,
     MAX_UPLOAD_BYTES,
@@ -953,6 +959,234 @@ def _build_prova_response(
     )
 
 
+# ─── Dashboard (Wave 4, Componente 15) ───────────────────────────────────
+#
+# RF-014: contadores em tempo real dos status das provas.
+# RN-008: calculo de "Atrasadas" com horas corridas (aprovado Wave 4).
+#
+# Estrategia de performance (ADR-092):
+#   1. Query unica consolidada com COUNT(*) FILTER — 1 scan da tabela
+#      em vez de 4 queries separadas.
+#   2. Cache in-memory com TTL 5s por perfil de scoping — 30 usuarios
+#      simultanamente recebem cache hit, gerando 1 query real a cada 5s.
+#   3. Leitura de tempo_atraso e a unica query separada (tabela diferente,
+#      muda raramente — cache natural do Postgres buffer).
+#
+# O endpoint deve ficar ANTES de /{prova_id} para que o FastAPI nao tente
+# interpretar "dashboard" como UUID.
+
+TERMINAL_STATUSES = (
+    StatusProvaEnum.RECEBIDA_PELA_CLICHERIA,
+    StatusProvaEnum.CANCELADA,
+)
+
+# ── Cache in-memory TTL 5s (ADR-092) ────────────────────────────────────
+#
+# Chave = perfil de scoping (admin | vendedor:{id} | motorista | clicheria).
+# Valor = (timestamp_monotonic, DashboardResponse).
+#
+# Seguro em asyncio single-threaded (event loop cooperativo, sem race).
+# Cada worker uvicorn tem seu proprio cache — aceitavel (worst case:
+# N workers = N queries no cold start, ainda >>30x melhor que sem cache).
+_dashboard_cache: dict[str, tuple[float, DashboardResponse]] = {}
+DASHBOARD_CACHE_TTL_SECONDS = 5
+
+
+def _dashboard_cache_key(user: Usuario) -> str:
+    """Gera chave de cache baseada no perfil de scoping do usuario."""
+    if user.is_admin:
+        return "admin"
+    if user.setor == SetorEnum.VENDEDOR:
+        return f"vendedor:{user.id}"
+    if user.setor == SetorEnum.MOTORISTA:
+        return "motorista"
+    if user.setor == SetorEnum.CLICHERIA:
+        return "clicheria"
+    return f"other:{user.id}"
+
+
+def _dashboard_cache_get(key: str) -> DashboardResponse | None:
+    """Retorna resposta cacheada se dentro do TTL, senao None."""
+    entry = _dashboard_cache.get(key)
+    if entry is not None and (_monotonic() - entry[0]) < DASHBOARD_CACHE_TTL_SECONDS:
+        return entry[1]
+    return None
+
+
+def _dashboard_cache_set(key: str, resp: DashboardResponse) -> None:
+    """Armazena resposta no cache com timestamp atual."""
+    _dashboard_cache[key] = (_monotonic(), resp)
+
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard(
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> DashboardResponse:
+    """Retorna contadores agregados para o dashboard (RF-014, US-013).
+
+    Autenticado (qualquer perfil ativo). Scoping por setor via
+    `_scoping_filter()` — admin ve tudo, vendedor ve suas provas, etc.
+
+    Performance (ADR-092):
+      - 1 query consolidada com COUNT(*) FILTER (em vez de 4 separadas).
+      - Cache in-memory TTL 5s por perfil — 30 usuarios simultaneos
+        geram 1 query real a cada 5s.
+      - Indices: idx_provas_status, idx_movimentacoes_prova_data.
+    """
+    # ── Cache hit? ───────────────────────────────────────────────────────
+    cache_key = _dashboard_cache_key(current_user)
+    cached = _dashboard_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    # ── Cache miss — executar queries ────────────────────────────────────
+    scoping = _scoping_filter(current_user)
+
+    try:
+        # ── Q1: Ler tempo_atraso da configuracao (RN-008) ────────────────
+        cfg_stmt = select(ConfiguracaoSistema.valor).where(
+            ConfiguracaoSistema.chave == "tempo_atraso_horas_uteis"
+        )
+        cfg_result = await db.execute(cfg_stmt)
+        tempo_atraso_raw = cfg_result.scalar_one_or_none()
+        try:
+            tempo_atraso_horas = (
+                int(tempo_atraso_raw) if tempo_atraso_raw is not None else 48
+            )
+        except (ValueError, TypeError):
+            tempo_atraso_horas = 48
+
+        # ── Q2: Query consolidada — todos os contadores em 1 scan ────────
+        #
+        # COUNT(*) FILTER (WHERE cond) e executado em uma unica passagem
+        # pela tabela. O Postgres avalia todas as FILTER conditions por
+        # linha e incrementa os contadores correspondentes.
+        #
+        # A subquery correlacionada para "atrasadas" e resolvida via
+        # idx_movimentacoes_prova_data (prova_id, created_at DESC).
+        hoje_brt_inicio = (
+            datetime.now(BRT_TIMEZONE)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .astimezone(timezone.utc)
+        )
+        limite_atraso = datetime.now(timezone.utc) - timedelta(
+            hours=tempo_atraso_horas
+        )
+
+        ultima_mov_subq = (
+            select(func.max(Movimentacao.created_at))
+            .where(Movimentacao.prova_id == ProvaDigital.id)
+            .correlate(ProvaDigital)
+            .scalar_subquery()
+        )
+
+        stmt = select(
+            func.count().filter(
+                ProvaDigital.status == StatusProvaEnum.RETIRADA_PELO_VENDEDOR
+            ).label("com_vendedor"),
+            func.count().filter(
+                ProvaDigital.status == StatusProvaEnum.APROVADA_PELO_VENDEDOR
+            ).label("aprovadas"),
+            func.count().filter(
+                ProvaDigital.status == StatusProvaEnum.REPROVADA_PELO_VENDEDOR
+            ).label("reprovadas"),
+            func.count().filter(
+                ProvaDigital.status == StatusProvaEnum.DE_VOLTA_3STUDIO
+            ).label("aguardando_envio"),
+            func.count().filter(
+                ProvaDigital.status == StatusProvaEnum.COM_MOTORISTA
+            ).label("com_motorista"),
+            func.count().filter(
+                ProvaDigital.status.in_((
+                    StatusProvaEnum.ENVIADA_PARA_CLICHERIA,
+                    StatusProvaEnum.ENCAMINHADA_A_CLICHERIA,
+                ))
+            ).label("na_clicheria"),
+            func.count().filter(
+                ProvaDigital.status == StatusProvaEnum.RECEBIDA_PELA_CLICHERIA
+            ).label("concluidas"),
+            func.count().filter(
+                ProvaDigital.created_at >= hoje_brt_inicio
+            ).label("criadas_hoje"),
+            func.count().filter(
+                ProvaDigital.status.not_in(TERMINAL_STATUSES)
+            ).label("total_ativas"),
+            func.count().filter(and_(
+                ProvaDigital.status.not_in(TERMINAL_STATUSES),
+                func.coalesce(ultima_mov_subq, ProvaDigital.created_at)
+                < limite_atraso,
+            )).label("atrasadas"),
+        ).select_from(ProvaDigital)
+
+        if scoping is not None:
+            stmt = stmt.where(scoping)
+
+        row = (await db.execute(stmt)).one()
+
+        # ── Q3: Atrasadas por vendedor (Figma: lista no card Atrasadas) ──
+        #
+        # JOIN com usuarios para obter nome do vendedor. GROUP BY vendedor.
+        # Ordenado por quantidade DESC, limitado a 10.
+        stmt_atrasadas_vendedor = (
+            select(
+                Usuario.nome.label("vendedor_nome"),
+                func.count().label("quantidade"),
+            )
+            .select_from(ProvaDigital)
+            .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
+            .where(
+                ProvaDigital.status.not_in(TERMINAL_STATUSES),
+                func.coalesce(ultima_mov_subq, ProvaDigital.created_at)
+                < limite_atraso,
+            )
+            .group_by(Usuario.id, Usuario.nome)
+            .order_by(func.count().desc())
+            .limit(10)
+        )
+        if scoping is not None:
+            stmt_atrasadas_vendedor = stmt_atrasadas_vendedor.where(scoping)
+
+        atrasadas_vendedor_rows = (
+            await db.execute(stmt_atrasadas_vendedor)
+        ).all()
+
+    except Exception:
+        logger.exception("Erro ao calcular contadores do dashboard")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Erro ao calcular contadores do dashboard",
+        )
+
+    # ── Montar resposta ──────────────────────────────────────────────────
+    response = DashboardResponse(
+        contadores=DashboardContadores(
+            criadas_hoje=row.criadas_hoje,
+            com_vendedor=row.com_vendedor,
+            aprovadas=row.aprovadas,
+            reprovadas=row.reprovadas,
+            aguardando_envio=row.aguardando_envio,
+            com_motorista=row.com_motorista,
+            na_clicheria=row.na_clicheria,
+            concluidas=row.concluidas,
+            atrasadas=row.atrasadas,
+        ),
+        total_ativas=row.total_ativas,
+        tempo_atraso_horas=tempo_atraso_horas,
+        atrasadas_por_vendedor=[
+            AtrasadaPorVendedor(
+                vendedor_nome=r.vendedor_nome,
+                quantidade=r.quantidade,
+            )
+            for r in atrasadas_vendedor_rows
+        ],
+        atualizado_em=datetime.now(timezone.utc),
+    )
+
+    _dashboard_cache_set(cache_key, response)
+    return response
+
+
 @router.get("/{prova_id}", response_model=ProvaResponse)
 async def get_prova_detail(
     prova_id: uuid.UUID = Depends(parse_prova_id),
@@ -1356,17 +1590,25 @@ def _computar_transicoes_permitidas(
         except (TransicaoInvalidaError, AtorNaoAutorizadoError):
             continue
 
-        # Regra extra RF-009 para APROVADA_PELO_VENDEDOR.
+        # Regra extra RF-009 para pos-aprovacao: filtro por localizacao.
+        if prova.status == StatusProvaEnum.APROVADA_PELO_VENDEDOR:
+            if not usuario.is_admin:
+                if destino == StatusProvaEnum.DE_VOLTA_3STUDIO:
+                    if usuario.localizacao != LocalizacaoEnum.MATRIZ:
+                        continue
+                elif destino == StatusProvaEnum.ENCAMINHADA_A_CLICHERIA:
+                    if usuario.localizacao != LocalizacaoEnum.FILIAL:
+                        continue
+
+        # Admin sem localizacao nao pode aprovar (RotaIndeterminavelError
+        # em executar_transicao). Filtramos aqui para nao exibir botao
+        # que vai falhar na execucao.
         if (
-            prova.status == StatusProvaEnum.APROVADA_PELO_VENDEDOR
-            and not usuario.is_admin
+            destino == StatusProvaEnum.APROVADA_PELO_VENDEDOR
+            and usuario.setor != SetorEnum.VENDEDOR
+            and usuario.localizacao is None
         ):
-            if destino == StatusProvaEnum.DE_VOLTA_3STUDIO:
-                if usuario.localizacao != LocalizacaoEnum.MATRIZ:
-                    continue
-            elif destino == StatusProvaEnum.ENCAMINHADA_A_CLICHERIA:
-                if usuario.localizacao != LocalizacaoEnum.FILIAL:
-                    continue
+            continue
 
         permitidas.append(destino)
 
@@ -1894,7 +2136,7 @@ async def cancelar_prova(
             motivo_reprovacao=movimentacao.motivo_reprovacao,
             ciclo=movimentacao.ciclo,
             rota_no_momento=movimentacao.rota_no_momento,
-            created_at=movimentacao.created_at or datetime.now(tz=timezone.utc),
+            created_at=movimentacao.created_at,
         ),
     )
 
@@ -2019,6 +2261,6 @@ async def reiniciar_ciclo_prova(
             motivo_reprovacao=movimentacao.motivo_reprovacao,
             ciclo=movimentacao.ciclo,
             rota_no_momento=movimentacao.rota_no_momento,
-            created_at=movimentacao.created_at or datetime.now(tz=timezone.utc),
+            created_at=movimentacao.created_at,
         ),
     )

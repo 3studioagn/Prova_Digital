@@ -4,7 +4,11 @@
       "Bash(python -c ':*)",
       "Read(//tmp/**)",
       "Bash(python -m pytest -q --tb=short)",
-      "Bash(python -m pytest --cov=app --cov-report=term-missing -q)"
+      "Bash(python -m pytest --cov=app --cov-report=term-missing -q)",
+      "Bash(python3 -c ':*)",
+      "Bash(python -c \"import docx; print\\('python-docx available'\\)\")",
+      "Read(//c/Users/mario.souza/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/33dfd3a7-c185-4c7b-9415-40a4ca2dc1bb/0bafc7cd-6b11-484c-adda-59bc63332225/skills/docx/**)",
+      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\mario.souza\\\\Desktop\\\\Rastreio Prova Digital\\\\RequisitosProvasDigitais_v3_0.docx\" unpacked_requisitos/)"
     ]
   }
 }

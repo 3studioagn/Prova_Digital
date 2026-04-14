@@ -1,0 +1,309 @@
+/* Dashboard — Wave 4, Componente 15
+ *
+ * Layout Figma: grid 3 colunas, height 100% do card pai.
+ *   Col 1-2: cards de contadores + atalhos rapidos
+ *   Col 3: card "Atrasadas" full-height com lista de vendedores
+ *
+ * Os cards preenchem 100% da altura do .cardInner sem criar scroll.
+ * Rows distribuidas proporcionalmente via fr units.
+ */
+
+/* ─── Grid principal — ocupa 100% do pai ─────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+  gap: 1rem;
+  height: 100%;
+}
+
+/* ─── Posicionamento explicito: 3 rows iguais ────────────────────────── */
+
+.cardCriadas {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.cardComVendedor {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.cardAprovadas {
+  grid-column: 1 / 3;
+  grid-row: 2;
+}
+
+.shortcutsCell {
+  grid-column: 1;
+  grid-row: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.cardNaClicheria {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.cardAtrasadas {
+  grid-column: 3;
+  grid-row: 1 / 4;
+}
+
+/* ─── Card base (Figma: fafafa, radius 31, shadow) ───────────────────── */
+
+.card {
+  background: #fafafa;
+  border: 1px solid rgba(202, 202, 202, 0.4);
+  border-radius: 31px;
+  box-shadow: 0 0 13.6px rgba(0, 0, 0, 0.04);
+  padding: 2rem 2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+  overflow: hidden;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+.card:active {
+  transform: translateY(0);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.cardLabel {
+  font-size: clamp(1.1rem, 1.6vw, 1.5rem);
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.29);
+  line-height: 1.4;
+}
+
+.cardIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 53px;
+  height: 61px;
+  background: var(--color-accent);
+  border-radius: 16px;
+  flex-shrink: 0;
+}
+
+.cardIconSvg {
+  width: 28px;
+  height: 32px;
+  fill: none;
+  stroke: #000;
+  stroke-width: 1.5;
+}
+
+.cardValue {
+  font-size: clamp(2.5rem, 4vw, 4.5rem);
+  font-weight: 400;
+  color: #000;
+  line-height: 1;
+  margin-top: auto;
+}
+
+/* ─── Card "Atrasadas" ───────────────────────────────────────────────── */
+
+.atrasadasList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.atrasadasList::-webkit-scrollbar {
+  display: none;
+}
+
+.atrasadasItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1.2rem;
+  background: rgba(147, 147, 147, 0.1);
+  border-radius: 54px;
+  flex-shrink: 0;
+}
+
+.atrasadasNome {
+  font-size: clamp(0.875rem, 1.2vw, 1.125rem);
+  font-weight: 300;
+  color: #595959;
+}
+
+.atrasadasQtd {
+  font-size: clamp(0.875rem, 1.2vw, 1.125rem);
+  font-weight: 300;
+  color: #595959;
+}
+
+.atrasadasTotal {
+  font-size: clamp(2.5rem, 4vw, 4.5rem);
+  font-weight: 400;
+  color: #000;
+  line-height: 1;
+  margin-top: 1rem;
+  flex-shrink: 0;
+}
+
+.atrasadasLabelColor {
+  color: #b1b1b1;
+}
+
+/* ─── Botao Escanear QR Code (preto) ─────────────────────────────────── */
+
+.shortcutScan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 2rem;
+  background: #000;
+  border-radius: 31px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  text-decoration: none;
+  border: none;
+  flex: 1;
+}
+
+.shortcutScan:hover {
+  opacity: 0.85;
+}
+
+.shortcutScanLabel {
+  font-size: clamp(1rem, 1.3vw, 1.25rem);
+  font-weight: 400;
+  color: #fff;
+}
+
+.shortcutScanIcon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.9;
+  flex-shrink: 0;
+}
+
+/* ─── Botao Nova Prova (amarelo) ─────────────────────────────────────── */
+
+.shortcutNova {
+  display: flex;
+  align-items: center;
+  padding: 1.25rem 2rem;
+  background: var(--color-accent);
+  border-radius: 31px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-decoration: none;
+  border: none;
+  flex: 1;
+}
+
+.shortcutNova:hover {
+  background: var(--color-accent-hover);
+}
+
+.shortcutNovaLabel {
+  font-size: clamp(1rem, 1.3vw, 1.25rem);
+  font-weight: 400;
+  color: #000;
+}
+
+/* ─── Loading / Error ────────────────────────────────────────────────── */
+
+.loadingContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-card-text-dim);
+  font-size: var(--fs-lg);
+}
+
+.errorContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  height: 100%;
+  color: var(--color-danger);
+  font-size: var(--fs-base);
+}
+
+.retryButton {
+  padding: 0.5rem 1.5rem;
+  background: var(--color-accent);
+  color: var(--color-text-dark);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.retryButton:hover {
+  background: var(--color-accent-hover);
+}
+
+/* ─── Responsivo: < 900px (2 colunas, Atrasadas abaixo) ─────────────── */
+
+@media (max-width: 899px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto auto auto;
+    height: auto;
+  }
+
+  .cardCriadas { grid-column: 1; grid-row: 1; }
+  .cardComVendedor { grid-column: 2; grid-row: 1; }
+  .cardAprovadas { grid-column: 1 / 3; grid-row: 2; }
+  .shortcutsCell { grid-column: 1; grid-row: 3; }
+  .cardNaClicheria { grid-column: 2; grid-row: 3; }
+  .cardAtrasadas { grid-column: 1 / 3; grid-row: 4; min-height: 300px; }
+
+  .card {
+    min-height: 160px;
+  }
+}
+
+/* ─── Responsivo: < 600px (1 coluna, todos empilhados — RNF-006) ────── */
+
+@media (max-width: 599px) {
+  .grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(6, auto);
+    height: auto;
+  }
+
+  .cardCriadas { grid-column: 1; grid-row: 1; }
+  .cardComVendedor { grid-column: 1; grid-row: 2; }
+  .cardAprovadas { grid-column: 1; grid-row: 3; }
+  .shortcutsCell { grid-column: 1; grid-row: 4; }
+  .cardNaClicheria { grid-column: 1; grid-row: 5; }
+  .cardAtrasadas { grid-column: 1; grid-row: 6; min-height: 250px; }
+
+  .card {
+    min-height: 140px;
+  }
+}

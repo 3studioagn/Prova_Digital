@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useCancelarProva } from "@/hooks/useCancelarProva";
 import { useReiniciarCiclo } from "@/hooks/useReiniciarCiclo";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { ProvaResponse, StatusProva } from "@/lib/types/prova";
 import styles from "./detalhe.module.css";
 
@@ -34,6 +35,7 @@ export function AdminActions({ prova, onActionComplete }: Props) {
   const { user, loading: userLoading } = useCurrentUser();
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const [motivo, setMotivo] = useState("");
+  const focusTrapRef = useFocusTrap<HTMLDivElement>(modal.kind !== "closed");
 
   const getToken = useCallback(async () => {
     const supabase = createClient();
@@ -55,6 +57,13 @@ export function AdminActions({ prova, onActionComplete }: Props) {
     reset: resetReiniciar,
   } = useReiniciarCiclo(getToken);
 
+  const handleCloseModal = useCallback(() => {
+    setModal({ kind: "closed" });
+    setMotivo("");
+    resetCancelar();
+    resetReiniciar();
+  }, [resetCancelar, resetReiniciar]);
+
   // ESC fecha modal
   useEffect(() => {
     if (modal.kind === "closed") return;
@@ -63,14 +72,7 @@ export function AdminActions({ prova, onActionComplete }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
-
-  const handleCloseModal = useCallback(() => {
-    setModal({ kind: "closed" });
-    setMotivo("");
-    resetCancelar();
-    resetReiniciar();
-  }, [resetCancelar, resetReiniciar]);
+  }, [modal.kind, handleCloseModal]);
 
   const handleCancelar = useCallback(async () => {
     const trimmed = motivo.trim();
@@ -130,6 +132,7 @@ export function AdminActions({ prova, onActionComplete }: Props) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="cancelar-modal-title"
+          ref={focusTrapRef}
         >
           <div className={styles.adminModalContent}>
             <h2 id="cancelar-modal-title" className={styles.adminModalTitle}>
@@ -183,6 +186,7 @@ export function AdminActions({ prova, onActionComplete }: Props) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="reiniciar-modal-title"
+          ref={focusTrapRef}
         >
           <div className={styles.adminModalContent}>
             <h2 id="reiniciar-modal-title" className={styles.adminModalTitle}>

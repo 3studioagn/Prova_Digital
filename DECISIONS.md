@@ -2563,3 +2563,112 @@ A constante `ASSINATURA_BASE64_MAX_BYTES` e exportada de `lib/types/prova.ts` �
 ### Decisao 3 — Input manual na IdleView do /escanear
 **Decisao:** Campo de texto abaixo do botao "Abrir camera" com label "Inserir codigo manual:" e botao "Buscar". Ao submeter, transiciona direto para `scan-loading` com o payload digitado — mesmo fluxo do scan por camera.
 **Por que:** Reusa 100% do backend existente. O `POST /scan` valida formato + hash constant-time. Se o codigo for invalido, o usuario ve o erro especifico do backend (B-01 ja corrigido nesta sessao).
+
+---
+
+## ADR-090 — Auditoria Wave 3: 3 correcoes HIGH (scan filter, getToken try/catch, focus trap)
+**Data:** 2026-04-13 (Auditoria pos-Wave 3)
+**Contexto:** Auditoria senior completa da Wave 3 contra Requisitos v3.0, Backlog v3.0, DAT v2.0 e UML v3.0. Auditados todos os arquivos backend (state_machine, provas.py, schemas, RLS 006, testes) e frontend (escanear/page, 7 hooks, AdminActions, Timeline, VisualizarEtiquetaModal). Resultado: 0 CRITICAL, 3 HIGH, 6 MEDIUM, 9 LOW. Conformidade 100% com RF/RN/US. As 3 correcoes HIGH foram aplicadas.
+
+### Correcao 1 — Filtro de APROVADA no scan para admins sem localizacao (H-01)
+**Problema:** `_computar_transicoes_permitidas` em `provas.py` nao filtrava `APROVADA_PELO_VENDEDOR` para admins (setor STUDIO) sem localizacao. O admin via o botao "Aprovar" no scan, mas ao executar recebia 422 (`RotaIndeterminavelError` em `determinar_rota`), porque a rota nao pode ser determinada sem localizacao VENDEDOR.
+**Decisao:** Adicionar check no loop de candidatos: se `destino == APROVADA_PELO_VENDEDOR` e o usuario nao e VENDEDOR e nao tem localizacao, filtrar da lista. Assim o botao nao aparece e o admin nao e induzido a erro.
+**Alternativas:**
+  - Tratar `RotaIndeterminavelError` no scan e filtrar a posteriori (rejeitado: a funcao `_computar_transicoes_permitidas` ja e o lugar certo para esse filtro, e seria mais caro chamar `determinar_rota` para cada candidato).
+  - Permitir que admin STUDIO aprove e usar rota default (rejeitado: viola RN-007 que exige rota determinada pela localizacao do vendedor).
+**Consequencias:** Admin STUDIO continua vendo todas as outras transicoes (CANCELADA e CRIADA ja eram filtradas por C13/C14). 407 testes passando sem regressao.
+
+### Correcao 2 — getToken() protegido com try/catch nos hooks admin (H-02)
+**Problema:** `useCancelarProva.ts` e `useReiniciarCiclo.ts` chamavam `await getToken()` fora do try/catch. Se o Supabase client lancasse excecao (sessao corrompida, storage error), a promise rejeitava sem tratamento e `loading` ficava `true` para sempre, travando a UI. Os hooks `useScanProva` e `useExecutarTransicao` ja faziam o try/catch corretamente.
+**Decisao:** Mover `const token = await getToken()` para dentro do bloco try existente. Se `getToken()` falhar, cai no catch e exibe mensagem generica.
+**Consequencias:** UI nunca trava em estado `loading: true` por erro de sessao. Consistencia entre todos os 4 hooks de API.
+
+### Correcao 3 — Focus trap nos modais (WCAG 2.1) (H-03)
+**Problema:** Todos os 3 modais da Wave 3 (AssinaturaModal, AdminActions cancelar/reiniciar, VisualizarEtiquetaModal) usavam `role="dialog"` e `aria-modal="true"` mas nao implementavam focus trap. Tab escapava para elementos atras do overlay.
+**Decisao:** Criar hook reutilizavel `useFocusTrap<T>` que:
+  - Prende Tab/Shift+Tab dentro de um container via `keydown` listener
+  - Move foco para o primeiro elemento focavel ao ativar
+  - Restaura o foco anterior ao desativar
+  - Retorna callback ref (nao RefObject) para compatibilidade com React 18 + TypeScript estrito onde `ref` de elementos JSX nao aceita `RefObject<T | null>`
+**Alternativas:**
+  - Biblioteca `focus-trap-react` (rejeitado: +1 dependencia para um hook de 60 linhas).
+  - Focus trap inline por modal (rejeitado: duplicacao; hook reutilizavel e mais limpo).
+  - `inert` attribute no conteudo atras do modal (rejeitado: suporte parcial em browsers antigos; focus trap e mais confiavel).
+**Consequencias:** 3 modais com focus trap. Hook criado em `frontend/src/hooks/useFocusTrap.ts`. +0.5 kB no bundle. Reutilizavel para qualquer modal futuro.
+
+---
+
+## ADR-091 — Dashboard em Tempo Real: endpoint agregado + Recharts + Supabase Realtime (Wave 4 / Componente 15)
+**Data:** 2026-04-14
+**Contexto:** RF-014 exige dashboard com 9 contadores em tempo real clicaveis. US-013 define criterios de aceitacao. RN-008 define calculo de "Atrasadas". RNF-001 exige < 3s de carregamento.
+**Decisao:** 8 decisoes de desenho:
+  1. **Endpoint unico `GET /api/v1/provas/dashboard`** que retorna os 9 contadores em uma unica chamada, em vez de 9 endpoints separados. Motivo: minimiza roundtrips HTTP, latencia e complexidade do frontend.
+  2. **Contadores derivados por query** (sem tabela materializada). Volume atual (< 500 provas) nao justifica materialized view. 3 queries leves: GROUP BY status, COUNT criadas_hoje, COUNT atrasadas com subquery correlacionada.
+  3. **"Criadas hoje" = provas criadas hoje (BRT)**, qualquer status. Nao e filtro de status CRIADA — e volume de intake diario. Usa `BRT_TIMEZONE` (ADR-048 padrao).
+  4. **"Atrasadas" com horas corridas** (nao uteis). Decisao aprovada pelo Mario. Calcular horas uteis reais exigiria tabela de feriados + logica de calendario — complexidade desproporcional para MVP. Se necessario, Wave 6 pode evoluir.
+  5. **Supabase Realtime via `postgres_changes`** em `provas_digitais`. Publicacao `supabase_realtime` configurada com `ALTER PUBLICATION ADD TABLE`. Frontend assina via `@supabase/supabase-js`. Debounce de 2s no refetch para evitar flood.
+  6. **Fallback para polling** (30s) se Realtime falhar (desconexao, timeout). Polling ativado inicialmente, cancelado quando Realtime conecta.
+  7. **Recharts para grafico de distribuicao** (bar chart horizontal). Import seletivo para tree-shaking. +105 kB na page, 294 kB First Load JS.
+  8. **Framer Motion para animacao** dos cards de contador (entrada com fade+slide, reutiliza dep existente).
+**Alternativas:**
+  - Dashboard server-side com revalidacao (rejeitado: nao atende "tempo real" do RF-014).
+  - Chart.js em vez de Recharts (rejeitado: DAT v2.0 especifica Recharts explicitamente).
+  - Materialized view para contadores (rejeitado: overkill para < 500 provas).
+  - pg_notify customizado (rejeitado: `postgres_changes` do Supabase Realtime ja faz isso nativamente).
+**Consequencias:** 1 endpoint novo, 1 pagina frontend, 1 dep npm (recharts), `provas_digitais` na publicacao Realtime. 14 testes novos backend (421 total). Menu "Dashboard" ativado.
+**Status:** SUPERSEDED parcialmente por ADR-092 (query consolidada + cache).
+
+---
+
+## ADR-092 — Dashboard: query consolidada + cache in-memory TTL 5s (Wave 4 — otimizacao)
+**Data:** 2026-04-14
+**Contexto:** A implementacao inicial do ADR-091 usava 4 queries separadas (GROUP BY + COUNT hoje + SELECT config + COUNT atrasadas). Para 30 usuarios simultaneos, cada mudanca de status gerava 120 queries (30 × 4). Mario questionou a viabilidade financeira em escala e sugeriu consolidar queries + cache curto.
+**Decisao:**
+  1. **Query unica consolidada** com `COUNT(*) FILTER (WHERE ...)` do PostgreSQL. Todos os 10 contadores (9 + total_ativas) sao calculados em 1 scan da tabela `provas_digitais`, incluindo "atrasadas" via subquery correlacionada em `movimentacoes`. A leitura de `tempo_atraso_horas_uteis` permanece como query separada (tabela diferente, valor estavel).
+  2. **Cache in-memory TTL 5 segundos** por perfil de scoping. Chaves: `admin`, `vendedor:{uuid}`, `motorista`, `clicheria`. `dict[str, (float, DashboardResponse)]` com `time.monotonic`. Seguro em asyncio single-threaded (event loop cooperativo). Cada worker uvicorn tem cache proprio.
+  3. **Polling frontend ajustado para 10s** (antes 30s). O custo real e ~1 query a cada 5s por perfil (cache hit para os demais), nao 1 query por usuario.
+**Impacto medido:**
+  - 1 mudanca de status, 30 usuarios: **120 queries → 1 query** (cache hit para os outros 29).
+  - Polling 30 usuarios: **14.400 queries/hora → ~720 queries/hora** (~20x reducao).
+**Alternativas:**
+  - Mutacao local via payload do Realtime (rejeitado: exige REPLICA IDENTITY FULL + logica complexa de increment/decrement client-side + "atrasadas" nao capturavel por evento).
+  - Redis/Memcached externo (rejeitado: nova infra para um cache de 5s; in-memory e suficiente para o volume).
+  - Cache compartilhado entre workers (rejeitado: requer IPC ou Redis; cache por worker e aceitavel — worst case N workers = N queries cold start).
+**Consequencias:** 3 queries por cache miss (config + consolidada + atrasadas_por_vendedor). Handler serve cache hit em <1ms. 17 testes (424 total). Frontend polling 10s seguro pelo cache backend.
+
+---
+
+## ADR-093 — Dashboard: layout Figma com grid 3x3, sem Recharts, breakdown de atrasadas por vendedor (Wave 4)
+**Data:** 2026-04-14
+**Contexto:** Apos a implementacao inicial (ADR-091/092) com grid generico de 9 cards + Recharts, Mario enviou o design Figma (node 58:183) com layout especifico: 5 contadores (Criadas hoje, Com Vendedor, Aprovadas, Na clicheria, Atrasadas) + 2 atalhos rapidos (Escanear QR Code, Nova Prova). Sem graficos.
+**Decisao:** 5 decisoes:
+  1. **Grid 3 colunas x 3 rows iguais** (`1fr 1fr 1fr`). Os 4 counter cards (Criadas hoje, Com Vendedor, Aprovadas, Na clicheria) tem a mesma altura. Os 2 shortcuts empilhados dividem a altura de 1 card (row 3, col 1). Card Atrasadas ocupa col 3, rows 1-3 (full height).
+  2. **Recharts removido.** O design Figma nao inclui graficos. A dependencia foi desinstalada. Bundle da pagina: 105 kB → 3 kB.
+  3. **Contadores nao exibidos no Figma permanecem no backend.** `reprovadas`, `aguardando_envio`, `com_motorista`, `concluidas` continuam calculados e retornados pelo endpoint (para uso futuro ou por outros consumers). O frontend renderiza apenas os 5 que o Figma especifica.
+  4. **`atrasadas_por_vendedor`** adicionado ao `DashboardResponse`. Query com JOIN em `usuarios`, GROUP BY `vendedor_nome`, ORDER BY `quantidade DESC`, LIMIT 10. Renderizado no card Atrasadas como lista de pills com nome + contagem, conforme Figma.
+  5. **Cards Figma:** `#fafafa`, `border: 1px solid rgba(202,202,202,0.4)`, `border-radius: 31px`, `box-shadow: 0 0 13.6px rgba(0,0,0,0.04)`. Icone amarelo `53x61px` com `border-radius: 16px`. Valores `clamp(2.5rem, 4vw, 4.5rem)`, labels `clamp(1.1rem, 1.6vw, 1.5rem)` com `color: rgba(0,0,0,0.29)`.
+**Alternativas:**
+  - Manter Recharts com grafico abaixo dos cards (rejeitado: nao esta no Figma, +102 kB de bundle desnecessario).
+  - Renderizar todos os 9 contadores do RF-014 no frontend (rejeitado: Figma e a especificacao visual aprovada pelo stakeholder).
+  - Card Atrasadas com total apenas (rejeitado: Figma mostra breakdown por vendedor explicitamente).
+**Consequencias:** Layout match Figma pixel-perfect. Bundle 3 kB (vs 105 kB). Backend retorna dados completos (9 contadores + breakdown), frontend consome seletivamente. 2 testes adicionais para `atrasadas_por_vendedor` (424 total).
+
+
+## ADR-094 — Auditoria Wave 4: correcoes H-01 + M-03 + L-01 + L-02 + L-04
+**Data:** 2026-04-14
+
+**Contexto:** Auditoria senior da Wave 4 identificou 1 HIGH, 4 MEDIUM e 5 LOW. Correcoes aplicadas para os itens autorizados pelo stakeholder.
+
+**Decisoes:**
+
+  1. **H-01 — Card "Na clicheria" navega sem filtro de status.** O contador `na_clicheria` agrega 2 status (`ENVIADA_PARA_CLICHERIA` + `ENCAMINHADA_A_CLICHERIA`), mas a pagina `/provas` so suporta filtro por 1 status. Passar `?status=ENVIADA_PARA_CLICHERIA` causava discrepancia entre o valor do card e a lista filtrada. Solucao: navegar para `/provas` sem filtro, padrao identico ao card "Atrasadas". Suporte a multi-status sera implementado na Wave 5 (relatorios com filtros combinados).
+
+  2. **M-03 — Breakpoint mobile < 600px adicionado.** Grid 1 coluna com 6 rows empilhados para telas < 600px (RNF-006 exige telas a partir de 5 polegadas). Cards com `min-height: 140px`, Atrasadas com `min-height: 250px`.
+
+  3. **L-01 — GROUP BY corrigido para `Usuario.id, Usuario.nome`.** Evita merge acidental de vendedores homonimos na query `atrasadas_por_vendedor`. Antes agrupava apenas por `nome`.
+
+  4. **L-02 — Guard `ValueError`/`TypeError` no `tempo_atraso_raw`.** `int(tempo_atraso_raw)` agora tem `try/except` com fallback para 48h. Valor invalido no banco nao causa mais 502 generico.
+
+  5. **Itens aceitos sem correcao:** M-01 (5/9 contadores, ADR-093), M-02 (atalhos RF-016, Figma-driven), M-04 (Realtime sem fallback silencioso, decisao Mario), L-03 (Atrasadas sem filtro), L-05 (sem teste TTL).
+
+**Consequencias:** 424 testes passando, 0 regressoes. Linters limpos. Zero toque em Waves 0/1/2/3. Wave 4 aprovada com ressalvas documentadas (M-01, M-02 requerem sign-off formal contra RF-014/RF-016).

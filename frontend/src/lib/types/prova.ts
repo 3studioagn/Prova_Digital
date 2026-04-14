@@ -257,6 +257,37 @@ export interface TransicaoResponse {
  * `ASSINATURA_BASE64_MAX_BYTES` em schemas/prova.py. */
 export const ASSINATURA_BASE64_MAX_BYTES = 700_000;
 
+// ─── Dashboard (Componente 15 — Wave 4) ─────────────────────────────────
+
+/** Contadores agregados do dashboard (RF-014). */
+export interface DashboardContadores {
+  criadas_hoje: number;
+  com_vendedor: number;
+  aprovadas: number;
+  reprovadas: number;
+  aguardando_envio: number;
+  com_motorista: number;
+  na_clicheria: number;
+  concluidas: number;
+  atrasadas: number;
+}
+
+/** Item do breakdown de atrasadas por vendedor. */
+export interface AtrasadaPorVendedor {
+  vendedor_nome: string;
+  quantidade: number;
+}
+
+/** Resposta de GET /api/v1/provas/dashboard. */
+export interface DashboardResponse {
+  contadores: DashboardContadores;
+  total_ativas: number;
+  tempo_atraso_horas: number;
+  atrasadas_por_vendedor: AtrasadaPorVendedor[];
+  atualizado_em: string;
+}
+
+
 /** Monta o payload escaneavel do QR Code a partir dos dados da prova.
  *
  * Formato: "3SD|{nro_requerimento}|{hash[:16]}"

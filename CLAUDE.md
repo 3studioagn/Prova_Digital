@@ -13,8 +13,8 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **0 — Infra** | ✅ **COMPLETA** | Schema Postgres (6 tabelas de dominio + enums + triggers imutabilidade), RLS inicial, R2 bucket, keep-alive cron, CI/CD | 1 |
 | **1 — Auth + RBAC** | ✅ **COMPLETA** (sign-off Sessao 6) | Supabase Auth (ES256 JWKS), CRUD de usuarios com saga auth↔DB, RLS `is_admin=true`, tela `/usuarios` | 1-6 |
 | **2 — Nucleo do Dominio** | ✅ **COMPLETA** (sign-off Sessao 22 pos-auditoria externa) | Cadastro de prova + etiqueta + QR Code (C06), Listagem com filtros (C07), Detalhe + modal etiqueta/QR (C08), Configuracoes do sistema (C09) | 7-22 |
-| **3 — Scanner + Transicoes** | ✅ **COMPLETA** + Review C11 | Camera HTML5, scanner QR, assinatura digital, maquina de estados, reprovacao, roteamento, timeline visual (C12), cancelamento admin (C13), reinicio de ciclo admin (C14). Review C11: bugs stale error, canvas responsivo, modal fluido, entrada manual de codigo QR | 23+ |
-| **4 — Dashboard + Atrasos** | ⏳ | Dashboard tempo real, contadores, calculo de atraso (RN-008), Realtime via Supabase | — |
+| **3 — Scanner + Transicoes** | ✅ **COMPLETA** + Review C11 + Auditoria Senior | Camera HTML5, scanner QR, assinatura digital, maquina de estados, reprovacao, roteamento, timeline visual (C12), cancelamento admin (C13), reinicio de ciclo admin (C14). Review C11: bugs stale error, canvas responsivo, modal fluido, entrada manual de codigo QR. Auditoria: 0 CRITICAL, 3 HIGH corrigidos (scan filter admin, getToken try/catch, focus trap modais) | 23+ |
+| **4 — Dashboard + Atrasos** | ✅ **COMPLETA** + Auditoria Senior | Dashboard tempo real (RF-014, US-013) com layout Figma: 5 contadores (criadas hoje, com vendedor, aprovadas, na clicheria, atrasadas c/ breakdown por vendedor) + 2 atalhos rapidos. Query consolidada + cache TTL 5s (ADR-092). Calculo de atraso horas corridas (RN-008). Supabase Realtime (postgres_changes) + fallback polling 10s. Auditoria: 0 CRITICAL, 1 HIGH corrigido (click Na clicheria), 2 MEDIUM corrigidos (breakpoint mobile, GROUP BY), 2 LOW corrigidos (ValueError guard, CHANGELOG). ADR-094 | — |
 | **5 — Relatorios + Export** | ⏳ | CSV export, metricas por vendedor, dashboards gerenciais | — |
 | **6 — Auditoria + Polish** | ⏳ | Tela de audit_log, cleanup de orfaos R2, rotacao de secrets, hardening final | — |
 
@@ -26,18 +26,22 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 - **3 usuarios ativos**: 2 admins (`admin@3studio.com.br` + `ops@3studio.com.br`) + 1 vendedor FILIAL (`mariosouza@teste.com.br`)
 - **Advisor Supabase limpo** exceto: 1 INFO `rls_enabled_no_policy` em `alembic_version` (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection` (WONTFIX plano pago, ADR-027)
 
-**Endpoints publicos em producao (28 rotas):**
+- **1 tabela na publicacao `supabase_realtime`**: `provas_digitais` (INSERT/UPDATE para dashboard tempo real)
+
+**Endpoints publicos em producao (29 rotas):**
 
 | Prefix | Endpoints | Wave |
 |---|---|---|
 | `/api/v1/users` | `GET /me`, `GET /`, `GET /{id}`, `POST /`, `PATCH /{id}`, `DELETE /{id}` | 1 |
 | `/api/v1/provas` | `POST /upload-url`, `POST /`, `GET /`, `GET /{id}`, `GET /{id}/imagem-url`, `GET /{id}/movimentacoes`, `GET /{id}/etiqueta.pdf`, `GET /{id}/qr-code.png` | 2 |
 | `/api/v1/provas` | `POST /scan`, `POST /{id}/transicoes`, `POST /{id}/cancelar`, `POST /{id}/reiniciar-ciclo` | 3 |
+| `/api/v1/provas` | `GET /dashboard` | 4 |
 | `/api/v1/configuracoes` | `GET /`, `GET /{chave}`, `PATCH /{chave}` | 2 |
 | `/health*` | `/health`, `/health/db`, `/health/r2` | 0 |
 
-**Rotas frontend em producao (8 paginas):**
+**Rotas frontend em producao (9 paginas):**
 - `/login` — Wave 1
+- `/dashboard` — Wave 4 C15 (contadores tempo real + Realtime + layout Figma)
 - `/usuarios` — Wave 1 (CRUD + modais)
 - `/nova-prova` — Wave 2 C06 (form + dropzone + preview etiqueta)
 - `/provas` — Wave 2 C07 (listagem + filtros URL-persisted + paginacao)
@@ -46,7 +50,6 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 - `/escanear` — Wave 3 C10+C11 (scanner QR + assinatura digital + transicao de status + entrada manual de codigo QR)
 
 **Itens do menu ainda inativos (placeholders para Waves futuras):**
-- "Dashboard" — Wave 4
 - "Relatorios" — Wave 5
 - "Informacoes" — possivel Wave 6
 
@@ -128,7 +131,8 @@ provaDigital/
 │   │   │   └── schemas/
 │   │   │       ├── user.py      # Pydantic v2: UserCreate, UserUpdate, UserResponse
 │   │   │       ├── prova.py     # Pydantic v2 Wave 2: Upload/ProvaCreate/ProvaResponse + sanitize_filename
-│   │   │       └── configuracao.py # Pydantic v2 Wave 2 C09: whitelist + validators por chave
+│   │   │       ├── configuracao.py # Pydantic v2 Wave 2 C09: whitelist + validators por chave
+│   │   │       └── dashboard.py   # Pydantic v2 Wave 4 C15: DashboardContadores + DashboardResponse
 │   │   └── services/            # Wave 2 (ADR-040) + Wave 3 (ADR-081)
 │   │       ├── state_machine.py # Transicoes + atores + determinar_rota + executar_transicao (Wave 3 A.1)
 │   │       ├── qrcode_service.py # HMAC-SHA256 hash + PNG via qrcode[pil] (ADR-033/034)
@@ -154,6 +158,7 @@ provaDigital/
 │   │       ├── 004_unify_rls_is_admin.sql  # ADR-018
 │   │       ├── 005_initplan_optimization.sql  # ADR-029 — (SELECT auth.uid()) em 11 policies
 │   │       ├── 006_movimentacoes_insert_and_expand_select.sql  # ADR-082 — INSERT admin + SELECT c/ MOTORISTA/CLICHERIA
+│   │       ├── 007_enable_realtime_provas.sql                 # Wave 4 — provas_digitais na publicacao supabase_realtime
 │   │       └── apply_rls.py
 │   └── tests/
 │       ├── conftest.py          # Fixtures: make_user, admin_user, mock_db, vendedor_matriz/filial
@@ -180,12 +185,14 @@ provaDigital/
 │       │   ├── useListProvas.ts         # Wave 2 C07 — GET /provas com filtros + debounce
 │       │   ├── useProvaDetail.ts        # Wave 2 C08 — GET detail + imagem-url + movimentacoes
 │       │   ├── useConfiguracoes.ts      # Wave 2 C09 — GET list + PATCH por chave
+│       │   ├── useFocusTrap.ts           # Wave 3 Auditoria — focus trap reutilizavel para modais (WCAG 2.1)
 │       │   ├── useScanner.ts            # Wave 3 C10 — wrapper html5-qrcode (SSR-safe + cleanup)
 │       │   ├── useScanProva.ts          # Wave 3 C10 — POST /scan wrapper (retorna {data,error})
 │       │   ├── useExecutarTransicao.ts  # Wave 3 C11 — POST /{id}/transicoes wrapper (retorna {data,error,isConflict})
 │       │   ├── useCurrentUser.ts        # Wave 3 C13 — GET /users/me para detectar admin
 │       │   ├── useCancelarProva.ts      # Wave 3 C13 — POST /{id}/cancelar wrapper
-│       │   └── useReiniciarCiclo.ts     # Wave 3 C14 — POST /{id}/reiniciar-ciclo wrapper
+│       │   ├── useReiniciarCiclo.ts     # Wave 3 C14 — POST /{id}/reiniciar-ciclo wrapper
+│       │   └── useDashboard.ts          # Wave 4 C15 — GET /dashboard wrapper
 │       ├── lib/
 │       │   ├── api.ts           # apiFetch wrapper (token injection, ApiError). Nao usar p/ binarios
 │       │   ├── types/
@@ -225,6 +232,9 @@ provaDigital/
 │               ├── escanear/     # Wave 3 (Componentes 10 + 11)
 │               │   ├── page.tsx                     # scanner QR + assinatura + state machine
 │               │   └── escanear.module.css
+│               ├── dashboard/    # Wave 4 (Componente 15)
+│               │   ├── page.tsx                     # contadores + Recharts + Realtime
+│               │   └── dashboard.module.css
 │               └── configuracoes/ # Wave 2 (Componente 09)
 │                   ├── page.tsx # Tempo atraso + template etiqueta
 │                   └── configuracoes.module.css

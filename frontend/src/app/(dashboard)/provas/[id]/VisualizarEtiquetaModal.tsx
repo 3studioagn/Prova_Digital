@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "@/lib/api";
 import { buildQrPayload } from "@/lib/types/prova";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { CloseIcon } from "@/components/icons";
 import styles from "./detalhe.module.css";
 
@@ -47,6 +48,7 @@ export function VisualizarEtiquetaModal({
 }: Props) {
   const [state, setState] = useState<BlobState>(INITIAL_BLOB);
   const [copied, setCopied] = useState(false);
+  const focusTrapRef = useFocusTrap<HTMLDivElement>(isOpen);
 
   const qrPayload = buildQrPayload(nroRequerimento, qrCodeHash);
 
@@ -205,6 +207,7 @@ export function VisualizarEtiquetaModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="etiqueta-modal-title"
+      ref={focusTrapRef}
     >
       <div className={styles.modalContent}>
         <header className={styles.modalHeader}>

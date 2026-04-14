@@ -42,7 +42,7 @@ interface NavItemSpec {
 }
 
 const MAIN_NAV: NavItemSpec[] = [
-  { key: "dashboard", label: "Dashboard", icon: <HomeIcon /> },
+  { key: "dashboard", label: "Dashboard", icon: <HomeIcon />, href: "/dashboard" },
   { key: "provas", label: "Provas", icon: <LaptopIcon />, href: "/provas" },
   { key: "nova-prova", label: "Nova prova", icon: <PlusIcon />, href: "/nova-prova" },
   { key: "escanear", label: "Escanear", icon: <ScanIcon />, href: "/escanear" },

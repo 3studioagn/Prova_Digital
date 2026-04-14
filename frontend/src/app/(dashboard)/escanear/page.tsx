@@ -16,6 +16,7 @@ import { ScanIcon } from "@/components/icons";
 import { useScanProva } from "@/hooks/useScanProva";
 import { useExecutarTransicao } from "@/hooks/useExecutarTransicao";
 import { useScanner } from "@/hooks/useScanner";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import {
   ASSINATURA_BASE64_MAX_BYTES,
   ROTA_LABELS,
@@ -508,6 +509,7 @@ function AssinaturaModal({
 }) {
   const sigRef = useRef<SignatureCanvas | null>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const focusTrapRef = useFocusTrap<HTMLDivElement>(true);
   const [canvasWidth, setCanvasWidth] = useState(0);
   const [motivo, setMotivo] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -590,6 +592,7 @@ function AssinaturaModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="assinatura-modal-title"
+      ref={focusTrapRef}
     >
       <form className={styles.modalCard} onSubmit={handleSubmit}>
         <h2 id="assinatura-modal-title" className={styles.modalTitle}>

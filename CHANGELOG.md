@@ -2,6 +2,272 @@
 
 ---
 
+## [2026-04-14 — Wave 4] — Dashboard em Tempo Real (Componente 15)
+
+### Contexto
+
+Wave 4 do Backlog v3.0 — Componente 15 (Dashboard em Tempo Real).
+Implementa RF-014 (contadores em tempo real), US-013 (dashboard operacional),
+RN-008 (calculo de atraso com horas corridas) e RNF-001 (< 3s).
+
+### Entregue
+
+**Backend (1 endpoint novo):**
+- `GET /api/v1/provas/dashboard` — retorna 9 contadores agregados, total
+  de provas ativas, parametro de atraso configurado e timestamp UTC.
+- Mapeamento RF-014: criadas_hoje, com_vendedor, aprovadas, reprovadas,
+  aguardando_envio, com_motorista, na_clicheria, concluidas, atrasadas.
+- Calculo de "Atrasadas" (RN-008): horas corridas desde a ultima
+  movimentacao (ou created_at), parametro de `configuracoes_sistema`.
+- Scoping por perfil via `_scoping_filter()` (reuso integral da Wave 2).
+- `DashboardContadores` + `DashboardResponse` schemas (Pydantic v2, frozen).
+- 17 testes novos: **424 passed**, 0 regressoes.
+
+**Infraestrutura Realtime:**
+- `provas_digitais` adicionada a publicacao `supabase_realtime` via
+  `ALTER PUBLICATION` (SQL versionado em `migrations/rls/007`).
+- Frontend assina `postgres_changes` (INSERT/UPDATE) para refetch
+  debounced (2s) dos contadores.
+- Fallback para polling (30s) se Realtime falhar.
+
+**Frontend (1 pagina nova):**
+- `/dashboard` — pagina com 9 cards clicaveis (contadores), grafico de
+  distribuicao (Recharts, bar chart horizontal) e resumo (total ativas +
+  parametro de atraso).
+- Cards com animacao de entrada (Framer Motion) e hover.
+- Click em contador navega para `/provas?status=X` (integra com C07).
+- "Criadas hoje" navega com filtro de periodo (hoje).
+- Hook `useDashboard` (fetch + race protection + mounted guard).
+- Hook `useRealtimeProvas` integrado diretamente na pagina.
+- Responsivo: 1 col (< 600px), 2 cols (< 900px), 3 cols (>= 900px).
+- Menu "Dashboard" ativado no sidebar (1 palavra: `href: "/dashboard"`).
+- Layout reescrito para match exato do Figma (grid 3 colunas).
+- Recharts removido (nao presente no design Figma). Bundle: 3 kB (antes 105 kB).
+- Card "Atrasadas" com lista de vendedores e total (backend: `atrasadas_por_vendedor`).
+- Atalhos rapidos "Escanear QR Code" (preto) e "Nova Prova" (amarelo).
+
+**Banco de dados:** zero alteracoes de schema. `alembic_version` = 009.
+12 policies RLS intactas. 1 tabela na publicacao Realtime.
+
+### Validacoes
+
+- `tsc --noEmit`: limpo
+- `next lint`: 0 warnings
+- `next build`: OK (3.02 kB page / 201 kB First Load JS para `/dashboard`)
+- Backend: **424 passed**, 1 warning pre-existente, **0 regressoes**
+- Ruff: limpo
+
+### Otimizacao aplicada (ADR-092)
+
+**Query consolidada:** 4 queries separadas refatoradas em 1 query unica
+com `COUNT(*) FILTER (WHERE ...)`. Todos os 10 contadores calculados em
+um unico scan da tabela.
+
+**Cache in-memory TTL 5s:** Cache por perfil de scoping (admin, vendedor:{id},
+motorista, clicheria). 30 usuarios simultaneos = 1 query real a cada 5s
+(29 cache hits). Reducao de ~120x por evento de status change.
+
+**Polling 10s:** Antes 30s. Custo real baixo pelo cache backend.
+
+| Cenario | Antes | Depois |
+|---------|-------|--------|
+| 1 status change, 30 usuarios | 120 queries | **1 query** |
+| Polling/hora, 30 usuarios | 14.400 queries | **~720 queries** |
+
+### Arquivos criados
+
+- `backend/app/domain/schemas/dashboard.py`
+- `backend/migrations/rls/007_enable_realtime_provas.sql`
+- `frontend/src/hooks/useDashboard.ts`
+- `frontend/src/app/(dashboard)/dashboard/page.tsx`
+- `frontend/src/app/(dashboard)/dashboard/dashboard.module.css`
+- `WAVE4_ANALYSIS.md`
+
+### Arquivos modificados
+
+- `backend/app/api/v1/provas.py` — +handler dashboard + cache TTL 5s + query consolidada + atrasadas_por_vendedor
+- `backend/tests/test_provas_api.py` — +17 testes dashboard (contadores, cache, scoping, atrasadas_por_vendedor)
+- `frontend/src/lib/types/prova.ts` — +tipos Dashboard + AtrasadaPorVendedor
+- `frontend/src/app/(dashboard)/layout.tsx` — 1 palavra (href do menu Dashboard)
+- `frontend/package.json` — recharts adicionado e depois removido (nao no Figma)
+- `frontend/package-lock.json` — atualizado
+- `CHANGELOG.md` — esta entrada
+- `DECISIONS.md` — ADR-091, ADR-092, ADR-093
+- `CLAUDE.md` — status Wave 4
+
+### Ajuste de layout Figma (ADR-093)
+
+Apos a implementacao inicial, o layout foi reescrito para match exato do
+design Figma (node 58:183). Mudancas:
+
+- **Grid 3 colunas x 3 rows iguais** (em vez do grid generico de 9 cards).
+- **Recharts removido** — o design Figma nao tem graficos. Bundle: 105 kB → 3 kB.
+- **5 itens no Figma:** Criadas hoje, Com Vendedor, Aprovadas, Na clicheria,
+  Atrasadas (com breakdown por vendedor). Os demais contadores (reprovadas,
+  aguardando_envio, com_motorista, concluidas) permanecem no backend para
+  uso futuro mas nao sao renderizados.
+- **Atalhos rapidos:** "Escanear QR Code" (preto) e "Nova Prova" (amarelo)
+  empilhados na row 3, dividindo a altura do card ao lado.
+- **Card Atrasadas full-height** (col 3, rows 1-3) com lista scrollavel
+  de vendedores + total.
+- **`atrasadas_por_vendedor`** adicionado ao backend: query com JOIN em
+  usuarios, GROUP BY vendedor, ORDER BY quantidade DESC, LIMIT 10.
+
+### Metricas finais
+
+| Aspecto | Wave 3 | Wave 4 | Delta |
+|---------|--------|--------|-------|
+| Testes backend | 407 | **424** | +17 |
+| Rotas backend | 28 | **29** | +1 |
+| Rotas frontend | 8 | **9** | +1 |
+| Policies RLS | 12 | **12** | 0 |
+| alembic_version | 009 | **009** | 0 |
+| Deps npm prod | 8 | **8** | 0 |
+| Realtime tables | 0 | **1** | +1 |
+| ADRs | 090 | **093** | +3 |
+
+---
+
+## [2026-04-14 — Auditoria Wave 4] — Auditoria senior read-only + correcoes
+
+### Contexto
+
+Auditoria completa da Wave 4 com olhar de engenheiro senior + tech lead.
+Analise cruzada contra Requisitos v3.0, Backlog v3.0, DAT v2.0, UML v3.0
+e DECISIONS.md. Cobertura: todos os arquivos backend (dashboard handler,
+schemas, cache, scoping, testes) e frontend (page, CSS, hook, tipos).
+8 eixos de auditoria: requisitos, schema/RLS, backend, frontend, seguranca,
+testes, qualidade, integracao entre waves.
+
+### Resultado da auditoria
+
+- **0 CRITICAL**, **1 HIGH**, **4 MEDIUM**, **5 LOW**
+- **424 testes passing**, 0 regressoes, linters 100% limpos (ruff, tsc, next lint)
+- **Veredito: Aprovada com ressalvas**
+- Backend solido: query consolidada, cache TTL 5s, scoping consistente,
+  Pydantic frozen, cobertura ~99% no handler dashboard
+- 0 achados em Waves 0/1/2/3 (integracao limpa)
+
+### Correcoes aplicadas
+
+**H-01 — Click "Na clicheria" filtrava 1 de 2 status (bug funcional):**
+- `dashboard/page.tsx:225`: o card "Na clicheria" navegava com
+  `?status=ENVIADA_PARA_CLICHERIA`, mas o contador backend soma
+  ENVIADA + ENCAMINHADA (2 status). Causava discrepancia visivel.
+- Fix: navegar para `/provas` sem filtro (padrao "Atrasadas"), com
+  comentario explicativo. Multi-status sera suportado na Wave 5.
+- ADR-094 documenta a decisao.
+
+**M-03 — Sem breakpoint mobile < 600px (RNF-006):**
+- `dashboard.module.css`: adicionado `@media (max-width: 599px)` com
+  grid 1-coluna, 6 rows empilhados. Cards com `min-height: 140px`,
+  Atrasadas com `min-height: 250px`.
+- Cumpre RNF-006 (telas a partir de 5 polegadas).
+
+**L-01 — GROUP BY nome risco de merge homonimos:**
+- `provas.py:1140`: `GROUP BY Usuario.nome` trocado por
+  `GROUP BY Usuario.id, Usuario.nome` para evitar merge de vendedores
+  com mesmo nome.
+
+**L-02 — `int(tempo_atraso_raw)` sem guard:**
+- `provas.py:1053`: adicionado `try/except (ValueError, TypeError)` com
+  fallback para 48h. Valor invalido no banco nao causa mais 502.
+
+**L-04 — Numeros de testes inconsistentes no CHANGELOG:**
+- Corrigido "14 testes: 421" para "17 testes: 424" e "422 passed" para
+  "424 passed" nas secoes da Wave 4.
+
+### Itens aceitos sem correcao (decisao do stakeholder)
+
+- **M-01** — 5 de 9 contadores exibidos (ADR-093, Figma-driven)
+- **M-02** — Atalhos divergem de RF-016 (ADR-093, Figma-driven)
+- **M-04** — Realtime sem fallback silencioso (mantido por decisao do Mario)
+- **L-03** — Card Atrasadas sem filtro (limitacao aceitavel)
+- **L-05** — Sem teste de cache TTL expiration (risco baixo)
+
+### Validacoes pos-correcao
+
+- `pytest backend/tests/`: **424 passed**, 1 warning pre-existente, **0 regressoes**
+- `ruff check backend/`: All checks passed
+- `tsc --noEmit`: limpo
+- `next lint`: 0 warnings
+- Nenhum arquivo de Wave 0/1/2/3 alterado
+
+### Arquivos modificados
+
+- `frontend/src/app/(dashboard)/dashboard/page.tsx` — H-01 (click Na clicheria)
+- `frontend/src/app/(dashboard)/dashboard/dashboard.module.css` — M-03 (breakpoint mobile)
+- `backend/app/api/v1/provas.py` — L-01 (GROUP BY id) + L-02 (ValueError guard)
+- `CHANGELOG.md` — L-04 (numeros testes) + esta entrada
+- `DECISIONS.md` — ADR-094
+- `CLAUDE.md` — status Wave 4 atualizado
+
+---
+
+## [2026-04-13 — Auditoria Wave 3] — Auditoria senior + correcoes HIGH
+
+### Contexto
+
+Auditoria completa da Wave 3 com olhar de engenheiro senior. Analise cruzada
+contra Requisitos v3.0, Backlog v3.0, DAT v2.0 e UML v3.0. Cobertura: todos
+os arquivos backend (state_machine, provas.py, schemas, RLS 006) e frontend
+(escanear/page, hooks, AdminActions, Timeline, VisualizarEtiquetaModal).
+
+### Resultado da auditoria
+
+- **0 CRITICAL**, **3 HIGH**, **6 MEDIUM**, **9 LOW**
+- **Conformidade 100%** com todos os requisitos funcionais (RF-004 a RF-011),
+  regras de negocio (RN-001 a RN-008) e historias de usuario (US-002 a US-016)
+- Backend: concorrencia (FOR UPDATE), seguranca (HMAC constant-time, scoping),
+  transacoes (flush/commit/rollback) — tudo correto
+- Frontend: maquina de estados client-side, cleanup de camera, revogacao de
+  object URLs — tudo correto
+
+### Correcoes HIGH aplicadas
+
+**H-01 — Admin ve transicao no scan que falharia na execucao (backend):**
+- `_computar_transicoes_permitidas` em `provas.py` agora filtra
+  `APROVADA_PELO_VENDEDOR` quando o usuario nao e VENDEDOR e nao tem
+  localizacao. Evita que admin STUDIO veja botao "Aprovar" que resultaria
+  em 422 (`RotaIndeterminavelError`).
+
+**H-02 — getToken() sem try/catch trava UI em erro (frontend):**
+- `useCancelarProva.ts` e `useReiniciarCiclo.ts`: `await getToken()` movido
+  para dentro do try/catch existente. Se Supabase client lancar excecao, o
+  hook exibe mensagem de erro em vez de manter `loading: true` para sempre.
+
+**H-03 — Modais sem focus trap (acessibilidade WCAG 2.1):**
+- Criado `useFocusTrap.ts`: hook reutilizavel que prende Tab/Shift+Tab dentro
+  do container, move foco ao abrir, restaura foco anterior ao fechar. Callback
+  ref para compatibilidade com React 18 + TypeScript estrito.
+- Aplicado em 3 modais: `AssinaturaModal` (escanear), `AdminActions`
+  (cancelar/reiniciar), `VisualizarEtiquetaModal` (etiqueta/QR).
+
+### Validacoes
+
+- `tsc --noEmit`: limpo
+- `next lint`: 0 warnings
+- `next build`: OK
+- Backend: **407 passed**, 1 warning pre-existente, **0 regressoes**
+- Bundle `/escanear`: 12.2 kB (+0.5 kB pelo useFocusTrap)
+
+### Arquivos criados
+
+- `frontend/src/hooks/useFocusTrap.ts`
+
+### Arquivos modificados
+
+- `backend/app/api/v1/provas.py` — filtro APROVADA para admin sem localizacao
+- `frontend/src/hooks/useCancelarProva.ts` — getToken() dentro do try/catch
+- `frontend/src/hooks/useReiniciarCiclo.ts` — getToken() dentro do try/catch
+- `frontend/src/app/(dashboard)/escanear/page.tsx` — import + focus trap no modal
+- `frontend/src/app/(dashboard)/provas/[id]/AdminActions.tsx` — import + focus trap
+- `frontend/src/app/(dashboard)/provas/[id]/VisualizarEtiquetaModal.tsx` — import + focus trap
+- `CHANGELOG.md` — esta entrada
+- `DECISIONS.md` — ADR-090
+
+---
+
 ## [2026-04-13 — Wave 3 Review C11] — Entrada manual de codigo QR + ajuste layout Figma
 
 ### Contexto

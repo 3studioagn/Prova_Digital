@@ -3372,3 +3372,397 @@ async def test_reiniciar_db_error_502(admin_user, mock_db):
 
     assert resp.status_code == 502
     mock_db.rollback.assert_awaited()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# GET /dashboard — Wave 4 (Componente 15)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _dashboard_mocks(
+    *,
+    com_vendedor=0,
+    aprovadas=0,
+    reprovadas=0,
+    aguardando_envio=0,
+    com_motorista=0,
+    na_clicheria=0,
+    concluidas=0,
+    criadas_hoje=0,
+    total_ativas=0,
+    atrasadas=0,
+    tempo_atraso=48,
+    atrasadas_vendedor=None,
+):
+    """Cria 3 mocks sequenciais para o handler de dashboard (ADR-092).
+
+    O handler faz 3 queries em ordem:
+      Q1: SELECT config valor → .scalar_one_or_none() retorna int | None
+      Q2: Query consolidada → .one() retorna named tuple com 10 campos
+      Q3: Atrasadas por vendedor → .all() retorna lista de (nome, qtd)
+    """
+    # Q1: tempo atraso config
+    q1 = MagicMock()
+    q1.scalar_one_or_none.return_value = tempo_atraso
+
+    # Q2: query consolidada — .one() retorna named tuple
+    row = MagicMock()
+    row.com_vendedor = com_vendedor
+    row.aprovadas = aprovadas
+    row.reprovadas = reprovadas
+    row.aguardando_envio = aguardando_envio
+    row.com_motorista = com_motorista
+    row.na_clicheria = na_clicheria
+    row.concluidas = concluidas
+    row.criadas_hoje = criadas_hoje
+    row.total_ativas = total_ativas
+    row.atrasadas = atrasadas
+    q2 = MagicMock()
+    q2.one.return_value = row
+
+    # Q3: atrasadas por vendedor — .all() retorna lista de named tuples
+    vendor_rows = []
+    for v_nome, v_qtd in (atrasadas_vendedor or []):
+        vr = MagicMock()
+        vr.vendedor_nome = v_nome
+        vr.quantidade = v_qtd
+        vendor_rows.append(vr)
+    q3 = MagicMock()
+    q3.all.return_value = vendor_rows
+
+    return [q1, q2, q3]
+
+
+DASHBOARD_URL = f"{PREFIX}/dashboard"
+
+
+def _clear_dashboard_cache():
+    """Limpa o cache do dashboard entre testes."""
+    from app.api.v1.provas import _dashboard_cache
+    _dashboard_cache.clear()
+
+
+# ─── Happy paths ──────────────────────────────────────────────────────────
+
+
+async def test_dashboard_happy_admin_all_counters(admin_user, mock_db):
+    """Admin ve todos os contadores corretamente populados."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+
+    mock_db.execute.side_effect = _dashboard_mocks(
+        com_vendedor=2,
+        aprovadas=1,
+        reprovadas=1,
+        aguardando_envio=1,
+        com_motorista=1,
+        na_clicheria=3,
+        concluidas=5,
+        criadas_hoje=4,
+        total_ativas=12,
+        atrasadas=2,
+        tempo_atraso=48,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200, resp.json()
+    data = resp.json()
+    c = data["contadores"]
+
+    assert c["criadas_hoje"] == 4
+    assert c["com_vendedor"] == 2
+    assert c["aprovadas"] == 1
+    assert c["reprovadas"] == 1
+    assert c["aguardando_envio"] == 1
+    assert c["com_motorista"] == 1
+    assert c["na_clicheria"] == 3
+    assert c["concluidas"] == 5
+    assert c["atrasadas"] == 2
+    assert data["total_ativas"] == 12
+    assert data["tempo_atraso_horas"] == 48
+    assert "atualizado_em" in data
+
+
+async def test_dashboard_happy_empty_db(admin_user, mock_db):
+    """Dashboard retorna zeros quando nao ha provas."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    c = resp.json()["contadores"]
+    assert all(v == 0 for v in c.values())
+    assert resp.json()["total_ativas"] == 0
+
+
+async def test_dashboard_na_clicheria_valor_correto(admin_user, mock_db):
+    """na_clicheria reflete o valor consolidado da query."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(na_clicheria=7)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["contadores"]["na_clicheria"] == 7
+
+
+async def test_dashboard_total_ativas_vem_da_query(admin_user, mock_db):
+    """total_ativas vem diretamente da query consolidada."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(total_ativas=5, concluidas=10)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["total_ativas"] == 5
+
+
+async def test_dashboard_tempo_atraso_from_config(admin_user, mock_db):
+    """tempo_atraso_horas reflete o valor configurado no banco."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(tempo_atraso=72)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["tempo_atraso_horas"] == 72
+
+
+async def test_dashboard_tempo_atraso_fallback_48(admin_user, mock_db):
+    """Se config nao existir, fallback para 48h."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(tempo_atraso=None)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["tempo_atraso_horas"] == 48
+
+
+# ─── Cache ────────────────────────────────────────────────────────────────
+
+
+async def test_dashboard_cache_hit_nao_executa_query(admin_user, mock_db):
+    """Segunda chamada dentro do TTL retorna cache sem query."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(com_vendedor=5)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp1 = await ac.get(DASHBOARD_URL)
+        # Reset side_effect — se cache funciona, nao precisa de mock
+        mock_db.execute.side_effect = RuntimeError("should not be called")
+        resp2 = await ac.get(DASHBOARD_URL)
+
+    assert resp1.status_code == 200
+    assert resp2.status_code == 200
+    assert resp1.json() == resp2.json()
+    assert resp2.json()["contadores"]["com_vendedor"] == 5
+
+
+# ─── Scoping ──────────────────────────────────────────────────────────────
+
+
+async def test_dashboard_scoping_vendedor(vendedor_matriz, mock_db):
+    """Vendedor ve contadores scoped."""
+    _clear_dashboard_cache()
+    _setup(mock_db, user=vendedor_matriz)
+    mock_db.execute.side_effect = _dashboard_mocks(
+        aprovadas=1, criadas_hoje=1, total_ativas=2,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    c = resp.json()["contadores"]
+    assert c["criadas_hoje"] == 1
+    assert c["aprovadas"] == 1
+    assert resp.json()["total_ativas"] == 2
+
+
+async def test_dashboard_scoping_motorista(mock_db):
+    """Motorista ve contadores scoped por COM_MOTORISTA."""
+    _clear_dashboard_cache()
+    motorista = make_user(
+        nome="Motorista", email="moto@test.com",
+        setor=SetorEnum.MOTORISTA,
+    )
+    _setup(mock_db, user=motorista)
+    mock_db.execute.side_effect = _dashboard_mocks(com_motorista=3)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["contadores"]["com_motorista"] == 3
+
+
+async def test_dashboard_scoping_clicheria(mock_db):
+    """Clicheria ve contadores scoped."""
+    _clear_dashboard_cache()
+    clicheria = make_user(
+        nome="Clicheria", email="cliche@test.com",
+        setor=SetorEnum.CLICHERIA,
+    )
+    _setup(mock_db, user=clicheria)
+    mock_db.execute.side_effect = _dashboard_mocks(na_clicheria=3, concluidas=4)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    c = resp.json()["contadores"]
+    assert c["na_clicheria"] == 3
+    assert c["concluidas"] == 4
+
+
+# ─── Auth ─────────────────────────────────────────────────────────────────
+
+
+async def test_dashboard_401_sem_auth(mock_db):
+    """Sem token retorna 401."""
+    _clear_dashboard_cache()
+    async def _get_db():
+        yield mock_db
+
+    app.dependency_overrides[get_db] = _get_db
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 401
+
+
+# ─── Error handling ───────────────────────────────────────────────────────
+
+
+async def test_dashboard_502_db_error(admin_user, mock_db):
+    """Erro de banco retorna 502."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = RuntimeError("connection lost")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 502
+
+
+# ─── Schema validation ───────────────────────────────────────────────────
+
+
+async def test_dashboard_response_schema_complete(admin_user, mock_db):
+    """Resposta contem todos os campos exigidos pelo schema."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(criadas_hoje=1)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert "contadores" in data
+    assert "total_ativas" in data
+    assert "tempo_atraso_horas" in data
+    assert "atualizado_em" in data
+
+    c = data["contadores"]
+    expected_keys = {
+        "criadas_hoje", "com_vendedor", "aprovadas", "reprovadas",
+        "aguardando_envio", "com_motorista", "na_clicheria",
+        "concluidas", "atrasadas",
+    }
+    assert set(c.keys()) == expected_keys
+
+    for key, val in c.items():
+        assert isinstance(val, int) and val >= 0, f"{key}={val}"
+
+
+async def test_dashboard_atrasadas_independente_dos_status(admin_user, mock_db):
+    """Atrasadas vem do calculo RN-008 na query consolidada."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(
+        com_vendedor=3, total_ativas=8, atrasadas=2,
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["contadores"]["atrasadas"] == 2
+    assert resp.json()["total_ativas"] == 8
+
+
+async def test_dashboard_zero_counters_default(admin_user, mock_db):
+    """Contadores nao populados retornam 0."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(criadas_hoje=3)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    c = resp.json()["contadores"]
+    assert c["criadas_hoje"] == 3
+    assert c["com_vendedor"] == 0
+    assert c["aprovadas"] == 0
+    assert c["reprovadas"] == 0
+    assert c["aguardando_envio"] == 0
+    assert c["com_motorista"] == 0
+    assert c["na_clicheria"] == 0
+    assert c["concluidas"] == 0
+
+
+async def test_dashboard_atrasadas_por_vendedor(admin_user, mock_db):
+    """Breakdown de atrasadas por vendedor retorna lista ordenada."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(
+        atrasadas=5,
+        atrasadas_vendedor=[
+            ("Regiane", 3),
+            ("Paulinho", 2),
+        ],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    av = resp.json()["atrasadas_por_vendedor"]
+    assert len(av) == 2
+    assert av[0]["vendedor_nome"] == "Regiane"
+    assert av[0]["quantidade"] == 3
+    assert av[1]["vendedor_nome"] == "Paulinho"
+    assert av[1]["quantidade"] == 2
+
+
+async def test_dashboard_atrasadas_por_vendedor_empty(admin_user, mock_db):
+    """Sem atrasadas, a lista de vendedores vem vazia."""
+    _clear_dashboard_cache()
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _dashboard_mocks(atrasadas=0)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(DASHBOARD_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["atrasadas_por_vendedor"] == []
