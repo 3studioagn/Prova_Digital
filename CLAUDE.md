@@ -15,7 +15,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **2 — Nucleo do Dominio** | ✅ **COMPLETA** (sign-off Sessao 22 pos-auditoria externa) | Cadastro de prova + etiqueta + QR Code (C06), Listagem com filtros (C07), Detalhe + modal etiqueta/QR (C08), Configuracoes do sistema (C09) | 7-22 |
 | **3 — Scanner + Transicoes** | ✅ **COMPLETA** + Review C11 + Auditoria Senior | Camera HTML5, scanner QR, assinatura digital, maquina de estados, reprovacao, roteamento, timeline visual (C12), cancelamento admin (C13), reinicio de ciclo admin (C14). Review C11: bugs stale error, canvas responsivo, modal fluido, entrada manual de codigo QR. Auditoria: 0 CRITICAL, 3 HIGH corrigidos (scan filter admin, getToken try/catch, focus trap modais) | 23+ |
 | **4 — Dashboard + Atrasos** | ✅ **COMPLETA** + Auditoria Senior | Dashboard tempo real (RF-014, US-013) com layout Figma: 5 contadores (criadas hoje, com vendedor, aprovadas, na clicheria, atrasadas c/ breakdown por vendedor) + 2 atalhos rapidos. Query consolidada + cache TTL 5s (ADR-092). Calculo de atraso horas corridas (RN-008). Supabase Realtime (postgres_changes) + fallback polling 10s. Auditoria: 0 CRITICAL, 1 HIGH corrigido (click Na clicheria), 2 MEDIUM corrigidos (breakpoint mobile, GROUP BY), 2 LOW corrigidos (ValueError guard, CHANGELOG). ADR-094 | — |
-| **5 — Relatorios + Export** | ⏳ | CSV export, metricas por vendedor, dashboards gerenciais | — |
+| **5 — Relatorios + Export** | ✅ **COMPLETA** + Auditoria Senior Ronda 1 + Ronda 2 (Bloco A + Bloco B) | Relatorios gerenciais (C16): 6 indicadores RF-015 + 3 graficos Recharts (PieChart, BarChart tempo medio, BarChart top vendedores) + tabelas vendedor/atrasadas + filtro periodo + exportacao CSV (`;` pt-BR). C17 (Atalhos) ja atendido pelos atalhos do dashboard Wave 4. **Ronda 1 (ADR-095/096):** 0 CRITICAL, 1 HIGH rejeitado, 4 MEDIUM corrigidos, 11 LOW corrigidos, cobertura `relatorio.py` 100%, 449 testes. **Ronda 2 Bloco A (ADR-097):** 4 MEDIUM corrigidos (M-01 CSV Injection sanitizer + 2 testes; M-02 tooltips cross-period + ADR-095 addendum 3.2 formalizando 3 regimes; M-03 botao Aplicar disabled; M-04 SQL-level assertion via `stmt.compile()` + 2 testes — mitigacao barata do H-01 rejeitado), 1 HIGH candidato (render loop via `createClient`) desmontado por singleton interno de `@supabase/ssr`. Testes 449 → 453. **Ronda 2 Bloco B (ADR-098):** 6 LOWs selecionados corrigidos: L-01 pattern `createClient` alinhado, L-02 coverage do fallback ValueError (+2 testes), L-03 `Cache-Control: no-store` no CSV, L-04 safety valve CSV com `X-CSV-Truncated` header (+2 testes), L-05 `AbortController`+timeout nos 2 hooks frontend, L-10 `taxa_reprovacao_geral_pct` centralizada no backend (+2 testes). Validacao empirica via preview_eval: 5s idle = 0 fetches (L-01), AbortController aborta request anterior (L-05), UI exibe taxa do backend (L-10). Cobertura `relatorio.py` continua **100%**. Testes 453 → **459**. Bundle `/relatorios` 113 → **114 kB** (+1 kB AbortController). LOWs aceitos para polish futuro (L-06 a L-09, L-11, L-12). Zero arquivo Wave 0-4 tocado em ambas as rondas. Removido `test_planilha.xlsx` (lixo local). ADR-095 addendum 3.2, ADR-097, ADR-098 | — |
 | **6 — Auditoria + Polish** | ⏳ | Tela de audit_log, cleanup de orfaos R2, rotacao de secrets, hardening final | — |
 
 **Estado atual do banco de producao:**
@@ -28,7 +28,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 
 - **1 tabela na publicacao `supabase_realtime`**: `provas_digitais` (INSERT/UPDATE para dashboard tempo real)
 
-**Endpoints publicos em producao (29 rotas):**
+**Endpoints publicos em producao (31 rotas):**
 
 | Prefix | Endpoints | Wave |
 |---|---|---|
@@ -36,10 +36,11 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | `/api/v1/provas` | `POST /upload-url`, `POST /`, `GET /`, `GET /{id}`, `GET /{id}/imagem-url`, `GET /{id}/movimentacoes`, `GET /{id}/etiqueta.pdf`, `GET /{id}/qr-code.png` | 2 |
 | `/api/v1/provas` | `POST /scan`, `POST /{id}/transicoes`, `POST /{id}/cancelar`, `POST /{id}/reiniciar-ciclo` | 3 |
 | `/api/v1/provas` | `GET /dashboard` | 4 |
+| `/api/v1/provas` | `GET /relatorios`, `GET /relatorios/csv` | 5 |
 | `/api/v1/configuracoes` | `GET /`, `GET /{chave}`, `PATCH /{chave}` | 2 |
 | `/health*` | `/health`, `/health/db`, `/health/r2` | 0 |
 
-**Rotas frontend em producao (9 paginas):**
+**Rotas frontend em producao (10 paginas):**
 - `/login` — Wave 1
 - `/dashboard` — Wave 4 C15 (contadores tempo real + Realtime + layout Figma)
 - `/usuarios` — Wave 1 (CRUD + modais)
@@ -48,6 +49,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 - `/provas/[id]` — Wave 2 C08 (detalhe + modal etiqueta/QR + timeline placeholder)
 - `/configuracoes` — Wave 2 C09 (tempo atraso + template etiqueta)
 - `/escanear` — Wave 3 C10+C11 (scanner QR + assinatura digital + transicao de status + entrada manual de codigo QR)
+- `/relatorios` — Wave 5 C16 (relatorios gerenciais + 3 graficos Recharts + tabelas + filtro periodo + export CSV)
 
 **Itens do menu ainda inativos (placeholders para Waves futuras):**
 - "Relatorios" — Wave 5
@@ -132,7 +134,8 @@ provaDigital/
 │   │   │       ├── user.py      # Pydantic v2: UserCreate, UserUpdate, UserResponse
 │   │   │       ├── prova.py     # Pydantic v2 Wave 2: Upload/ProvaCreate/ProvaResponse + sanitize_filename
 │   │   │       ├── configuracao.py # Pydantic v2 Wave 2 C09: whitelist + validators por chave
-│   │   │       └── dashboard.py   # Pydantic v2 Wave 4 C15: DashboardContadores + DashboardResponse
+│   │   │       ├── dashboard.py   # Pydantic v2 Wave 4 C15: DashboardContadores + DashboardResponse
+│   │   │       └── relatorio.py  # Pydantic v2 Wave 5 C16: RelatorioResponse + VendedorRelatorio + ProvaAtrasada + StatusCount
 │   │   └── services/            # Wave 2 (ADR-040) + Wave 3 (ADR-081)
 │   │       ├── state_machine.py # Transicoes + atores + determinar_rota + executar_transicao (Wave 3 A.1)
 │   │       ├── qrcode_service.py # HMAC-SHA256 hash + PNG via qrcode[pil] (ADR-033/034)
@@ -192,13 +195,16 @@ provaDigital/
 │       │   ├── useCurrentUser.ts        # Wave 3 C13 — GET /users/me para detectar admin
 │       │   ├── useCancelarProva.ts      # Wave 3 C13 — POST /{id}/cancelar wrapper
 │       │   ├── useReiniciarCiclo.ts     # Wave 3 C14 — POST /{id}/reiniciar-ciclo wrapper
-│       │   └── useDashboard.ts          # Wave 4 C15 — GET /dashboard wrapper
+│       │   ├── useDashboard.ts          # Wave 4 C15 — GET /dashboard wrapper
+│       │   ├── useRelatorios.ts         # Wave 5 C16 — GET /relatorios wrapper
+│       │   └── useExportCsv.ts          # Wave 5 C16 — GET /relatorios/csv download
 │       ├── lib/
 │       │   ├── api.ts           # apiFetch wrapper (token injection, ApiError). Nao usar p/ binarios
 │       │   ├── types/
 │       │   │   ├── prova.ts     # Wave 2 C06-C08 — tipos completos + STATUS_LABELS + ROTA_LABELS
 │       │   │   ├── usuario.ts   # Wave 2 — tipos TS espelho de schemas/user.py
-│       │   │   └── configuracao.ts # Wave 2 C09 — tipos + type guards
+│       │   │   ├── configuracao.ts # Wave 2 C09 — tipos + type guards
+│       │   │   └── relatorio.ts   # Wave 5 C16 — tipos RelatorioResponse + VendedorRelatorio + ProvaAtrasada
 │       │   └── supabase/
 │       │       ├── client.ts    # Browser client (@supabase/ssr)
 │       │       ├── server.ts    # Server client + cookies()
@@ -235,6 +241,9 @@ provaDigital/
 │               ├── dashboard/    # Wave 4 (Componente 15)
 │               │   ├── page.tsx                     # contadores + Recharts + Realtime
 │               │   └── dashboard.module.css
+│               ├── relatorios/   # Wave 5 (Componente 16)
+│               │   ├── page.tsx                     # metricas + 3 graficos Recharts + tabelas + filtro + CSV
+│               │   └── relatorios.module.css
 │               └── configuracoes/ # Wave 2 (Componente 09)
 │                   ├── page.tsx # Tempo atraso + template etiqueta
 │                   └── configuracoes.module.css

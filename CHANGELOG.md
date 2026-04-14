@@ -2,6 +2,515 @@
 
 ---
 
+## [2026-04-14 — Auditoria Wave 5 Ronda 2 Bloco B] — 6 LOWs selecionados + hardening defensivo
+
+### Contexto
+
+Apos aprovacao do Bloco A (MEDIUMs — ADR-097), Mario selecionou 6 dos 12
+LOWs catalogados para execucao imediata: **L-01, L-02, L-03, L-04, L-05,
+L-10**. Os outros 6 (L-06 a L-09, L-11, L-12) ficam como polish futuro —
+majoritariamente cosmeticos ou ja endereçados indiretamente pelo ADR-095
+addendum 3.2 (L-12).
+
+### Correcoes aplicadas
+
+**L-01 — Pattern `createClient()` alinhado com outras paginas dashboard:**
+
+- `page.tsx:33` usava `const supabase = createClient()` no corpo do
+  componente + `useCallback([supabase])`. O ADR-097 documentou que isso
+  funcionava pelo singleton interno do `@supabase/ssr`, mas era
+  inconsistente com as outras 5 paginas.
+- **Fix:** movido `createClient()` para DENTRO do `useCallback` com
+  `deps=[]`, alinhando com `nova-prova/page.tsx`, `provas/page.tsx` e
+  `escanear/page.tsx`. Docstring explica por que o padrao alinhado e
+  preferivel (proteção contra major version futura do `@supabase/ssr`).
+- **Validacao empirica (preview_eval):** 5 segundos de idle = **0
+  fetches espontaneos**. Zero render loop, confirmado.
+
+**L-02 — Cobertura do fallback `(ValueError, TypeError)` em tempo_atraso:**
+
+- Linhas `provas.py:1282-1283` estavam missing no coverage. O fallback
+  protege contra `configuracoes_sistema.tempo_atraso_horas_uteis` ter
+  valor nao-numerico no banco.
+- **Fix:** 2 testes novos:
+  - `test_relatorios_fallback_tempo_atraso_valor_invalido` — injeta Q1
+    com `"abc"`, valida que handler retorna 200 com 48h default.
+  - `test_relatorios_fallback_tempo_atraso_none` — cenario None
+    (config ausente).
+- Linhas 1282-1283 saem do missing apos o fix.
+
+**L-03 — `Cache-Control: no-store` no CSV Response:**
+
+- Endpoint CSV nao definia cache header — browser podia servir versao
+  stale se admin baixasse duas vezes em sequencia.
+- **Fix:** adicionado `"Cache-Control": "no-store"` no dict `headers=`
+  do `Response(...)` em `provas.py:1759`. Teste
+  `test_relatorios_csv_200_admin` atualizado com assertion no header.
+
+**L-04 — Safety valve CSV truncado com warning header HTTP:**
+
+- `.limit(10000)` hard-coded no SQL, truncava silenciosamente.
+- **Fix:** constante `CSV_MAX_ROWS = 10000` no topo, query busca
+  `CSV_MAX_ROWS + 1` (detectar overflow), trunca se preciso e seta
+  headers `X-CSV-Truncated: true` + `X-CSV-Max-Rows: 10000`. Nao
+  modifica linhas do CSV (parser-friendly).
+- **Testes:** 2 novos — `test_relatorios_csv_nao_truncado_sem_header`
+  (5 rows, headers ausentes) + `test_relatorios_csv_truncado_com_header`
+  (10001 rows, headers presentes, CSV tem exatamente 10000 linhas).
+
+**L-05 — `AbortSignal` + timeout nos hooks frontend:**
+
+- `useRelatorios` + `useExportCsv` nao tinham mecanismo de cancelamento.
+- **Fix `useRelatorios`:** `AbortController` armazenado em `abortRef`.
+  Cada novo `refresh()` aborta a anterior. `setTimeout(30_000)` dispara
+  abort automatico. `AbortError` ignorado silenciosamente (nao mostrar
+  "Erro ao carregar" em cancelamentos legitimos). Cleanup do
+  `useEffect` aborta request em voo no unmount.
+- **Fix `useExportCsv`:** `AbortController` com `setTimeout(60_000)`
+  (mais generoso porque CSV grande pode demorar). Mensagem especifica
+  "Exportacao cancelada (timeout ou navegacao)" para `AbortError`.
+- **Validacao empirica (preview_eval):** mock de fetch lento (10s) +
+  2 refreshes em sequencia. O segundo cancelou o primeiro via
+  AbortController — `opts.signal.aborted === true` confirmado.
+
+**L-10 — `taxa_reprovacao_geral_pct` centralizada no backend:**
+
+- `page.tsx:94-101` calculava a taxa no frontend via `reduce()`. Logica
+  de negocio misturada com apresentacao.
+- **Fix backend:** campo novo `taxa_reprovacao_geral_pct: float` no
+  schema `RelatorioResponse` (frozen). Handler calcula
+  `sum(v.reprovadas for v in por_vendedor) / total_geral * 100` com
+  guard `if total_geral > 0 else 0.0`, arredondado a 1 casa.
+- **Fix frontend:** tipo TS ganha o campo. `page.tsx` substitui o
+  `reduce` por `data.taxa_reprovacao_geral_pct.toFixed(1)`.
+- **Testes:** 2 novos — `test_relatorios_taxa_reprovacao_geral_calculada`
+  (4 reprovadas / 20 total = 20.0%) +
+  `test_relatorios_taxa_reprovacao_geral_zero_division` (total=0 →
+  0.0 sem ZeroDivisionError).
+- **Validacao empirica:** card "Taxa reprovacao geral" exibe 25.0%
+  direto do campo backend (nao mais calculado no cliente). Confirmado
+  via preview_eval.
+
+### LOWs aceitos para polish futuro (nao corrigidos no Bloco B)
+
+- **L-06** Graficos Recharts sem `aria-label` (acessibilidade)
+- **L-07** `vendedor_nome.split(" ")[0]` ambiguidade ranking
+- **L-08** `ultima_mov_subq` referenciada 3× em Q7 (CTE idiomatico)
+- **L-09** GROUP BY redundante em Q6
+- **L-11** Bundle 114 kB informativo, trade-off aceito no ADR-095 decisao 6
+- **L-12** Cross-period-future ja coberto pelo ADR-095 addendum 3.2
+
+### Medicoes finais (ronda 2 completa — Bloco A + Bloco B)
+
+| Aspecto | Inicio ronda 2 | Pos-Bloco A | Pos-Bloco B | Delta total |
+|---------|----------------|-------------|-------------|-------------|
+| Testes backend | 449 | 453 | **459** | +10 |
+| Cobertura `relatorio.py` | 100% | 100% | **100%** | = |
+| Cobertura `provas.py` range Wave 5 | 98% | 98% | **~99%** (L-02 cobriu 1282-1283) | +1pp |
+| Rotas backend | 31 | 31 | 31 | 0 |
+| Rotas frontend | 10 | 10 | 10 | 0 |
+| ADRs | 096 | 097 + addendum 3.2 | **098** | +2 ADR + 1 addendum |
+| Bundle `/relatorios` | 113 kB | 113 kB | **114 kB** | +1 kB (AbortController) |
+| Arquivos Wave 0-4 tocados | 0 | 0 | **0** | 0 |
+
+### Arquivos modificados (Bloco B)
+
+- `backend/app/api/v1/provas.py` (L-03 header, L-04 safety valve, L-10
+  calculo)
+- `backend/app/domain/schemas/relatorio.py` (L-10 novo campo)
+- `backend/tests/test_provas_api.py` (L-02 x2, L-04 x2, L-10 x2 + L-03
+  assertion)
+- `frontend/src/app/(dashboard)/relatorios/page.tsx` (L-01 refactor,
+  L-10 remove calculo)
+- `frontend/src/hooks/useRelatorios.ts` (L-05 AbortController + timeout)
+- `frontend/src/hooks/useExportCsv.ts` (L-05 AbortController + timeout)
+- `frontend/src/lib/types/relatorio.ts` (L-10 novo campo no tipo)
+- `DECISIONS.md` (ADR-098)
+- `CHANGELOG.md` (esta entrada)
+- `CLAUDE.md` (status Wave 5 pos Bloco B)
+
+### Veredito final (pos Bloco B)
+
+🟢 **Aprovada**. As ressalvas formais do ADR-097 foram majoritariamente
+dissolvidas:
+- **L-01** corrigido — pattern alinhado com outras paginas
+- **L-02** coberto — cobertura limpa, 0 missing em linhas defensivas
+- **L-03** adicionado — no-store no CSV
+- **L-04** adicionado — safety valve com warning header
+- **L-05** adicionado — AbortController + timeouts defensivos
+- **L-10** centralizado — logica de negocio no backend, UI consume
+
+Wave 5 esta pronta para closeout e passar para Wave 6.
+
+---
+
+## [2026-04-14 — Auditoria Wave 5 Ronda 2] — Auditoria senior independente + correcoes Bloco A
+
+### Contexto
+
+Segunda auditoria senior independente da Wave 5 (solicitada apos a ronda 1 ter
+sido arquivada). Execucao read-only por padrao, com gate de aprovacao antes de
+qualquer edicao. Objetivo: olhar fresco sobre o mesmo codigo, cruzar contra
+Requisitos v3.0, Backlog v3.0, DAT v2.0, UML v3.0, DECISIONS.md e
+WAVE5_ANALYSIS.md. 8 eixos auditados (requisitos, schema/RLS, backend, frontend,
+seguranca, testes, qualidade, integracao entre waves).
+
+### Resultado da auditoria (antes das correcoes)
+
+- **0 CRITICAL, 0 HIGH, 4 MEDIUM, 12 LOW** — todos sobre 449 testes verdes e
+  linters limpos herdados da ronda 1.
+- **Um achado HIGH candidato (render loop via createClient()) foi desmontado
+  durante a propria auditoria** apos leitura do source code de `@supabase/ssr`
+  (`createBrowserClient.js:5-12`) — tem singleton interno, `createClient()` em
+  cada render retorna a mesma instancia cached. Verificado empiricamente via
+  preview_eval (`window.__sameRef === true` apos 2 calls). Rebaixado para L-01
+  (code smell + inconsistencia vs outras paginas).
+- **0 achado em Waves 0/1/2/3/4**: 0 arquivo congelado tocado.
+- **Veredito:** Aprovada com ressalvas documentadas.
+
+### Correcoes aplicadas (Bloco A — 4 MEDIUM + limpeza)
+
+**M-01 — CSV Injection nos campos de texto livre (CWE-1236 / OWASP):**
+
+- Handler `get_relatorios_csv` escrevia `r.nome`, `r.cliente`, `r.vendedor_nome`
+  sem sanitizacao. Pydantic (`ProvaCreateRequest.nome/cliente`) valida apenas
+  comprimento, nao charset. Admin podia criar prova com
+  `nome = "=1+1+cmd|'/C calc'!A1"` e atacar outro admin quando ele abrisse o
+  CSV no Excel.
+- `nro_requerimento` nao era vulneravel — regex `NRO_REQ_RE` no schema ja
+  proibia chars de formula.
+- **Fix:** helper `_csv_sanitize(v)` em `backend/app/api/v1/provas.py` (+22
+  linhas, antes do handler) que prefixa `'` quando valor comeca com `=`, `+`,
+  `-`, `@`, `\t`, `\r`. Aplicado nos 3 campos vulneraveis dentro de
+  `writer.writerow([...])`. Valores nao-string e campos ja seguros (labels
+  fixos, ints, datas formatadas) passam inalterados.
+- **Testes:** 2 novos — `test_relatorios_csv_injection_sanitized` (valida
+  prefixacao em `=1+1`, `+cmd|...`, `@SUM(...)`) +
+  `test_relatorios_csv_injection_valores_seguros_inalterados` (valida que
+  valores normais e com `=` no meio nao recebem apostrofo).
+
+**M-02 — Semantica cross-period vs in-period nao documentada na UI (Opcao A):**
+
+- O relatorio mistura 3 regimes de filtro por periodo (in-period puro,
+  in-period criacao + future-aberto movimentacao, cross-period total). A UI
+  nao explicava a diferenca, causando potencial ma interpretacao.
+- **Fix adotado (Opcao A):** zero mudanca backend, 2 tooltips `title` HTML
+  nativos no `page.tsx`:
+  - `<div title="Distribuicao atual de todas as provas em status nao-terminal,
+    independente do filtro de periodo. CANCELADA e RECEBIDA_PELA_CLICHERIA sao
+    excluidas por serem estados finais.">Provas Ativas</div>` (PieChart).
+  - `<div title="Lista todas as provas atualmente atrasadas (sem movimentacao
+    ha mais que o tempo configurado em Configuracoes), independente do filtro
+    de periodo acima. RN-008 trata atraso como conceito 'agora', nao
+    historico.">Provas Atrasadas (N)</div>` (tabela).
+- **ADR-095 ganhou addendum 3.2** formalizando os 3 regimes com tabela
+  explicita e racional para cada um. Opcoes B (filtro SQL estrito) e C (query
+  param opcional) foram consideradas e rejeitadas com justificativa.
+- **Validacao visual (preview_eval):** ambos tooltips renderizando com texto
+  correto. Zero mudanca de comportamento, zero risco de regressao.
+
+**M-03 — Botao "Aplicar" no-op silencioso quando datas nao mudam:**
+
+- `handleApply` fazia apenas `setAppliedInicio/Fim`. Se valores nao mudavam,
+  useEffect nao disparava — clicar era silencioso. Auditoria ronda 1 (M-02
+  anterior) adicionou botao "Atualizar" como escape hatch, mas "Aplicar"
+  continuava desconcertante.
+- **Fix:** `const isApplyDisabled = inicio === appliedInicio && fim ===
+  appliedFim;` em `page.tsx`. Botao recebe `disabled={isApplyDisabled}` e
+  `title` contextual (dois textos: "As datas do picker ja estao aplicadas..."
+  ou "Aplicar o periodo selecionado..."). CSS `.filterBtn:disabled` adicionado
+  em `relatorios.module.css` (opacity 0.5, cursor not-allowed).
+- **Validacao visual (preview_eval + preview_inspect):**
+  - Estado inicial (datas iguais): `disabled=true, opacity=0.5,
+    cursor=not-allowed`, title correto.
+  - Apos mudar data: `disabled=false, opacity=1, cursor=pointer`, title muda.
+
+**M-04 — Risco de regressao silenciosa em `status.not_in(TERMINAL_STATUSES)`:**
+
+- Reafirmacao do H-01 original da ronda 1 (rejeitado como suite integracao).
+  Os testes `*_exclui_terminais` da ronda anterior validam o contrato do mock,
+  nao o SQL — se alguem remover o WHERE, os testes passam silenciosamente.
+- **Mitigacao alternativa barata (nao explorada na ronda 1):** compilar o
+  `stmt` para SQL string via `postgresql.dialect()` + `literal_binds=True` e
+  fazer assertion estrutural. Pega regressoes sem precisar de Postgres real.
+- **Fix:** 2 testes novos em `test_provas_api.py`:
+  `test_relatorios_q4_sql_literal_contem_not_in_terminais` (captura Q4 via
+  `mock_db.execute.side_effect = capture` callable + assert `NOT IN`,
+  `RECEBIDA_PELA_CLICHERIA`, `CANCELADA` no SQL) +
+  `test_relatorios_q7_sql_literal_contem_not_in_terminais` (mesmo para Q7).
+- **Validacao da eficacia:** script one-shot comparou stmt com/sem WHERE —
+  sem WHERE, `NOT IN` e `CANCELADA` nao aparecem no SQL compilado. Os testes
+  falham imediatamente se alguem remover a clausula.
+
+**Limpeza:**
+
+- **Removido `test_planilha.xlsx`** (untracked na raiz do repo, arquivo de
+  teste local que ficou fora do .gitignore).
+
+### HIGH candidato desmontado (L-01)
+
+- **L-01 — Inconsistencia do pattern `createClient()` vs render loop:**
+  Inicialmente suspeitei de render loop em `page.tsx:34` (`const supabase =
+  createClient()` no body + `useCallback([supabase])` com supabase como
+  dependency). Se supabase fosse nova instancia a cada render, o useCallback
+  recriaria getToken, o refresh do hook recriaria, useEffect([refresh]) se
+  dispararia, setState disparia rerender, loop.
+- Validacao do source de `@supabase/ssr`: `createBrowserClient.js:5-12` tem
+  `let cachedBrowserClient;` e retorna o cache se
+  `shouldUseSingleton && cachedBrowserClient`. `shouldUseSingleton` e true no
+  browser.
+- Confirmacao empirica via preview_eval: `window.__sameRef = a === b` apos 2
+  calls retornou `true`. Singleton ativo.
+- **Rebaixado de HIGH candidato para L-01** (code smell + inconsistencia com
+  `usuarios/page.tsx` top-level, `nova-prova/page.tsx`/`provas/page.tsx`/
+  `escanear/page.tsx` com `useCallback([])`, `dashboard/page.tsx` top-level
+  module-scope). Se o singleton for removido em major version futura do
+  `@supabase/ssr`, o codigo vira bug — vale alinhar em polish futuro.
+- **Nao corrigido** nesta ronda por estar fora do escopo do Bloco A (MEDIUMs).
+
+### Medicoes finais (ronda 2)
+
+| Aspecto | Antes da ronda 2 | Depois da ronda 2 | Delta |
+|---------|-------------------|--------------------|-------|
+| Testes backend | 449 | **453** | +4 (M-01 x2, M-04 x2) |
+| Cobertura `relatorio.py` | 100% | **100%** | 0 |
+| Rotas backend | 31 | 31 | 0 |
+| Rotas frontend | 10 | 10 | 0 |
+| ADRs | 096 | **097** | +1 (ADR-095 addendum 3.2 + ADR-097 novo) |
+| Bundle `/relatorios` | 113 kB | **113 kB** | 0 |
+| Arquivos Wave 0-4 tocados | 0 | **0** | 0 |
+
+### Arquivos modificados (Bloco A)
+
+- `backend/app/api/v1/provas.py` (M-01: helper `_csv_sanitize` + 3 aplicacoes)
+- `backend/tests/test_provas_api.py` (M-01 x2 testes + M-04 x2 testes)
+- `frontend/src/app/(dashboard)/relatorios/page.tsx` (M-02 tooltips + M-03
+  disabled)
+- `frontend/src/app/(dashboard)/relatorios/relatorios.module.css` (M-03 regras
+  `:disabled`)
+- `DECISIONS.md` (ADR-095 addendum 3.2 + ADR-097 novo)
+- `CHANGELOG.md` (esta entrada)
+- `CLAUDE.md` (status Wave 5 + ADR-097)
+
+### Arquivos removidos
+
+- `test_planilha.xlsx` (lixo de teste local, untracked — removido)
+
+### Ressalvas aceitas formalmente (LOWs nao corrigidos)
+
+- **H-01 original (ronda 1):** continua rejeitado; M-04 oferece mitigacao
+  parcial barata mas nao substitui suite de integracao real.
+- **L-01 (createClient pattern):** code smell; fix fora do escopo Bloco A.
+- **L-02 a L-12:** melhorias incrementais, fora do escopo Bloco A. Registradas
+  no relatorio da ronda 2 para referencia futura.
+
+---
+
+## [2026-04-14 — Auditoria Wave 5] — Auditoria senior read-only + correcoes
+
+### Contexto
+
+Auditoria completa da Wave 5 (Componente 16 — Relatorios Gerenciais) com olhar
+de engenheiro senior + tech lead. Analise cruzada contra Requisitos v3.0,
+Backlog v3.0, DAT v2.0, WAVE5_ANALYSIS.md e DECISIONS.md. Cobertura: todos os
+arquivos backend (handlers relatorios JSON/CSV, schema Pydantic, testes)
+e frontend (page.tsx, CSS Module, hooks useRelatorios/useExportCsv, tipos).
+8 eixos de auditoria: requisitos, schema/RLS, backend, frontend, seguranca,
+testes, qualidade, integracao entre waves.
+
+### Resultado da auditoria
+
+- **0 CRITICAL**, **1 HIGH** (rejeitado pelo stakeholder), **4 MEDIUM**, **11 LOW**
+- **449 testes passing**, 0 regressoes, linters 100% limpos (ruff, tsc, next lint)
+- **Cobertura relatorio.py 100%** (era 98% — dead code de validator removido)
+- **Veredito: Aprovada com ressalvas** (1 ressalva formal: H-01 aceito como risco)
+- **0 achados em Waves 0/1/2/3/4** (integracao limpa, 0 arquivo congelado tocado)
+
+### Correcoes aplicadas (15 de 16 achados, H-01 rejeitado)
+
+**MEDIUM:**
+
+- **M-01 — Semantica tempo_medio com re-aprovacao (decisao A mantida):**
+  ADR-095 ganhou subitem 3.1 documentando que AVG considera TODAS as aprovacoes
+  (inclusive re-aprovacoes em ciclos posteriores). 2 tooltips `title` HTML
+  nativos no `page.tsx` (card de resumo + coluna da tabela por vendedor)
+  expoe a semantica para o admin.
+
+- **M-02 — Botao "Atualizar" em /relatorios:** hook `useRelatorios.refresh`
+  (ja exportado) agora tem consumidor na UI. Resolve o caso de clicar
+  "Aplicar" com as mesmas datas (antes no-op silencioso) e permite refresh
+  manual sem alterar periodo. Nova classe CSS `.refreshBtn` pill-style cinza.
+
+- **M-03 — Helper `toIso` local (off-by-one timezone):** substituido o uso de
+  `d.toISOString().split("T")[0]` (UTC) por implementacao com
+  `getFullYear()/getMonth()/getDate()` (fuso local). Elimina bug onde apos
+  ~21h BRT o picker mostrava o dia UTC seguinte em vez do dia local corrente.
+
+- **M-04 — +2 testes negativos de exclusao de terminais:** `Q4`
+  (distribuicao_por_status) e `Q7` (atrasadas) ganharam testes afirmando que
+  CANCELADA e RECEBIDA_PELA_CLICHERIA nao aparecem nos responses. Bloco de
+  comentario documentando honestamente que validam o contrato do mock, nao
+  o SQL real (limitacao do H-01 rejeitado).
+
+**LOW (11 correcoes):**
+
+- **L-01** docstring `VendedorRelatorio.tempo_medio_aprovacao_horas`
+  (RETIRADA→APROVADA → CRIADA→APROVADA, alinhada com ADR-095 decisao 3.1)
+- **L-02** ADR-095 decisao 6 atualizada com versao explicita Recharts v3.8.1
+  (WAVE5_ANALYSIS original propunha v2.15 — nota de reconciliacao)
+- **L-03** imports `csv`/`io` movidos do corpo de `get_relatorios_csv`
+  para o topo do arquivo (PEP 8)
+- **L-04** validator `PeriodoFiltro.inicio_antes_fim` removido (dead code —
+  handler ja rejeita com 422 antes de instanciar o modelo); cobertura
+  `relatorio.py` 98% → 100%
+- **L-05** `except HTTPException: raise` dead removido em `get_relatorios`
+  (nenhuma linha do try levanta HTTPException); comentario protetivo
+  explicando quando reintroduzir
+- **L-06** tratamento de `tzinfo` em `get_relatorios` alinhado ao padrao
+  condicional do handler CSV (`if tzinfo is None: replace`) — defensivo
+  contra futuros drivers que devolvam naive
+- **L-07** 2 `style={{...}}` inline removidos do `page.tsx`; duas novas
+  classes CSS Module (`.summaryValueNarrow`, `.errorInline`) substituem-nos.
+  `wrapperStyle` do Recharts Legend mantido (prop de biblioteca, nao
+  inline style HTML)
+- **L-08** `.filterInput { min-width: 0; width: 100%; }` adicionado ao
+  `@media (max-width: 599px)` — antes sobrava `min-width: 350px` causando
+  potencial overflow horizontal em RNF-006 (telas >= 5")
+- **L-09** +1 teste `test_relatorios_csv_502_db_error` cobrindo o
+  `except Exception:` do handler CSV (antes nao tinha rede de seguranca)
+- **L-10** 4 ramos `else: "-"` unreachable removidos do loop CSV
+  (invariantes: `func.coalesce` garante non-NULL + `created_at NOT NULL`
+  no schema); comentario documentando quando reintroduzir
+- **L-11** `datetime.now(timezone.utc)` unificado em 1 chamada no topo do
+  try de `get_relatorios`; `limite_atraso` derivado + `now_utc` reusado
+  na Q7
+
+**HIGH rejeitado:**
+
+- **H-01 — Suite de integracao contra Postgres real:** o plano inicial era
+  criar `scripts/reproduce_relatorios.py` com 3 smokes (padrao Sessao 8c).
+  Stakeholder (Mario) optou por nao criar o script. O risco e formalmente
+  aceito: as queries Q5/Q6/Q7 continuam validadas apenas por mocks
+  `mock_db.execute.side_effect = [...]`, sem gerar nem executar o SQL real.
+  Regressoes na estrutura de JOINs, subqueries correlatas ou GROUP BY
+  passariam no CI. Mitigacao parcial: comentario em bloco de 12 linhas
+  acima dos testes M-04 documentando a limitacao, M-01 addendum no ADR
+  documentando a semantica intencional, auditoria manual do SQL foi feita
+  e nao encontrou bugs.
+
+### Medicoes finais
+
+| Aspecto | Antes da auditoria | Depois da auditoria | Delta |
+|---------|-------------------|--------------------|-------|
+| Testes backend | 446 | **449** | +3 (M-04 x2, L-09 x1) |
+| Cobertura `relatorio.py` | 98% | **100%** | +2pp |
+| Rotas backend | 31 | 31 | 0 |
+| Rotas frontend | 10 | 10 | 0 |
+| ADRs | 096 | 096 | 0 (addendum ao 095, nao novo ADR) |
+| Bundle `/relatorios` | 113 kB | 113 kB | 0 |
+| Arquivos Wave 0-4 tocados | 0 | **0** | 0 |
+
+### Arquivos modificados
+
+- `backend/app/api/v1/provas.py` (L-03, L-05, L-06, L-10, L-11)
+- `backend/app/domain/schemas/relatorio.py` (L-01, L-04)
+- `backend/tests/test_provas_api.py` (M-04 +2 testes, L-09 +1 teste)
+- `frontend/src/app/(dashboard)/relatorios/page.tsx` (M-01, M-02, M-03, L-07)
+- `frontend/src/app/(dashboard)/relatorios/relatorios.module.css` (M-02, L-07, L-08)
+- `CHANGELOG.md` — esta entrada
+- `DECISIONS.md` — ADR-095 addendum decisao 3.1 (M-01), decisao 6 atualizada (L-02)
+- `CLAUDE.md` — status Wave 5 (+ Auditoria Senior)
+
+---
+
+## [2026-04-14 — Wave 5] — Relatorios Gerenciais (Componente 16)
+
+### Contexto
+
+Wave 5 do Backlog v3.0 — Componente 16 (Relatorios Gerenciais).
+Implementa RF-015 (relatorios com metricas agregadas), US-014 (criterios de aceitacao)
+e RN-008 (calculo de atraso com horas corridas, reuso da Wave 4).
+C17 (Atalhos Rapidos) confirmado como ja atendido pelos atalhos do dashboard Wave 4.
+
+### Entregue
+
+**Backend (2 endpoints novos):**
+- `GET /api/v1/provas/relatorios` — retorna 6 indicadores RF-015: total_geral,
+  tempo_medio_aprovacao_horas, total_atrasadas, distribuicao_por_rota,
+  distribuicao_por_status (PieChart), por_vendedor (metricas individuais),
+  atrasadas (lista com dias de atraso). Filtro de periodo opcional (default 30 dias).
+  Admin-only (get_admin_user). Scoping via get_admin_user (nao _scoping_filter,
+  pois relatorios sao admin-only).
+- `GET /api/v1/provas/relatorios/csv` — exporta provas em CSV formatado com
+  separador `;` (padrao Excel pt-BR), headers em portugues, datas DD/MM/YYYY,
+  labels legiveis (Sim/Nao, Rota Padrao/Direta), UTF-8 BOM. Mesmo filtro de periodo.
+- Pydantic schemas: PeriodoFiltro, VendedorRelatorio, ProvaAtrasada,
+  DistribuicaoRota, StatusCount, RelatorioResponse (frozen, v2).
+- 22 testes novos: **446 passed**, 0 regressoes.
+
+**Frontend (1 pagina nova):**
+- `/relatorios` — pagina com 4 cards de resumo (total geral, tempo medio,
+  taxa reprovacao, distribuicao por rota) + 3 graficos Recharts (PieChart provas
+  ativas por status, BarChart tempo medio por vendedor, BarChart vendedor com
+  mais artes) + tabela metricas por vendedor + tabela provas atrasadas.
+- Filtro de periodo com inputs date pill-style + botao "Aplicar".
+- Botao "Exportar planilha" (CSV download via blob + anchor).
+- Hook `useRelatorios` (fetch + race protection + mounted guard).
+- Hook `useExportCsv` (fetch binario + blob download).
+- Tipos TypeScript: RelatorioResponse, VendedorRelatorio, ProvaAtrasada, etc.
+- Recharts re-adicionado (+113 kB na pagina, 263 kB First Load JS).
+- Cores ajustadas para identidade 3Studio (#ffcb5c, #db6607, #ff9640, #6bb6c7).
+- Menu "Relatorios" ativado no sidebar.
+- Scroll da pagina via .cardInner do layout pai (scrollbar customizada existente).
+
+**Banco de dados:** zero alteracoes de schema. `alembic_version` = 009.
+12 policies RLS intactas. Nenhuma migration nova.
+
+### Validacoes
+
+- `pytest backend/tests/`: **446 passed**, 1 warning pre-existente, **0 regressoes**
+- `ruff check backend/`: All checks passed
+- `tsc --noEmit`: limpo
+- `next lint`: 0 warnings
+- `next build`: OK (113 kB page / 263 kB First Load JS para `/relatorios`)
+- Nenhum arquivo de Wave 0/1/2/3/4 alterado (exceto 1 palavra no layout.tsx)
+
+### Arquivos criados
+
+- `backend/app/domain/schemas/relatorio.py`
+- `frontend/src/lib/types/relatorio.ts`
+- `frontend/src/hooks/useRelatorios.ts`
+- `frontend/src/hooks/useExportCsv.ts`
+- `frontend/src/app/(dashboard)/relatorios/page.tsx`
+- `frontend/src/app/(dashboard)/relatorios/relatorios.module.css`
+- `WAVE5_ANALYSIS.md`
+
+### Arquivos modificados
+
+- `backend/app/api/v1/provas.py` — +2 handlers (relatorios JSON + CSV)
+- `backend/tests/test_provas_api.py` — +22 testes relatorios
+- `frontend/src/app/(dashboard)/layout.tsx` — 1 palavra (href do menu Relatorios)
+- `frontend/package.json` — +recharts
+- `frontend/package-lock.json` — atualizado
+- `CHANGELOG.md` — esta entrada
+- `DECISIONS.md` — ADR-095, ADR-096
+- `CLAUDE.md` — status Wave 5
+
+### Metricas finais
+
+| Aspecto | Wave 4 | Wave 5 | Delta |
+|---------|--------|--------|-------|
+| Testes backend | 424 | **446** | +22 |
+| Rotas backend | 29 | **31** | +2 |
+| Rotas frontend | 9 | **10** | +1 |
+| Policies RLS | 12 | **12** | 0 |
+| alembic_version | 009 | **009** | 0 |
+| Deps npm prod | 8 | **9** | +1 (recharts) |
+| Realtime tables | 1 | **1** | 0 |
+| ADRs | 094 | **096** | +2 |
+
+---
+
 ## [2026-04-14 — Wave 4] — Dashboard em Tempo Real (Componente 15)
 
 ### Contexto

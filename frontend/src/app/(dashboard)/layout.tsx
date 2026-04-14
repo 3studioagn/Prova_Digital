@@ -46,7 +46,7 @@ const MAIN_NAV: NavItemSpec[] = [
   { key: "provas", label: "Provas", icon: <LaptopIcon />, href: "/provas" },
   { key: "nova-prova", label: "Nova prova", icon: <PlusIcon />, href: "/nova-prova" },
   { key: "escanear", label: "Escanear", icon: <ScanIcon />, href: "/escanear" },
-  { key: "relatorios", label: "Relatorios", icon: <ChartIcon /> },
+  { key: "relatorios", label: "Relatorios", icon: <ChartIcon />, href: "/relatorios" },
   { key: "usuarios", label: "Usuarios", icon: <UserIcon />, href: "/usuarios" },
 ];
 

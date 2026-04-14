@@ -3766,3 +3766,1029 @@ async def test_dashboard_atrasadas_por_vendedor_empty(admin_user, mock_db):
 
     assert resp.status_code == 200
     assert resp.json()["atrasadas_por_vendedor"] == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Relatorios Gerenciais — Wave 5 Componente 16 (RF-015, US-014)
+# ═══════════════════════════════════════════════════════════════════════════
+
+RELATORIOS_URL = f"{PREFIX}/relatorios"
+
+
+def _relatorio_mocks(
+    *,
+    tempo_atraso=48,
+    total_geral=10,
+    rota_rows=None,
+    status_rows=None,
+    tempo_medio_raw=None,
+    vendedor_rows=None,
+    atrasadas_rows=None,
+):
+    """Cria mocks sequenciais para o handler de relatorios.
+
+    O handler faz 7 queries em ordem:
+      Q1: config tempo_atraso → .scalar_one_or_none()
+      Q2: total_geral → .scalar_one()
+      Q3: distribuicao por rota → .all()
+      Q4: distribuicao por status → .all()
+      Q5: tempo medio aprovacao → .scalar_one()
+      Q6: metricas por vendedor → .all()
+      Q7: provas atrasadas → .all()
+    """
+    # Q1: config
+    q1 = MagicMock()
+    q1.scalar_one_or_none.return_value = tempo_atraso
+
+    # Q2: total_geral
+    q2 = MagicMock()
+    q2.scalar_one.return_value = total_geral
+
+    # Q3: distribuicao por rota
+    rows_rota = []
+    for rota_val, cnt in (rota_rows or []):
+        r = MagicMock()
+        r.rota = rota_val
+        r.cnt = cnt
+        rows_rota.append(r)
+    q3 = MagicMock()
+    q3.all.return_value = rows_rota
+
+    # Q4: distribuicao por status
+    rows_status = []
+    for st_val, cnt in (status_rows or []):
+        r = MagicMock()
+        r.status = st_val
+        r.cnt = cnt
+        rows_status.append(r)
+    q4 = MagicMock()
+    q4.all.return_value = rows_status
+
+    # Q5: tempo medio
+    q5 = MagicMock()
+    q5.scalar_one.return_value = tempo_medio_raw
+
+    # Q6: vendedor rows
+    q6 = MagicMock()
+    q6.all.return_value = vendedor_rows or []
+
+    # Q7: atrasadas lista
+    q7 = MagicMock()
+    q7.all.return_value = atrasadas_rows or []
+
+    return [q1, q2, q3, q4, q5, q6, q7]
+
+
+async def test_relatorios_200_admin_basic(admin_user, mock_db):
+    """Admin recebe 200 com estrutura basica vazia."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _relatorio_mocks()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "periodo" in data
+    assert "total_geral" in data
+    assert "tempo_medio_aprovacao_horas" in data
+    # L-10 (auditoria Wave 5 ronda 2): taxa_reprovacao_geral_pct centralizada
+    # no backend
+    assert "taxa_reprovacao_geral_pct" in data
+    assert "distribuicao_por_rota" in data
+    assert "distribuicao_por_status" in data
+    assert "por_vendedor" in data
+    assert "atrasadas" in data
+    assert "atualizado_em" in data
+    assert data["total_geral"] == 10
+
+
+async def test_relatorios_403_vendedor(vendedor_matriz, mock_db):
+    """Vendedor recebe 403 (relatorios sao admin-only)."""
+    _setup(mock_db, user=vendedor_matriz)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 403
+
+
+async def test_relatorios_401_sem_auth(mock_db):
+    """Sem autenticacao recebe 401."""
+    async def _get_db():
+        yield mock_db
+    app.dependency_overrides[get_db] = _get_db
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 401
+
+
+async def test_relatorios_422_periodo_invalido(admin_user, mock_db):
+    """inicio > fim retorna 422."""
+    _setup(mock_db, admin=admin_user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(
+            RELATORIOS_URL,
+            params={"periodo_inicio": "2026-04-15", "periodo_fim": "2026-04-01"},
+        )
+
+    assert resp.status_code == 422
+
+
+async def test_relatorios_total_geral(admin_user, mock_db):
+    """total_geral reflete o valor retornado pela query."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _relatorio_mocks(total_geral=25)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["total_geral"] == 25
+
+
+async def test_relatorios_distribuicao_rota(admin_user, mock_db):
+    """Distribuicao por rota agrupa corretamente."""
+    from app.db.models import RotaEnum
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _relatorio_mocks(
+        rota_rows=[
+            (RotaEnum.PADRAO, 5),
+            (RotaEnum.DIRETA, 3),
+            (None, 2),
+        ]
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    dr = resp.json()["distribuicao_por_rota"]
+    assert dr["PADRAO"] == 5
+    assert dr["DIRETA"] == 3
+    assert dr["SEM_ROTA"] == 2
+
+
+async def test_relatorios_distribuicao_status(admin_user, mock_db):
+    """Distribuicao por status retorna lista com labels."""
+    from app.db.models import StatusProvaEnum
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _relatorio_mocks(
+        status_rows=[
+            (StatusProvaEnum.RETIRADA_PELO_VENDEDOR, 3),
+            (StatusProvaEnum.APROVADA_PELO_VENDEDOR, 2),
+        ]
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    ds = resp.json()["distribuicao_por_status"]
+    assert len(ds) == 2
+    assert ds[0]["status"] == "RETIRADA_PELO_VENDEDOR"
+    assert ds[0]["label"] == "Com vendedor"
+    assert ds[0]["quantidade"] == 3
+
+
+async def test_relatorios_tempo_medio_com_dados(admin_user, mock_db):
+    """Tempo medio retorna valor em horas quando ha aprovacoes."""
+    _setup(mock_db, admin=admin_user)
+    # 10800 seconds = 3 hours
+    mock_db.execute.side_effect = _relatorio_mocks(tempo_medio_raw=10800)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["tempo_medio_aprovacao_horas"] == 3.0
+
+
+async def test_relatorios_tempo_medio_null(admin_user, mock_db):
+    """Tempo medio retorna null quando nao ha aprovacoes."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _relatorio_mocks(tempo_medio_raw=None)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["tempo_medio_aprovacao_horas"] is None
+
+
+async def test_relatorios_por_vendedor(admin_user, mock_db):
+    """Metricas por vendedor retornam com taxa de reprovacao."""
+    from app.db.models import LocalizacaoEnum
+    _setup(mock_db, admin=admin_user)
+    vr = MagicMock()
+    vr.vendedor_id = uuid.uuid4()
+    vr.vendedor_nome = "Mario Souza"
+    vr.vendedor_localizacao = LocalizacaoEnum.FILIAL
+    vr.total_provas = 10
+    vr.aprovadas = 7
+    vr.reprovadas = 2
+    vr.avg_sec = 7200  # 2 hours
+
+    mock_db.execute.side_effect = _relatorio_mocks(vendedor_rows=[vr])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    pv = resp.json()["por_vendedor"]
+    assert len(pv) == 1
+    assert pv[0]["vendedor_nome"] == "Mario Souza"
+    assert pv[0]["total_provas"] == 10
+    assert pv[0]["aprovadas"] == 7
+    assert pv[0]["reprovadas"] == 2
+    assert pv[0]["taxa_reprovacao_pct"] == 20.0
+    assert pv[0]["tempo_medio_aprovacao_horas"] == 2.0
+    assert pv[0]["vendedor_localizacao"] == "FILIAL"
+
+
+async def test_relatorios_vendedor_taxa_zero(admin_user, mock_db):
+    """Vendedor com zero provas tem taxa 0.0."""
+    _setup(mock_db, admin=admin_user)
+    vr = MagicMock()
+    vr.vendedor_id = uuid.uuid4()
+    vr.vendedor_nome = "Empty Seller"
+    vr.vendedor_localizacao = None
+    vr.total_provas = 0
+    vr.aprovadas = 0
+    vr.reprovadas = 0
+    vr.avg_sec = None
+
+    mock_db.execute.side_effect = _relatorio_mocks(vendedor_rows=[vr])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    pv = resp.json()["por_vendedor"]
+    assert pv[0]["taxa_reprovacao_pct"] == 0.0
+    assert pv[0]["tempo_medio_aprovacao_horas"] is None
+    assert pv[0]["vendedor_localizacao"] is None
+
+
+async def test_relatorios_atrasadas_lista(admin_user, mock_db):
+    """Lista de atrasadas retorna com dias de atraso."""
+    from datetime import timedelta
+
+    from app.db.models import RotaEnum, StatusProvaEnum
+
+    _setup(mock_db, admin=admin_user)
+    now = datetime.now(timezone.utc)
+    old_date = now - timedelta(days=5)
+
+    ar = MagicMock()
+    ar.prova_id = uuid.uuid4()
+    ar.nome = "Arte Atrasada"
+    ar.nro_requerimento = "REQ-999"
+    ar.cliente = "Cliente Atraso"
+    ar.vendedor_nome = "Vendedor Lento"
+    ar.status = StatusProvaEnum.RETIRADA_PELO_VENDEDOR
+    ar.rota = RotaEnum.PADRAO
+    ar.ultima_mov_at = old_date
+
+    mock_db.execute.side_effect = _relatorio_mocks(atrasadas_rows=[ar])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    atrasadas = resp.json()["atrasadas"]
+    assert len(atrasadas) == 1
+    assert atrasadas[0]["nome"] == "Arte Atrasada"
+    assert atrasadas[0]["nro_requerimento"] == "REQ-999"
+    assert atrasadas[0]["status"] == "RETIRADA_PELO_VENDEDOR"
+    assert atrasadas[0]["rota"] == "PADRAO"
+    assert atrasadas[0]["dias_atraso"] >= 4.9
+
+
+async def test_relatorios_atrasadas_sem_rota(admin_user, mock_db):
+    """Prova atrasada sem rota retorna rota=null."""
+    from datetime import timedelta as _td
+
+    from app.db.models import StatusProvaEnum
+
+    _setup(mock_db, admin=admin_user)
+    now = datetime.now(timezone.utc)
+    ar = MagicMock()
+    ar.prova_id = uuid.uuid4()
+    ar.nome = "Sem Rota"
+    ar.nro_requerimento = "REQ-000"
+    ar.cliente = "C"
+    ar.vendedor_nome = "V"
+    ar.status = StatusProvaEnum.CRIADA
+    ar.rota = None
+    ar.ultima_mov_at = now - _td(days=3)
+
+    mock_db.execute.side_effect = _relatorio_mocks(atrasadas_rows=[ar])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    assert resp.json()["atrasadas"][0]["rota"] is None
+
+
+async def test_relatorios_periodo_default_30_dias(admin_user, mock_db):
+    """Sem parametros de periodo, usa default de 30 dias."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _relatorio_mocks()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    p = resp.json()["periodo"]
+    from datetime import date as _date
+    inicio = _date.fromisoformat(p["inicio"])
+    fim = _date.fromisoformat(p["fim"])
+    assert (fim - inicio).days == 30
+
+
+async def test_relatorios_502_db_error(admin_user, mock_db):
+    """Erro de DB retorna 502."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = Exception("DB connection lost")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 502
+
+
+async def test_relatorios_response_schema_completo(admin_user, mock_db):
+    """Response contem todos os campos esperados pelo RelatorioResponse."""
+    from datetime import timedelta
+
+    from app.db.models import LocalizacaoEnum, RotaEnum, StatusProvaEnum
+    _setup(mock_db, admin=admin_user)
+    now = datetime.now(timezone.utc)
+
+    vr = MagicMock()
+    vr.vendedor_id = uuid.uuid4()
+    vr.vendedor_nome = "V1"
+    vr.vendedor_localizacao = LocalizacaoEnum.MATRIZ
+    vr.total_provas = 5
+    vr.aprovadas = 3
+    vr.reprovadas = 1
+    vr.avg_sec = 3600
+
+    ar = MagicMock()
+    ar.prova_id = uuid.uuid4()
+    ar.nome = "A1"
+    ar.nro_requerimento = "R1"
+    ar.cliente = "C1"
+    ar.vendedor_nome = "V1"
+    ar.status = StatusProvaEnum.COM_MOTORISTA
+    ar.rota = RotaEnum.PADRAO
+    ar.ultima_mov_at = now - timedelta(days=3)
+
+    mock_db.execute.side_effect = _relatorio_mocks(
+        total_geral=15,
+        tempo_medio_raw=7200,
+        rota_rows=[(RotaEnum.PADRAO, 10), (RotaEnum.DIRETA, 5)],
+        status_rows=[(StatusProvaEnum.COM_MOTORISTA, 2)],
+        vendedor_rows=[vr],
+        atrasadas_rows=[ar],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_geral"] == 15
+    assert data["tempo_medio_aprovacao_horas"] == 2.0
+    assert data["total_atrasadas"] == 1
+    assert data["distribuicao_por_rota"]["PADRAO"] == 10
+    assert data["distribuicao_por_rota"]["DIRETA"] == 5
+    assert len(data["distribuicao_por_status"]) == 1
+    assert len(data["por_vendedor"]) == 1
+    assert len(data["atrasadas"]) == 1
+
+
+async def test_relatorios_taxa_reprovacao_geral_calculada(admin_user, mock_db):
+    """Taxa de reprovacao geral e calculada no backend (L-10 auditoria Wave 5 ronda 2).
+
+    Valida o novo campo `taxa_reprovacao_geral_pct` que foi movido do
+    frontend para o backend. Soma das reprovadas de todos os vendedores
+    dividido pelo total_geral, x100, arredondado a 1 casa decimal.
+
+    Cenario: total_geral=20, 2 vendedores com 3 + 1 = 4 reprovadas.
+    Taxa esperada: (4 / 20) * 100 = 20.0%.
+    """
+    from app.db.models import LocalizacaoEnum
+
+    _setup(mock_db, admin=admin_user)
+
+    v1 = MagicMock()
+    v1.vendedor_id = uuid.uuid4()
+    v1.vendedor_nome = "Vendedor A"
+    v1.vendedor_localizacao = LocalizacaoEnum.MATRIZ
+    v1.total_provas = 12
+    v1.aprovadas = 8
+    v1.reprovadas = 3
+    v1.avg_sec = 3600
+
+    v2 = MagicMock()
+    v2.vendedor_id = uuid.uuid4()
+    v2.vendedor_nome = "Vendedor B"
+    v2.vendedor_localizacao = LocalizacaoEnum.FILIAL
+    v2.total_provas = 8
+    v2.aprovadas = 5
+    v2.reprovadas = 1
+    v2.avg_sec = 7200
+
+    mock_db.execute.side_effect = _relatorio_mocks(
+        total_geral=20,
+        vendedor_rows=[v1, v2],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # 4 reprovadas / 20 total = 20.0%
+    assert data["taxa_reprovacao_geral_pct"] == 20.0
+
+
+async def test_relatorios_taxa_reprovacao_geral_zero_division(admin_user, mock_db):
+    """Taxa de reprovacao geral retorna 0.0 quando total_geral = 0 (L-10).
+
+    Protege contra ZeroDivisionError. O handler deve detectar total_geral
+    zero e retornar 0.0 sem dividir.
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _relatorio_mocks(
+        total_geral=0,
+        vendedor_rows=[],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["taxa_reprovacao_geral_pct"] == 0.0
+
+
+# ── Testes negativos de exclusao de status terminais ─────────────────────────
+#
+# Auditoria Wave 5 (achado M-04): os filtros `status.not_in(TERMINAL_STATUSES)`
+# em Q4 (distribuicao_por_status, provas.py:1324) e Q7 (atrasadas_stmt,
+# provas.py:1488) sao cruciais para a corretude dos relatorios. Um bug em
+# Wave 4 (ADR-094 L-01) mostra que filtros SQL podem quebrar silenciosamente.
+#
+# LIMITACAO HONESTA: como `_relatorio_mocks` retorna mocks pre-fabricados sem
+# passar pelo Postgres real, estes testes NAO exercitam o SQL `WHERE not_in`.
+# Eles validam o *contrato do mock* — que o handler so recebe status ativos —
+# e falhariam se alguem introduzisse um pos-processamento Python que vazasse
+# terminais no response. Validacao real do SQL pende de suite de integracao
+# contra Postgres (achado H-01 rejeitado pelo stakeholder em 2026-04-14).
+
+
+async def test_relatorios_distribuicao_status_exclui_terminais(admin_user, mock_db):
+    """Distribuicao por status nunca inclui CANCELADA/RECEBIDA (Q4, M-04).
+
+    Limitacao: o mock bypassa o WHERE not_in(TERMINAL_STATUSES). Este teste
+    valida o contrato + o pos-processamento Python do handler, nao o SQL.
+    """
+    from app.db.models import StatusProvaEnum
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _relatorio_mocks(
+        status_rows=[
+            (StatusProvaEnum.RETIRADA_PELO_VENDEDOR, 3),
+            (StatusProvaEnum.APROVADA_PELO_VENDEDOR, 2),
+            (StatusProvaEnum.COM_MOTORISTA, 1),
+        ]
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    ds = resp.json()["distribuicao_por_status"]
+    status_vals = {s["status"] for s in ds}
+    # Nenhum status terminal deve aparecer
+    assert "CANCELADA" not in status_vals
+    assert "RECEBIDA_PELA_CLICHERIA" not in status_vals
+    # Status ativos devem aparecer
+    assert "RETIRADA_PELO_VENDEDOR" in status_vals
+    assert "APROVADA_PELO_VENDEDOR" in status_vals
+    assert "COM_MOTORISTA" in status_vals
+    assert len(ds) == 3
+
+
+async def test_relatorios_atrasadas_exclui_terminais(admin_user, mock_db):
+    """Lista de atrasadas nunca inclui provas em status terminal (Q7, M-04).
+
+    Limitacao: idem M-04 — valida contrato + pos-processamento, nao o SQL.
+    """
+    from datetime import timedelta
+
+    from app.db.models import RotaEnum, StatusProvaEnum
+
+    _setup(mock_db, admin=admin_user)
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=5)
+
+    # Apenas 1 linha ativa (COM_MOTORISTA) — o SQL Q7 ja filtrou os terminais
+    ar = MagicMock()
+    ar.prova_id = uuid.uuid4()
+    ar.nome = "Atrasada ativa"
+    ar.nro_requerimento = "REQ-M04"
+    ar.cliente = "C"
+    ar.vendedor_nome = "V"
+    ar.status = StatusProvaEnum.COM_MOTORISTA
+    ar.rota = RotaEnum.PADRAO
+    ar.ultima_mov_at = old
+
+    mock_db.execute.side_effect = _relatorio_mocks(atrasadas_rows=[ar])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    atrasadas = resp.json()["atrasadas"]
+    assert len(atrasadas) == 1
+    status_in_list = {a["status"] for a in atrasadas}
+    # Nenhum terminal deve ter escapado do mock para o response
+    assert "CANCELADA" not in status_in_list
+    assert "RECEBIDA_PELA_CLICHERIA" not in status_in_list
+    assert atrasadas[0]["status"] == "COM_MOTORISTA"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Relatorios CSV — Wave 5 (RF-015 exportacao)
+# ═══════════════════════════════════════════════════════════════════════════
+
+RELATORIOS_CSV_URL = f"{PREFIX}/relatorios/csv"
+
+
+def _csv_mocks(*, rows=None):
+    """Mocks para o handler de CSV.
+
+    O handler faz 1 query:
+      Q1: SELECT provas + JOIN usuarios + subqueries → .all()
+    """
+    q1 = MagicMock()
+    q1.all.return_value = rows or []
+    return [q1]
+
+
+def _make_csv_row(
+    *,
+    nome="Arte Test",
+    nro_req="REQ-001",
+    cliente="Cliente A",
+    vendedor_nome="Mario",
+    localizacao=None,
+    status_val=None,
+    rota_val=None,
+    ciclo=1,
+    created_at=None,
+    ultima_mov_at=None,
+    aprovada_cnt=0,
+    reprovada_cnt=0,
+):
+    from app.db.models import StatusProvaEnum
+
+    r = MagicMock()
+    r.nome = nome
+    r.nro_requerimento = nro_req
+    r.cliente = cliente
+    r.vendedor_nome = vendedor_nome
+    r.vendedor_localizacao = localizacao
+    r.status = status_val or StatusProvaEnum.CRIADA
+    r.rota = rota_val
+    r.ciclo_atual = ciclo
+    r.created_at = created_at or datetime.now(timezone.utc)
+    r.ultima_mov_at = ultima_mov_at or datetime.now(timezone.utc)
+    r.aprovada_cnt = aprovada_cnt
+    r.reprovada_cnt = reprovada_cnt
+    return r
+
+
+async def test_relatorios_csv_200_admin(admin_user, mock_db):
+    """Admin recebe 200 com Content-Type text/csv + Cache-Control no-store (L-03)."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _csv_mocks()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 200
+    assert "text/csv" in resp.headers["content-type"]
+    assert "attachment" in resp.headers["content-disposition"]
+    assert ".csv" in resp.headers["content-disposition"]
+    # L-03 (auditoria Wave 5 ronda 2): header Cache-Control previne browser
+    # de servir CSV cached depois que os dados mudam entre downloads.
+    assert resp.headers.get("cache-control") == "no-store"
+
+
+async def test_relatorios_csv_403_vendedor(vendedor_matriz, mock_db):
+    """Vendedor recebe 403."""
+    _setup(mock_db, user=vendedor_matriz)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 403
+
+
+async def test_relatorios_csv_conteudo_header(admin_user, mock_db):
+    """CSV contem header pt-BR correto."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _csv_mocks()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 200
+    text = resp.text
+    lines = text.strip().split("\n")
+    assert len(lines) >= 1
+    header = lines[0].replace("\ufeff", "")
+    assert "Nome da Prova" in header
+    assert "Nro Requerimento" in header
+    assert "Vendedor" in header
+    assert "Dias Parada" in header
+
+
+async def test_relatorios_csv_conteudo_dados(admin_user, mock_db):
+    """CSV inclui dados formatados."""
+    from app.db.models import LocalizacaoEnum, RotaEnum, StatusProvaEnum
+
+    _setup(mock_db, admin=admin_user)
+    row = _make_csv_row(
+        nome="Arte CSV",
+        nro_req="REQ-CSV",
+        cliente="Client CSV",
+        vendedor_nome="Vendedor CSV",
+        localizacao=LocalizacaoEnum.FILIAL,
+        status_val=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        rota_val=RotaEnum.DIRETA,
+        aprovada_cnt=1,
+    )
+    mock_db.execute.side_effect = _csv_mocks(rows=[row])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 200
+    text = resp.text
+    assert "Arte CSV" in text
+    assert "REQ-CSV" in text
+    assert "Filial" in text
+    assert "Aprovada pelo vendedor" in text
+    assert "Rota Direta" in text
+    assert "Sim" in text
+
+
+async def test_relatorios_csv_422_periodo_invalido(admin_user, mock_db):
+    """inicio > fim retorna 422."""
+    _setup(mock_db, admin=admin_user)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(
+            RELATORIOS_CSV_URL,
+            params={"periodo_inicio": "2026-04-15", "periodo_fim": "2026-04-01"},
+        )
+
+    assert resp.status_code == 422
+
+
+async def test_relatorios_csv_utf8_bom(admin_user, mock_db):
+    """CSV inicia com UTF-8 BOM para Excel."""
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = _csv_mocks()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 200
+    assert resp.text.startswith("\ufeff")
+
+
+async def test_relatorios_csv_nao_truncado_sem_header(admin_user, mock_db):
+    """CSV abaixo do limite nao tem header X-CSV-Truncated (L-04 auditoria Wave 5 ronda 2).
+
+    Valida que requests dentro do limite CSV_MAX_ROWS (10000) nao sinalizam
+    truncamento. Usa um mock pequeno (5 linhas) para confirmar que o header
+    `X-CSV-Truncated` NAO aparece no response.
+    """
+    _setup(mock_db, admin=admin_user)
+    rows = [_make_csv_row(nome=f"Arte {i}", nro_req=f"REQ-{i}") for i in range(5)]
+    mock_db.execute.side_effect = _csv_mocks(rows=rows)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 200
+    assert "x-csv-truncated" not in resp.headers
+    assert "x-csv-max-rows" not in resp.headers
+
+
+async def test_relatorios_csv_truncado_com_header(admin_user, mock_db):
+    """CSV no limite sinaliza truncamento via X-CSV-Truncated=true (L-04).
+
+    Simula um dataset de CSV_MAX_ROWS + 1 linhas (10001). O handler deve:
+      1. Detectar que len(rows) > CSV_MAX_ROWS
+      2. Truncar para CSV_MAX_ROWS (10000 linhas)
+      3. Setar header X-CSV-Truncated: true + X-CSV-Max-Rows: 10000
+    """
+    from app.api.v1.provas import CSV_MAX_ROWS
+
+    _setup(mock_db, admin=admin_user)
+    # Gera CSV_MAX_ROWS + 1 linhas (o limit da query busca CSV_MAX_ROWS + 1)
+    rows = [
+        _make_csv_row(nome=f"Arte {i}", nro_req=f"REQ-{i:05d}")
+        for i in range(CSV_MAX_ROWS + 1)
+    ]
+    mock_db.execute.side_effect = _csv_mocks(rows=rows)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 200
+    assert resp.headers.get("x-csv-truncated") == "true"
+    assert resp.headers.get("x-csv-max-rows") == str(CSV_MAX_ROWS)
+
+    # O CSV renderizado deve conter exatamente CSV_MAX_ROWS linhas de dados
+    # (+ 1 header + BOM). Simples contagem de \n.
+    body = resp.text
+    line_count = body.count("\n")
+    # CSV_MAX_ROWS (10000 linhas de dados) + 1 header
+    assert line_count == CSV_MAX_ROWS + 1
+
+
+async def test_relatorios_csv_502_db_error(admin_user, mock_db):
+    """Erro de DB no CSV retorna 502 (L-09 auditoria Wave 5).
+
+    Cobre o `except Exception:` do handler get_relatorios_csv que ate entao
+    nao tinha teste — o coverage da auditoria identificou as linhas como
+    nao cobertas.
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = Exception("DB connection lost")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 502
+
+
+async def test_relatorios_csv_injection_sanitized(admin_user, mock_db):
+    """CSV Injection nos campos de texto livre e neutralizado (M-01 auditoria Wave 5).
+
+    Verifica que nome/cliente/vendedor_nome comecando com chars de formula
+    (=, +, -, @, \\t, \\r) sao prefixados com apostrofo antes de serem escritos
+    no CSV, protegendo admins que abrem o export no Excel/Calc/Sheets contra
+    execucao acidental de formulas maliciosas. CWE-1236 / OWASP CSV Injection.
+
+    Campos testados:
+      - nome: `=1+1` (formula basica)
+      - cliente: `+cmd|' /C calc'!A1` (DDE — Excel dispara commando externo)
+      - vendedor_nome: `@SUM(A1:A9)` (formula com prefixo @)
+
+    `nro_requerimento` nao entra neste teste porque o schema Pydantic
+    (NRO_REQ_RE) ja proibe os chars perigosos na criacao da prova.
+    """
+    from app.db.models import StatusProvaEnum
+
+    _setup(mock_db, admin=admin_user)
+    row = _make_csv_row(
+        nome="=1+1",
+        nro_req="REQ-SAFE",
+        cliente="+cmd|' /C calc'!A1",
+        vendedor_nome="@SUM(A1:A9)",
+        status_val=StatusProvaEnum.CRIADA,
+    )
+    mock_db.execute.side_effect = _csv_mocks(rows=[row])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 200
+    text = resp.text
+
+    # Os 3 campos vulneraveis devem ter apostrofo prefixado
+    assert "'=1+1" in text
+    assert "'+cmd|' /C calc'!A1" in text
+    assert "'@SUM(A1:A9)" in text
+
+    # O apostrofo e o UNICO char adicionado — o valor original segue logo depois
+    # Garante que nao ha escape duplo ou perda de dados
+    assert "=1+1" in text  # presente apos o apostrofo
+    assert "@SUM(A1:A9)" in text  # idem
+
+    # Campos nao vulneraveis NAO devem ter apostrofo adicionado
+    assert "'REQ-SAFE" not in text  # nro_requerimento intacto
+    assert "REQ-SAFE" in text
+
+
+# ── SQL-level assertions em TERMINAL_STATUSES (M-04 auditoria Wave 5) ──────
+#
+# A auditoria anterior adicionou os testes `*_exclui_terminais` que validam
+# o *contrato do mock* — se alguem remover o WHERE NOT IN do SQL, esses
+# testes continuam passando porque o mock devolve rows pre-fabricados.
+#
+# A suite real contra Postgres (H-01) continua rejeitada, mas esta re-auditoria
+# propoe uma mitigacao barata e ortogonal: compilar o stmt para SQL string e
+# fazer assertion na estrutura. Os testes abaixo capturam os stmts enviados ao
+# `mock_db.execute` via side_effect callable e inspecionam o SQL gerado pelo
+# dialeto Postgres.
+#
+# Esta tecnica NAO substitui integracao real (nao valida que o WHERE esta
+# semanticamente correto em um banco ativo), mas GARANTE que o SQL contem a
+# clausula — pega regressoes tipo "alguem comentou o .where(...)" que os
+# testes de contrato de mock nao pegam.
+
+
+async def test_relatorios_fallback_tempo_atraso_valor_invalido(admin_user, mock_db):
+    """Fallback 48h quando configuracoes_sistema.tempo_atraso_horas_uteis
+    retorna valor nao-numerico (L-02 auditoria Wave 5 ronda 2).
+
+    O handler tem um try/except (ValueError, TypeError) em torno do
+    int(tempo_atraso_raw) que protege contra valores invalidos no banco
+    (ex: alguem editou a configuracao via painel e colocou string).
+    As linhas 1282-1283 do handler estavam marcadas como missing no
+    coverage — este teste as exercita.
+
+    Estrategia: substituir apenas a 1a query (Q1 tempo_atraso config) para
+    retornar 'abc' (string nao-numerica), e deixar as demais queries
+    retornando vazio. O handler deve:
+      1. Tentar int('abc') -> ValueError
+      2. Cair no except e usar fallback tempo_atraso_horas = 48
+      3. Prosseguir normalmente e retornar 200
+    """
+    _setup(mock_db, admin=admin_user)
+
+    # Q1 retorna string nao-numerica; Q2-Q7 retornam defaults do _relatorio_mocks
+    mocks = _relatorio_mocks()
+    mocks[0].scalar_one_or_none.return_value = "abc"  # valor invalido
+    mock_db.execute.side_effect = mocks
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    # O handler nao deve quebrar — fallback 48h e usado e o response e 200
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "total_geral" in data
+    assert data["total_geral"] == 10  # default do _relatorio_mocks
+
+
+async def test_relatorios_fallback_tempo_atraso_none(admin_user, mock_db):
+    """Fallback 48h quando configuracoes_sistema.tempo_atraso_horas_uteis nao existe
+    (L-02 auditoria Wave 5 ronda 2).
+
+    Cobre o outro ramo do try/except: o branch `if tempo_atraso_raw is not None`
+    que ja e default (None -> usa 48h). Garante que o handler aceita o cenario
+    de configuracao ausente.
+    """
+    _setup(mock_db, admin=admin_user)
+
+    mocks = _relatorio_mocks()
+    mocks[0].scalar_one_or_none.return_value = None  # configuracao ausente
+    mock_db.execute.side_effect = mocks
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+
+
+async def test_relatorios_q4_sql_literal_contem_not_in_terminais(admin_user, mock_db):
+    """Q4 SQL contem WHERE status NOT IN com terminais (M-04 auditoria Wave 5).
+
+    Captura os stmts enviados a `db.execute` e inspeciona o SQL compilado
+    para o dialeto Postgres. Valida que a 4a query (distribuicao_por_status)
+    contem `NOT IN` e os valores `CANCELADA` e `RECEBIDA_PELA_CLICHERIA`.
+    """
+    from sqlalchemy.dialects import postgresql
+
+    _setup(mock_db, admin=admin_user)
+
+    captured_stmts: list = []
+    mock_iter = iter(_relatorio_mocks())
+
+    def capture(stmt, *args, **kwargs):
+        captured_stmts.append(stmt)
+        return next(mock_iter)
+
+    mock_db.execute.side_effect = capture
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    # Q1=config, Q2=total_geral, Q3=rota, Q4=status, Q5=tempo_medio, Q6=vendedor, Q7=atrasadas
+    assert len(captured_stmts) >= 4
+
+    q4_sql = str(
+        captured_stmts[3].compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    q4_upper = q4_sql.upper()
+    assert "NOT IN" in q4_upper, (
+        f"Q4 (distribuicao_por_status) perdeu WHERE NOT IN.\nSQL:\n{q4_sql}"
+    )
+    assert "RECEBIDA_PELA_CLICHERIA" in q4_sql, (
+        f"Q4 nao esta excluindo RECEBIDA_PELA_CLICHERIA.\nSQL:\n{q4_sql}"
+    )
+    assert "CANCELADA" in q4_sql, (
+        f"Q4 nao esta excluindo CANCELADA.\nSQL:\n{q4_sql}"
+    )
+
+
+async def test_relatorios_q7_sql_literal_contem_not_in_terminais(admin_user, mock_db):
+    """Q7 SQL (atrasadas) contem WHERE status NOT IN com terminais (M-04).
+
+    Mesmo principio do teste Q4 — captura o stmt da 7a query e verifica
+    que a lista de atrasadas exclui status terminais no SQL real.
+    """
+    from sqlalchemy.dialects import postgresql
+
+    _setup(mock_db, admin=admin_user)
+
+    captured_stmts: list = []
+    mock_iter = iter(_relatorio_mocks())
+
+    def capture(stmt, *args, **kwargs):
+        captured_stmts.append(stmt)
+        return next(mock_iter)
+
+    mock_db.execute.side_effect = capture
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_URL)
+
+    assert resp.status_code == 200
+    assert len(captured_stmts) >= 7, (
+        f"Esperava 7 queries executadas, got {len(captured_stmts)}"
+    )
+
+    q7_sql = str(
+        captured_stmts[6].compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    q7_upper = q7_sql.upper()
+    assert "NOT IN" in q7_upper, (
+        f"Q7 (atrasadas) perdeu WHERE NOT IN.\nSQL:\n{q7_sql}"
+    )
+    assert "RECEBIDA_PELA_CLICHERIA" in q7_sql, (
+        f"Q7 nao esta excluindo RECEBIDA_PELA_CLICHERIA.\nSQL:\n{q7_sql}"
+    )
+    assert "CANCELADA" in q7_sql, (
+        f"Q7 nao esta excluindo CANCELADA.\nSQL:\n{q7_sql}"
+    )
+
+
+async def test_relatorios_csv_injection_valores_seguros_inalterados(admin_user, mock_db):
+    """Valores que nao comecam com char de formula passam inalterados (M-01).
+
+    Confirma que o sanitizer e cirurgico: apenas strings comecando com
+    `=+-@\\t\\r` recebem apostrofo. Nomes normais, nomes com `=` no meio,
+    numeros negativos formatados como string etc nao devem ser afetados.
+    """
+    from app.db.models import StatusProvaEnum
+
+    _setup(mock_db, admin=admin_user)
+    row = _make_csv_row(
+        nome="Arte Normal 2026",
+        nro_req="REQ-123",
+        cliente="Empresa X = Best (desde 1990)",  # `=` no meio, nao no comeco
+        vendedor_nome="Mario Souza",
+        status_val=StatusProvaEnum.CRIADA,
+    )
+    mock_db.execute.side_effect = _csv_mocks(rows=[row])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(RELATORIOS_CSV_URL)
+
+    assert resp.status_code == 200
+    text = resp.text
+
+    # Valores seguros devem aparecer sem alteracao
+    assert "Arte Normal 2026" in text
+    assert "Empresa X = Best (desde 1990)" in text
+    assert "Mario Souza" in text
+
+    # NAO deve prefixar nenhum dos 3 (nenhum comeca com char de formula)
+    assert "'Arte Normal" not in text
+    assert "'Empresa X" not in text
+    assert "'Mario Souza" not in text

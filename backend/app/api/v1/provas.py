@@ -32,6 +32,8 @@ Fluxo completo de criacao (ADR-031 — upload direto frontend -> R2):
   (ADR-041). Falha de cleanup loga "drift manual" para investigacao futura.
 """
 import base64
+import csv
+import io
 import logging
 import uuid
 from datetime import date, datetime, timedelta, timezone
@@ -91,6 +93,14 @@ from app.domain.schemas.prova import (
     UploadUrlRequest,
     UploadUrlResponse,
     sanitize_filename,
+)
+from app.domain.schemas.relatorio import (
+    DistribuicaoRota,
+    PeriodoFiltro,
+    ProvaAtrasada,
+    RelatorioResponse,
+    StatusCount,
+    VendedorRelatorio,
 )
 from app.services import qrcode_service, r2_signed
 from app.services.audit_service import log_audit
@@ -1185,6 +1195,634 @@ async def get_dashboard(
 
     _dashboard_cache_set(cache_key, response)
     return response
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Relatorios Gerenciais (Wave 5, Componente 16 — RF-015, US-014)
+# ═══════════════════════════════════════════════════════════════════════════
+# RBAC: admin-only (get_admin_user). BACKLOG C05: "Impede que um vendedor
+# acesse relatorios." US-014: "Como usuario da 3Studio..."
+#
+# Assim como /dashboard, deve ficar ANTES de /{prova_id} para o FastAPI
+# nao interpretar "relatorios" como UUID.
+
+# Labels para o PieChart de distribuicao por status (provas ativas).
+_STATUS_LABELS: dict[StatusProvaEnum, str] = {
+    StatusProvaEnum.CRIADA: "Criada",
+    StatusProvaEnum.RETIRADA_PELO_VENDEDOR: "Com vendedor",
+    StatusProvaEnum.APROVADA_PELO_VENDEDOR: "Aprovada",
+    StatusProvaEnum.DE_VOLTA_3STUDIO: "Na 3Studio",
+    StatusProvaEnum.COM_MOTORISTA: "Com motorista",
+    StatusProvaEnum.ENVIADA_PARA_CLICHERIA: "Enviada p/ clicheria",
+    StatusProvaEnum.ENCAMINHADA_A_CLICHERIA: "Encaminhada a clicheria",
+    StatusProvaEnum.REPROVADA_PELO_VENDEDOR: "Reprovada",
+}
+
+
+@router.get("/relatorios", response_model=RelatorioResponse)
+async def get_relatorios(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(get_admin_user),
+    periodo_inicio: date | None = Query(None),
+    periodo_fim: date | None = Query(None),
+) -> RelatorioResponse:
+    """Retorna metricas agregadas para a pagina de relatorios (RF-015, US-014).
+
+    Admin-only. Filtro de periodo opcional (default: ultimos 30 dias).
+
+    Indicadores:
+      - total_geral: COUNT de provas no periodo
+      - tempo_medio_aprovacao_horas: media RETIRADA→APROVADA em horas corridas
+      - total_atrasadas: provas ativas com atraso (RN-008, cross-period)
+      - distribuicao_por_rota: COUNT por rota
+      - distribuicao_por_status: COUNT por status ativo (para PieChart)
+      - por_vendedor: metricas individuais por vendedor
+      - atrasadas: lista detalhada com dias de atraso (US-014 criterio 2)
+    """
+    hoje = date.today()
+    inicio = periodo_inicio or (hoje - timedelta(days=30))
+    fim = periodo_fim or hoje
+
+    if fim < inicio:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Data final do periodo nao pode ser anterior a inicial",
+        )
+
+    periodo = PeriodoFiltro(inicio=inicio, fim=fim)
+
+    # Converter datas para UTC com offset BRT (identico ao padrao do C07).
+    inicio_utc = datetime(
+        inicio.year, inicio.month, inicio.day,
+        tzinfo=BRT_TIMEZONE,
+    ).astimezone(timezone.utc)
+    fim_utc = datetime(
+        fim.year, fim.month, fim.day, 23, 59, 59, 999999,
+        tzinfo=BRT_TIMEZONE,
+    ).astimezone(timezone.utc)
+
+    try:
+        # L-11 (auditoria Wave 5): now_utc computado uma unica vez no topo
+        # do try e usado tanto para limite_atraso (RN-008) quanto para a
+        # lista de atrasadas (Q7) e o campo `atualizado_em` do response.
+        # Evita microssegundos de drift entre os dois pontos e remove
+        # chamada duplicada de datetime.now().
+        now_utc = datetime.now(timezone.utc)
+
+        # ── Q1: tempo_atraso da configuracao (RN-008) ────────────────────
+        cfg_stmt = select(ConfiguracaoSistema.valor).where(
+            ConfiguracaoSistema.chave == "tempo_atraso_horas_uteis"
+        )
+        cfg_result = await db.execute(cfg_stmt)
+        tempo_atraso_raw = cfg_result.scalar_one_or_none()
+        try:
+            tempo_atraso_horas = (
+                int(tempo_atraso_raw) if tempo_atraso_raw is not None else 48
+            )
+        except (ValueError, TypeError):
+            tempo_atraso_horas = 48
+
+        limite_atraso = now_utc - timedelta(hours=tempo_atraso_horas)
+
+        # Subquery: ultima movimentacao por prova.
+        ultima_mov_subq = (
+            select(func.max(Movimentacao.created_at))
+            .where(Movimentacao.prova_id == ProvaDigital.id)
+            .correlate(ProvaDigital)
+            .scalar_subquery()
+        )
+
+        # ── Q2: total_geral no periodo ──────────────────────────────────
+        total_stmt = (
+            select(func.count())
+            .select_from(ProvaDigital)
+            .where(
+                ProvaDigital.created_at >= inicio_utc,
+                ProvaDigital.created_at <= fim_utc,
+            )
+        )
+        total_geral = (await db.execute(total_stmt)).scalar_one()
+
+        # ── Q3: distribuicao por rota no periodo ────────────────────────
+        rota_stmt = (
+            select(
+                ProvaDigital.rota,
+                func.count().label("cnt"),
+            )
+            .where(
+                ProvaDigital.created_at >= inicio_utc,
+                ProvaDigital.created_at <= fim_utc,
+            )
+            .group_by(ProvaDigital.rota)
+        )
+        rota_rows = (await db.execute(rota_stmt)).all()
+        dist_rota = DistribuicaoRota(
+            PADRAO=sum(r.cnt for r in rota_rows if r.rota == RotaEnum.PADRAO),
+            DIRETA=sum(r.cnt for r in rota_rows if r.rota == RotaEnum.DIRETA),
+            SEM_ROTA=sum(r.cnt for r in rota_rows if r.rota is None),
+        )
+
+        # ── Q4: distribuicao por status (provas ativas, para PieChart) ──
+        status_stmt = (
+            select(
+                ProvaDigital.status,
+                func.count().label("cnt"),
+            )
+            .where(ProvaDigital.status.not_in(TERMINAL_STATUSES))
+            .group_by(ProvaDigital.status)
+        )
+        status_rows = (await db.execute(status_stmt)).all()
+        dist_status = [
+            StatusCount(
+                status=r.status.value,
+                label=_STATUS_LABELS.get(r.status, r.status.value),
+                quantidade=r.cnt,
+            )
+            for r in status_rows
+        ]
+
+        # ── Q5: tempo medio de aprovacao (CRIADA→APROVADA) ─────────────
+        # Calcula a media de (mov_aprovacao.created_at - prova.created_at)
+        # para provas criadas no periodo que tiveram aprovacao.
+        tempo_medio_stmt = (
+            select(
+                func.avg(
+                    func.extract(
+                        "epoch",
+                        Movimentacao.created_at - ProvaDigital.created_at,
+                    )
+                ).label("avg_seconds")
+            )
+            .select_from(Movimentacao)
+            .join(ProvaDigital, ProvaDigital.id == Movimentacao.prova_id)
+            .where(
+                Movimentacao.status_novo
+                == StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+                ProvaDigital.created_at >= inicio_utc,
+                ProvaDigital.created_at <= fim_utc,
+            )
+        )
+        tempo_medio_raw = (await db.execute(tempo_medio_stmt)).scalar_one()
+        tempo_medio_horas = (
+            round(tempo_medio_raw / 3600, 1) if tempo_medio_raw else None
+        )
+
+        # ── Q6: metricas por vendedor ───────────────────────────────────
+        # Subquery: aprovadas por prova (pelo menos 1 APROVADA)
+        aprovada_subq = (
+            select(Movimentacao.prova_id)
+            .where(
+                Movimentacao.status_novo
+                == StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+            )
+            .group_by(Movimentacao.prova_id)
+            .subquery()
+        )
+        # Subquery: reprovadas por prova
+        reprovada_subq = (
+            select(Movimentacao.prova_id)
+            .where(
+                Movimentacao.status_novo
+                == StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
+            )
+            .group_by(Movimentacao.prova_id)
+            .subquery()
+        )
+
+        # Tempo medio por vendedor: avg(mov_aprovacao - prova.created_at)
+        tempo_medio_vendedor_subq = (
+            select(
+                ProvaDigital.vendedor_id,
+                func.avg(
+                    func.extract(
+                        "epoch",
+                        Movimentacao.created_at - ProvaDigital.created_at,
+                    )
+                ).label("avg_sec"),
+            )
+            .select_from(Movimentacao)
+            .join(ProvaDigital, ProvaDigital.id == Movimentacao.prova_id)
+            .where(
+                Movimentacao.status_novo
+                == StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+                ProvaDigital.created_at >= inicio_utc,
+                ProvaDigital.created_at <= fim_utc,
+            )
+            .group_by(ProvaDigital.vendedor_id)
+            .subquery()
+        )
+
+        vendedor_stmt = (
+            select(
+                Usuario.id.label("vendedor_id"),
+                Usuario.nome.label("vendedor_nome"),
+                Usuario.localizacao.label("vendedor_localizacao"),
+                func.count(ProvaDigital.id).label("total_provas"),
+                func.count(aprovada_subq.c.prova_id).label("aprovadas"),
+                func.count(reprovada_subq.c.prova_id).label("reprovadas"),
+                tempo_medio_vendedor_subq.c.avg_sec.label("avg_sec"),
+            )
+            .select_from(ProvaDigital)
+            .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
+            .outerjoin(
+                aprovada_subq,
+                aprovada_subq.c.prova_id == ProvaDigital.id,
+            )
+            .outerjoin(
+                reprovada_subq,
+                reprovada_subq.c.prova_id == ProvaDigital.id,
+            )
+            .outerjoin(
+                tempo_medio_vendedor_subq,
+                tempo_medio_vendedor_subq.c.vendedor_id == Usuario.id,
+            )
+            .where(
+                ProvaDigital.created_at >= inicio_utc,
+                ProvaDigital.created_at <= fim_utc,
+            )
+            .group_by(
+                Usuario.id,
+                Usuario.nome,
+                Usuario.localizacao,
+                tempo_medio_vendedor_subq.c.avg_sec,
+            )
+            .order_by(func.count(ProvaDigital.id).desc())
+        )
+        vendedor_rows = (await db.execute(vendedor_stmt)).all()
+
+        por_vendedor = []
+        for v in vendedor_rows:
+            total = v.total_provas or 0
+            reprov = v.reprovadas or 0
+            taxa = round((reprov / total) * 100, 1) if total > 0 else 0.0
+            avg_h = (
+                round(v.avg_sec / 3600, 1) if v.avg_sec is not None else None
+            )
+            loc_val = v.vendedor_localizacao
+            loc_str = loc_val.value if loc_val is not None else None
+            por_vendedor.append(
+                VendedorRelatorio(
+                    vendedor_id=v.vendedor_id,
+                    vendedor_nome=v.vendedor_nome,
+                    vendedor_localizacao=loc_str,
+                    total_provas=total,
+                    aprovadas=v.aprovadas or 0,
+                    reprovadas=reprov,
+                    taxa_reprovacao_pct=taxa,
+                    tempo_medio_aprovacao_horas=avg_h,
+                )
+            )
+
+        # ── Q7: lista de provas atrasadas (US-014 criterio 2) ───────────
+        # Cross-period: atrasadas nao dependem do filtro de periodo.
+        # (now_utc ja definido no topo do try — L-11 auditoria Wave 5)
+        atrasadas_stmt = (
+            select(
+                ProvaDigital.id.label("prova_id"),
+                ProvaDigital.nome,
+                ProvaDigital.nro_requerimento,
+                ProvaDigital.cliente,
+                Usuario.nome.label("vendedor_nome"),
+                ProvaDigital.status,
+                ProvaDigital.rota,
+                func.coalesce(
+                    ultima_mov_subq, ProvaDigital.created_at
+                ).label("ultima_mov_at"),
+            )
+            .select_from(ProvaDigital)
+            .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
+            .where(
+                ProvaDigital.status.not_in(TERMINAL_STATUSES),
+                func.coalesce(ultima_mov_subq, ProvaDigital.created_at)
+                < limite_atraso,
+            )
+            .order_by(
+                func.coalesce(
+                    ultima_mov_subq, ProvaDigital.created_at
+                ).asc()
+            )
+        )
+        atrasadas_rows = (await db.execute(atrasadas_stmt)).all()
+
+        atrasadas_list = []
+        for a in atrasadas_rows:
+            # L-06 (auditoria Wave 5): alinhado ao padrao do handler CSV —
+            # nao sobrescrever tzinfo se a linha ja vier tz-aware. asyncpg
+            # sempre retorna TIMESTAMPTZ como UTC tz-aware, mas a coercao
+            # condicional protege contra futuros drivers que possam devolver
+            # naive.
+            ultima = a.ultima_mov_at
+            if ultima.tzinfo is None:
+                ultima = ultima.replace(tzinfo=timezone.utc)
+            delta = now_utc - ultima
+            dias = round(delta.total_seconds() / 86400, 1)
+            rota_val = a.rota
+            atrasadas_list.append(
+                ProvaAtrasada(
+                    prova_id=a.prova_id,
+                    nome=a.nome,
+                    nro_requerimento=a.nro_requerimento,
+                    cliente=a.cliente,
+                    vendedor_nome=a.vendedor_nome,
+                    status=a.status.value,
+                    rota=rota_val.value if rota_val is not None else None,
+                    dias_atraso=dias,
+                    ultima_movimentacao_em=a.ultima_mov_at,
+                )
+            )
+
+    except Exception:
+        # Nota (L-05 auditoria Wave 5): nao ha `except HTTPException: raise`
+        # porque o try acima so contem queries ORM puras — nenhuma chamada
+        # levanta HTTPException. Se no futuro alguem adicionar um `raise
+        # HTTPException(...)` dentro do try, reintroduzir o handler explicito
+        # ANTES deste bloco para nao mascarar com 502 o codigo de erro original.
+        logger.exception("Erro ao calcular relatorios")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Erro ao calcular relatorios",
+        )
+
+    # L-10 (auditoria Wave 5 ronda 2): taxa de reprovacao geral centralizada
+    # no backend. Soma de reprovadas de todos os vendedores no periodo
+    # dividido pelo total_geral. Evita drift com o calculo que antes era
+    # feito no frontend (page.tsx L94-101).
+    total_reprovadas_geral = sum(v.reprovadas for v in por_vendedor)
+    taxa_reprov_geral = (
+        round((total_reprovadas_geral / total_geral) * 100, 1)
+        if total_geral > 0
+        else 0.0
+    )
+
+    return RelatorioResponse(
+        periodo=periodo,
+        total_geral=total_geral,
+        tempo_medio_aprovacao_horas=tempo_medio_horas,
+        taxa_reprovacao_geral_pct=taxa_reprov_geral,
+        total_atrasadas=len(atrasadas_list),
+        distribuicao_por_rota=dist_rota,
+        distribuicao_por_status=dist_status,
+        por_vendedor=por_vendedor,
+        atrasadas=atrasadas_list,
+        atualizado_em=now_utc,
+    )
+
+
+# Labels para CSV (consistente com frontend STATUS_LABELS).
+_CSV_STATUS_LABELS: dict[StatusProvaEnum, str] = {
+    StatusProvaEnum.CRIADA: "Criada",
+    StatusProvaEnum.RETIRADA_PELO_VENDEDOR: "Retirada pelo vendedor",
+    StatusProvaEnum.APROVADA_PELO_VENDEDOR: "Aprovada pelo vendedor",
+    StatusProvaEnum.DE_VOLTA_3STUDIO: "De volta a 3Studio",
+    StatusProvaEnum.COM_MOTORISTA: "Com motorista",
+    StatusProvaEnum.ENVIADA_PARA_CLICHERIA: "Enviada para clicheria",
+    StatusProvaEnum.ENCAMINHADA_A_CLICHERIA: "Encaminhada a clicheria",
+    StatusProvaEnum.RECEBIDA_PELA_CLICHERIA: "Recebida pela clicheria",
+    StatusProvaEnum.REPROVADA_PELO_VENDEDOR: "Reprovada pelo vendedor",
+    StatusProvaEnum.CANCELADA: "Cancelada",
+}
+
+_CSV_HEADER = [
+    "Nome da Prova",
+    "Nro Requerimento",
+    "Cliente",
+    "Vendedor",
+    "Localizacao",
+    "Status",
+    "Rota",
+    "Ciclo",
+    "Data de Criacao",
+    "Ultima Movimentacao",
+    "Dias Parada",
+    "Aprovada",
+    "Reprovada",
+]
+
+_CSV_ROTA_LABELS: dict[RotaEnum, str] = {
+    RotaEnum.PADRAO: "Rota Padrao",
+    RotaEnum.DIRETA: "Rota Direta",
+}
+
+# L-04 (auditoria Wave 5 ronda 2): safety valve no CSV. Volume projetado e
+# <500 provas, mas `.limit(N)` trunca silenciosamente — sem aviso ao usuario
+# se o dataset real ultrapassar. Mudamos para `.limit(CSV_MAX_ROWS + 1)`:
+# se a query devolver `CSV_MAX_ROWS + 1` linhas, sabemos que ha pelo menos
+# mais 1 no banco e truncamos para CSV_MAX_ROWS. Setamos o header HTTP
+# `X-CSV-Truncated: true` para que o frontend (ou admin inspecionando o
+# response) possa avisar. Nao setamos linha extra no CSV para nao quebrar
+# parsers externos.
+CSV_MAX_ROWS = 10000
+
+# Chars que Excel/LibreOffice/Google Sheets interpretam como inicio de formula
+# quando aparecem no primeiro caractere de uma celula. Prefixar com apostrofo
+# (`'`) neutraliza a interpretacao — o `'` nao e exibido na celula e e o
+# padrao recomendado pela OWASP para mitigar CSV Injection (CWE-1236).
+# Ref: https://owasp.org/www-community/attacks/CSV_Injection
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_sanitize(value: object) -> object:
+    """Neutraliza CSV Injection em campos de texto livre (M-01 auditoria Wave 5).
+
+    O handler `get_relatorios_csv` exporta campos que aceitam texto arbitrario
+    (`nome`, `cliente`, `vendedor_nome`) — Pydantic valida apenas comprimento,
+    nao charset. Um admin que crie uma prova com `nome = "=1+1+cmd|'/C calc'!A1"`
+    pode disparar execucao de formula quando outro admin abrir o CSV no Excel.
+
+    Esta funcao so toca strings que comecam com um dos `_CSV_FORMULA_PREFIXES`,
+    prefixando com apostrofo. Valores nao-string (int, float, date str ja
+    formatada) passam inalterados. `nro_requerimento` nao precisa passar por
+    aqui porque e validado por `NRO_REQ_RE` no schema (prova.py:20), que proibe
+    os prefixos perigosos.
+    """
+    if isinstance(value, str) and value.startswith(_CSV_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
+@router.get("/relatorios/csv")
+async def get_relatorios_csv(
+    db: AsyncSession = Depends(get_db),
+    admin: Usuario = Depends(get_admin_user),
+    periodo_inicio: date | None = Query(None),
+    periodo_fim: date | None = Query(None),
+) -> Response:
+    """Exporta dados das provas em CSV formatado (RF-015, US-014).
+
+    Admin-only. Mesmos filtros de periodo do endpoint JSON.
+    Separador `;` (padrao Excel pt-BR) + UTF-8 BOM + headers pt-BR.
+    """
+    hoje = date.today()
+    inicio = periodo_inicio or (hoje - timedelta(days=30))
+    fim = periodo_fim or hoje
+
+    if fim < inicio:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Data final do periodo nao pode ser anterior a inicial",
+        )
+
+    inicio_utc = datetime(
+        inicio.year, inicio.month, inicio.day,
+        tzinfo=BRT_TIMEZONE,
+    ).astimezone(timezone.utc)
+    fim_utc = datetime(
+        fim.year, fim.month, fim.day, 23, 59, 59, 999999,
+        tzinfo=BRT_TIMEZONE,
+    ).astimezone(timezone.utc)
+
+    try:
+        ultima_mov_subq = (
+            select(func.max(Movimentacao.created_at))
+            .where(Movimentacao.prova_id == ProvaDigital.id)
+            .correlate(ProvaDigital)
+            .scalar_subquery()
+        )
+
+        aprovada_exists = (
+            select(func.count())
+            .where(
+                Movimentacao.prova_id == ProvaDigital.id,
+                Movimentacao.status_novo
+                == StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+            )
+            .correlate(ProvaDigital)
+            .scalar_subquery()
+        )
+        reprovada_exists = (
+            select(func.count())
+            .where(
+                Movimentacao.prova_id == ProvaDigital.id,
+                Movimentacao.status_novo
+                == StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
+            )
+            .correlate(ProvaDigital)
+            .scalar_subquery()
+        )
+
+        stmt = (
+            select(
+                ProvaDigital.nome,
+                ProvaDigital.nro_requerimento,
+                ProvaDigital.cliente,
+                Usuario.nome.label("vendedor_nome"),
+                Usuario.localizacao.label("vendedor_localizacao"),
+                ProvaDigital.status,
+                ProvaDigital.rota,
+                ProvaDigital.ciclo_atual,
+                ProvaDigital.created_at,
+                func.coalesce(
+                    ultima_mov_subq, ProvaDigital.created_at
+                ).label("ultima_mov_at"),
+                aprovada_exists.label("aprovada_cnt"),
+                reprovada_exists.label("reprovada_cnt"),
+            )
+            .select_from(ProvaDigital)
+            .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
+            .where(
+                ProvaDigital.created_at >= inicio_utc,
+                ProvaDigital.created_at <= fim_utc,
+            )
+            .order_by(ProvaDigital.created_at.desc())
+            # L-04 (auditoria Wave 5 ronda 2): buscamos CSV_MAX_ROWS + 1 para
+            # detectar truncamento. Se a query devolver CSV_MAX_ROWS + 1
+            # linhas, sabemos que ha pelo menos mais 1 no banco.
+            .limit(CSV_MAX_ROWS + 1)
+        )
+        rows = (await db.execute(stmt)).all()
+    except Exception:
+        logger.exception("Erro ao gerar CSV de relatorios")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Erro ao gerar CSV de relatorios",
+        )
+
+    # L-04: detectar truncamento e cortar a lista para CSV_MAX_ROWS antes
+    # de escrever o CSV.
+    truncated = len(rows) > CSV_MAX_ROWS
+    if truncated:
+        rows = rows[:CSV_MAX_ROWS]
+
+    now_utc = datetime.now(timezone.utc)
+
+    # UTF-8 BOM + separador `;` (padrao Excel pt-BR).
+    output = io.StringIO()
+    output.write("\ufeff")
+    writer = csv.writer(output, delimiter=";")
+    writer.writerow(_CSV_HEADER)
+
+    for r in rows:
+        # L-10 (auditoria Wave 5): ultima_mov_at nunca e None aqui — a query
+        # usa func.coalesce(ultima_mov_subq, ProvaDigital.created_at), e
+        # created_at e NOT NULL no schema. Mantemos o guard de tzinfo por
+        # defesa contra drivers que venham a devolver naive (L-06).
+        # Se alguem remover o coalesce ou o NOT NULL, reintroduzir ramos
+        # `else: "-"`.
+        ultima_at = r.ultima_mov_at
+        if ultima_at.tzinfo is None:
+            ultima_at = ultima_at.replace(tzinfo=timezone.utc)
+        delta_days = round(
+            (now_utc - ultima_at).total_seconds() / 86400, 1
+        )
+        ultima_str = ultima_at.astimezone(BRT_TIMEZONE).strftime(
+            "%d/%m/%Y %H:%M"
+        )
+
+        created_at = r.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        created_str = created_at.astimezone(BRT_TIMEZONE).strftime(
+            "%d/%m/%Y %H:%M"
+        )
+
+        loc = r.vendedor_localizacao
+        loc_str = loc.value.capitalize() if loc is not None else "-"
+        status_label = _CSV_STATUS_LABELS.get(r.status, r.status.value)
+        rota_str = (
+            _CSV_ROTA_LABELS.get(r.rota, "-") if r.rota is not None
+            else "-"
+        )
+
+        # M-01 (auditoria Wave 5): sanitizar campos de texto livre contra
+        # CSV Injection. `nro_requerimento` e seguro (validado por NRO_REQ_RE
+        # no schema, proibe `=+-@`). Demais campos sao labels fixos ou
+        # numericos — tambem seguros.
+        writer.writerow([
+            _csv_sanitize(r.nome),
+            r.nro_requerimento,
+            _csv_sanitize(r.cliente),
+            _csv_sanitize(r.vendedor_nome),
+            loc_str,
+            status_label,
+            rota_str,
+            r.ciclo_atual,
+            created_str,
+            ultima_str,
+            delta_days,
+            "Sim" if r.aprovada_cnt > 0 else "Nao",
+            "Sim" if r.reprovada_cnt > 0 else "Nao",
+        ])
+
+    filename = f"relatorio_provas_{inicio}_{fim}.csv"
+    # L-03 (auditoria Wave 5 ronda 2): Cache-Control no-store previne browser
+    # de servir uma versao cached do CSV depois que o admin atualiza dados
+    # entre downloads. Relatorios sao dados mutaveis — nunca devem bater cache.
+    #
+    # L-04 (auditoria Wave 5 ronda 2): header X-CSV-Truncated sinaliza que o
+    # dataset atingiu CSV_MAX_ROWS e foi truncado. Frontend ou admin pode
+    # alertar o usuario para refinar o filtro de periodo.
+    response_headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "Cache-Control": "no-store",
+    }
+    if truncated:
+        response_headers["X-CSV-Truncated"] = "true"
+        response_headers["X-CSV-Max-Rows"] = str(CSV_MAX_ROWS)
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers=response_headers,
+    )
 
 
 @router.get("/{prova_id}", response_model=ProvaResponse)
