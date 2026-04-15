@@ -2,6 +2,161 @@
 
 ---
 
+## [2026-04-15 — Wave 6 Bloco 6.3] — types TS + hooks frontend para auditoria
+
+### Contexto
+
+Sequencia do Bloco 6.2 — entrega a **camada frontend de tipos e data
+fetching** para a tela `/auditoria` que sera criada no Bloco 6.4. Wave 6
+continua respeitando as regras invioaveis: zero toque em Waves 0-5, zero
+arquivo frontend Wave 1-5 modificado, zero alteracao em `layout.tsx` (isso
+fica para o 6.4), zero alteracao em `package.json`.
+
+### Arquivos criados
+
+1. **`frontend/src/lib/types/auditoria.ts`** (156 linhas) — espelho
+   TypeScript fiel de `backend/app/domain/schemas/auditoria.py`:
+
+   - **Constantes exportadas** (mantidas em sincronia com o backend):
+     - `TIPO_EVENTO_VALUES` — readonly tuple `[CRIACAO_PROVA, ESCANEAMENTO,
+       CANCELAMENTO, REPROVACAO, TRANSICAO_STATUS, REINICIO_CICLO,
+       ALTERACAO_CONFIG]` → deriva `type TipoEventoEnum = (typeof ...)[number]`.
+       Evita duplicar a lista em varios lugares e permite iteracao em
+       runtime (ex: popular dropdown de filtro).
+     - `TIPO_EVENTO_LABELS: Record<TipoEventoEnum, string>` — labels pt-BR
+       canonicas (fonte unica no frontend — nada de hardcode em pagina).
+     - `ACOES_VALIDAS` — whitelist de 5 valores crus de `acao`.
+     - `TOTAL_ESTIMADO_CAP = 100_001` — teto para o sinal "100k+" na UI.
+     - `LIMIT_DEFAULT = 50`, `LIMIT_MAX = 100` — espelha os defaults do
+       backend.
+
+   - **DTOs de response** (snake_case, fiel ao wire format JSON):
+     - `UsuarioAuditoria`, `ProvaAuditoria`, `AuditLogItem`,
+       `FiltrosAplicados`, `AuditoriaListResponse`.
+
+   - **Filtros de entrada do hook** (camelCase, idiomatico JS):
+     - `AuditoriaFilters` com `dataInicio`, `dataFim`, `usuarioId`,
+       `nroRequerimento`, `acao`, `tipoEvento`, `limit`. Traducao para
+       snake_case na query string e feita pelo hook `buildQueryString`.
+
+2. **`frontend/src/hooks/useAuditoria.ts`** (239 linhas) — hook de
+   listagem paginada com race protection + AbortController + timeout:
+
+   - **Assinatura:** `useAuditoria(getToken, filters): AuditoriaHookResult`
+     onde `AuditoriaHookResult` estende `State` com `refresh()` +
+     `loadMore()`.
+
+   - **Estado interno:** `{ loading, loadingMore, error, items, nextCursor,
+     hasMore, totalEstimado, filtrosAplicados }`. Separar `loading`
+     (carregamento inicial/refresh) de `loadingMore` (paginacao via botao)
+     permite a UI mostrar spinner diferente no skeleton inicial vs. no
+     botao "Carregar mais".
+
+   - **Refresh reativo a filtros:** `filtersKey` e derivada via
+     `JSON.stringify({...})` de TODOS os valores relevantes dos filtros.
+     O `useEffect` depende de `filtersKey` (string estavel) em vez do
+     objeto `filters` — identidade instavel do caller nao dispara
+     re-fetch, apenas mudanca de VALOR. Caller nao precisa memoizar.
+
+   - **`loadMore()` acumulativo:** concatena a proxima pagina ao `items`
+     existente. No-op quando `!hasMore || loading || loadingMore`.
+     `stateRef` mantem sincronia sem criar closure stale.
+
+   - **Race protection completa:** `latestReqRef` (descarta respostas
+     stale), `abortRef` (cancela fetch em voo), `mountedRef` (previne
+     setState apos unmount). Abort na limpeza do useEffect e no unmount.
+
+   - **Timeout 30 s** (mesmo padrao `useRelatorios` L-05 Wave 5) e
+     `AbortError` silencioso (cancelamentos legitimos nao viram
+     "Erro ao carregar").
+
+   - **`buildQueryString(filters, cursor)`** exportada — funcao pura,
+     testavel isoladamente. Traduz camelCase -> snake_case, usa
+     `params.append()` para arrays (`acao`, `tipo_evento`) gerando
+     `?acao=a&acao=b` que FastAPI aceita nativamente.
+
+3. **`frontend/src/hooks/useAuditoriaDetail.ts`** (138 linhas) — hook
+   pontual para `GET /api/v1/auditoria/{log_id}`:
+
+   - **Assinatura:** `useAuditoriaDetail(getToken, logId): State` onde
+     `State = { loading, error, data: AuditLogItem | null }`.
+
+   - **`logId=null` = estado inativo:** quando o modal nao esta aberto,
+     o caller passa `null` e o hook retorna estado vazio sem fetch.
+     Trocar para UUID dispara o fetch automatico no `useEffect`.
+
+   - **404 traduzido:** `ApiError.status === 404` vira
+     `"Log de auditoria nao encontrado"` em pt-BR amigavel.
+
+   - **Mesmo padrao de AbortController + timeout 30 s + AbortError
+     silencioso** do hook de listagem. Cleanup de efeito aborta fetch
+     quando `logId` muda no meio do carregamento.
+
+### Arquivos Wave 0-5 tocados
+
+**Zero.** Este bloco cria 3 arquivos novos no frontend e nao modifica
+nenhum arquivo pre-existente — nem `layout.tsx`, nem `api.ts`, nem
+`package.json`. A integracao com a UI acontece no Bloco 6.4.
+
+### Validacao
+
+- `npx tsc --noEmit` no `frontend/`: **0 erros** de tipo.
+- `npx next lint --file ...`: **0 warnings, 0 errors** nos 3 arquivos
+  novos.
+- `pytest` backend completo: **610 passed** (zero side-effect — Bloco 6.3
+  nao toca em nada backend).
+
+### Decisoes-chave
+
+- **Espelho snake_case no wire format, camelCase no input do hook** — o
+  usuario do hook escreve TypeScript idiomatico (`dataInicio`), mas o
+  JSON transportado e o JSON retornado preservam o snake_case do backend
+  (`data_inicio`). O hook faz a traducao na `buildQueryString`.
+
+- **`TIPO_EVENTO_VALUES` como `as const` tuple** gerando um union type
+  automaticamente — permite iteracao em runtime + type safety + zero
+  duplicacao.
+
+- **Estabilidade de filtros via `filtersKey` JSON** — caller nao precisa
+  memoizar o objeto (padrao mais amigavel que exigir `useMemo`). Custo
+  de `JSON.stringify` a cada render e trivial (7 campos).
+
+- **`stateRef` + `filtersRef` sincronizados em cada render** para que
+  callbacks `useCallback` leiam valores atuais sem criar stale closures.
+
+- **`loadMore()` nao dispara se `!hasMore`** — evita request redundante
+  quando o usuario clica no botao duas vezes seguidas ou durante uma
+  animacao de scroll infinito futura.
+
+### Medicoes
+
+| Metrica | Antes (6.2) | Depois (6.3) | Delta |
+|---|---|---|---|
+| Arquivos frontend novos Wave 6 | 0 | **3** | +3 |
+| Linhas TS novas | 0 | **533** (156 types + 239 list + 138 detail) | +533 |
+| Arquivos Wave 0-5 tocados | 1 (`main.py` no 6.2) | **1** (apenas o de 6.2) | 0 |
+| `tsc --noEmit` | limpo | **limpo** | 0 erros |
+| `next lint` nos arquivos novos | — | **0 warnings / 0 errors** | — |
+| `pytest` backend | 610 passed | **610 passed** | 0 (nenhum toque) |
+| Migrations Alembic | 009 | **009** | 0 |
+| Policies RLS | 12 | **12** | 0 |
+
+### Arquivos criados
+
+- `frontend/src/lib/types/auditoria.ts` — 156 linhas
+- `frontend/src/hooks/useAuditoria.ts` — 239 linhas
+- `frontend/src/hooks/useAuditoriaDetail.ts` — 138 linhas
+
+### Veredito final
+
+🟢 **Bloco 6.3 aprovado.** 3 arquivos novos no frontend, `tsc` limpo,
+`next lint` limpo, backend regressao 610 inalterada, zero arquivo Wave 0-5
+tocado. Wave 6 pronta para seguir ao **Bloco 6.4** (pagina `/auditoria` +
+modal de detalhes + atualizacao condicional do `layout.tsx` para o novo
+item de menu).
+
+---
+
 ## [2026-04-15 — Wave 6 Bloco 6.2] — query builder + endpoints GET /api/v1/auditoria/
 
 ### Contexto
