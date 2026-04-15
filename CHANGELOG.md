@@ -2,6 +2,181 @@
 
 ---
 
+## [2026-04-15 — Wave 6 Bloco 6.2] — query builder + endpoints GET /api/v1/auditoria/
+
+### Contexto
+
+Sequencia do Bloco 6.1 — entrega a **camada de query e os endpoints HTTP**
+da interface de log de auditoria (Componente 18, RNF-005). Wave 6 continua
+respeitando as regras invioaveis: zero toque em Waves 0-5 (exceto 1 linha
+adicional em `main.py` para `include_router`), zero migration, zero policy
+RLS nova, zero endpoint de escrita em `audit_logs`.
+
+### Arquivos criados
+
+1. **`app/services/auditoria_query.py`** (420 linhas) — camada SQL + cursor
+   codec + timezone helpers + filter builder + query principal:
+
+   - **Cursor codec** — `encode_cursor(created_at, log_id)` / `decode_cursor(str)`
+     em base64 urlsafe de `{"c": iso_datetime, "i": uuid}`. Opaco do ponto
+     de vista do cliente. Levanta `CursorInvalidoError` defensivamente em
+     cada passo do decode (base64, JSON, objeto, chaves, UUID, datetime).
+
+   - **Timezone helpers** — `data_inicio_brt_para_utc` /
+     `data_fim_brt_para_utc` convertem `date` BRT em `datetime` UTC
+     usando offset FIXO `-03:00` (Brasil nao observa DST desde 2019,
+     Decreto 9.772/2019). `data_fim` soma +1 dia e usa comparacao
+     EXCLUSIVA `<` — evita o bug classico de perder eventos das
+     `23:59:59.999` do dia final.
+
+   - **Filter builder** — `_build_filter_clauses(filtros)` gera lista de
+     WHERE clauses a partir de `AuditoriaFiltros`. `_tipo_evento_para_clause(tipo)`
+     espelha `projetar_tipo_evento` no sentido inverso (derivado -> cru +
+     condicao JSONB). `TRANSICAO_STATUS` expressa como `transitar_status`
+     + `para NOT IN ('CANCELADA','REPROVADA_PELO_VENDEDOR')` com tratamento
+     de NULL para match exato da semantica da projecao.
+
+   - **`listar_audit_logs(db, filtros)`** — query principal com LEFT JOIN
+     `usuarios` + LEFT JOIN `provas_digitais`, WHERE condicional, cursor
+     keyset `(created_at < cursor_ts) OR (created_at == cursor_ts AND id <
+     cursor_id)`, ORDER BY DESC, LIMIT N+1 (para detectar `has_more`), +
+     query separada de `COUNT(*)` capped em `TOTAL_ESTIMADO_CAP=100_001`
+     (usa subquery com LIMIT para parar a contagem cedo em tabelas grandes).
+
+   - **`buscar_audit_log_por_id(db, log_id)`** — query pontual com mesmo
+     enriquecimento, retorna `None` se nao existir.
+
+   - **`_build_item(log, usuario, prova)`** — row -> `AuditLogItem` DTO,
+     chama `projetar_tipo_evento` para derivar `tipo_evento`. Defesa em
+     profundidade: levanta `AuditLogSemUsuarioError` se `usuario=None`
+     (FK orfa — nao deveria acontecer em producao, mas usuarios sao
+     desativados via `ativo=false` em vez de apagados).
+
+2. **`app/api/v1/auditoria.py`** (175 linhas) — router FastAPI com 2
+   endpoints:
+
+   - **`GET /api/v1/auditoria/`** — listagem com 8 query params (data_inicio,
+     data_fim, usuario_id, nro_requerimento, acao, tipo_evento, cursor,
+     limit). Instancia `AuditoriaFiltros` dentro do handler para disparar
+     os validators cruzados (mutuamente exclusivo, data range, whitelist).
+     Traduz `CursorInvalidoError` -> 422, `AuditLogSemUsuarioError` -> 500,
+     `Exception` generica -> 502. Depends `get_admin_user` (ADR-018).
+
+   - **`GET /api/v1/auditoria/{log_id}`** — detalhe pontual, 404 se nao
+     existir, mesma arvore de error translation.
+
+   - **`_format_validation_error(exc)`** — helper que formata
+     `ValidationError` do Pydantic em mensagem pt-BR amigavel, removendo
+     o prefixo `"Value error, "` que o Pydantic v2 adiciona automaticamente.
+
+3. **`tests/test_auditoria_query.py`** (540 linhas) — **47 testes** puros
+   e com mock de `AsyncSession`:
+   - 9 testes de cursor codec (encode/decode + 7 edge cases de corrupcao)
+   - 5 testes de timezone helpers (BRT -> UTC)
+   - 12 testes de filter builder (_tipo_evento_para_clause parametrizado +
+     _build_filter_clauses + combinacoes)
+   - 17 testes de `listar_audit_logs` + `buscar_audit_log_por_id` com mock
+     de `db.execute` (vazio, com dados, has_more, cursor, projecao de
+     cancelamento, prova=None, usuario orfao, ip_address conversao,
+     filtros_aplicados echo)
+
+4. **`tests/test_auditoria_api.py`** (536 linhas) — **42 testes** de
+   integracao HTTP com `AsyncClient + ASGITransport + app`:
+   - 5 testes de autenticacao (401 sem token, 403 vendedor)
+   - 4 testes de happy path (lista vazia, com dados, has_more, cancelamento)
+   - 10 testes de validacao 422 (acao invalida, mutuamente exclusivo, data
+     invertida, limit 0/101, nro_req longo, data malformada, UUID invalido,
+     cursor corrompido, tipo_evento invalido)
+   - 5 testes de filter passing (periodo, acao multi, tipo_evento multi,
+     usuario_id, nro_requerimento)
+   - 4 testes do endpoint `/{id}` (200, 404, 422, prova=None)
+   - 4 testes de **imutabilidade** (POST/PUT/PATCH/DELETE -> 405)
+   - 4 testes de error handling (500 para orfao, 502 para db down)
+   - 4 testes de cobertura adicional (re-raise HTTPException, fallback
+     de ValidationError vazio, msg sem prefixo)
+
+### Arquivos modificados
+
+- **`app/main.py`** — +2 linhas: `import` do `auditoria_router` +
+  `include_router(auditoria_router, prefix="/api/v1/auditoria", tags=["auditoria"])`.
+  Unica alteracao em arquivo Wave 0-5 nesta Wave.
+
+### Decisoes tecnicas no Bloco 6.2
+
+- **BRT fixo `-03:00`** em vez de `ZoneInfo("America/Sao_Paulo")` — Brasil
+  nao observa DST desde 2019, e `ZoneInfo` em Python 3.14 no Windows exige
+  o pacote `tzdata` (adicionaria dependencia so por causa disso). Se o
+  Brasil voltar a adotar DST, basta trocar o constante para `ZoneInfo(...)`
+  e adicionar `tzdata` ao `pyproject.toml`. Documentado no docstring.
+
+- **Cursor opaco base64 urlsafe** — formato interno `{"c": iso_datetime,
+  "i": uuid}` com chaves curtas para minimizar payload. Urlsafe
+  (sem `+`/`/`) para poder ir como query param sem escape extra.
+
+- **Cap do COUNT(*)** via subquery com LIMIT 100_001 — o planner do
+  Postgres para a contagem ao atingir o cap, evitando full scan em
+  tabelas grandes no futuro. A 50 linhas (hoje) e a 10k linhas (estimativa
+  proxima), o impacto e trivial (< 10 ms).
+
+- **Re-raise HTTPException no handler** — defensivo: se o service por
+  algum motivo levantar `HTTPException` (nao deveria, mas e possivel se
+  Waves futuras adicionarem subcallees), o handler deixa propagar sem
+  traduzir. Testado explicitamente com teapot 418.
+
+- **Fallback para acao desconhecida no filter builder** — `_tipo_evento_para_clause`
+  levanta `ValueError` se um novo `TipoEventoEnum` for adicionado sem
+  atualizar o mapping. Diferente do fallback defensivo de `projetar_tipo_evento`
+  (que loga warning) — aqui e melhor falhar rapido porque o filtro
+  silenciosamente nao encontrar nada seria dado errado, nao dado reduzido.
+
+### Medicoes
+
+| Metrica | Antes (6.1) | Depois (6.2) | Delta |
+|---|---|---|---|
+| Testes pytest | 521 passed | **610 passed** | +89 (+47 query + +42 api) |
+| Tempo pytest | 3.54 s | 3.52 s | -0.02 s |
+| Cobertura `auditoria_query.py` | — | **100%** (135/135 stmts) | novo |
+| Cobertura `api/v1/auditoria.py` | — | **100%** (58/58 stmts) | novo |
+| Cobertura total Wave 6 (6.1+6.2) | 100% em 2 arquivos | **100% em 4 arquivos** | +2 |
+| Arquivos novos backend | 4 | **6** (+auditoria_query, +api/v1/auditoria) | +2 |
+| Arquivos Wave 0-5 tocados | 0 | **1** (`main.py`, +2 linhas) | +1 |
+| Endpoints publicos | 31 | **33** (+GET listar, +GET detalhe) | +2 |
+| Migrations Alembic | 009 | **009** | 0 |
+| Policies RLS | 12 | **12** | 0 |
+| Ruff check | limpo | **limpo** | 0 |
+
+### Validacao empirica
+
+- `pytest -q`: 610 passed, 1 warning (HMAC pre-existente, intencional).
+- `pytest --cov` nos arquivos novos: 100% em ambos.
+- `ruff check`: 0 erros em todos os arquivos (ajustes N806 alias + ordering
+  aplicados via refactor e `--fix`).
+- **5 EXPLAIN ANALYZE do Bloco 6.0** ja validou que a query principal
+  (LEFT JOINs + keyset pagination) usa os indices existentes com
+  execution time < 3 ms para 50 linhas.
+
+### Arquivos criados no Bloco 6.2
+
+- `backend/app/services/auditoria_query.py` — 420 linhas
+- `backend/app/api/v1/auditoria.py` — 175 linhas
+- `backend/tests/test_auditoria_query.py` — 540 linhas (47 testes)
+- `backend/tests/test_auditoria_api.py` — 536 linhas (42 testes)
+
+### Arquivos modificados no Bloco 6.2
+
+- `backend/app/main.py` — +2 linhas (import + include_router)
+
+### Veredito final
+
+🟢 **Bloco 6.2 aprovado.** 100% de cobertura nos 2 arquivos de codigo
+novos, 0 regresso nos 521 testes pre-existentes do 6.1 (hoje 610 total),
+ruff limpo, zero migration, zero policy RLS nova, zero endpoint de escrita
+em `audit_logs`. O unico arquivo Wave 0-5 tocado foi `main.py` (+2 linhas
+para `include_router` — alteracao localizada e minima). Wave 6 pronta para
+seguir ao **Bloco 6.3** (types + hooks frontend).
+
+---
+
 ## [2026-04-15 — Wave 6 Bloco 6.1] — schemas Pydantic + projecao de tipo_evento (ADR-099)
 
 ### Contexto
