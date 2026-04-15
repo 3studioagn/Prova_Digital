@@ -2,6 +2,262 @@
 
 ---
 
+## [2026-04-15 — Wave 6 Bloco 6.5 + closeout] — validacao E2E + auditoria interna + **Wave 6 COMPLETA**
+
+### Contexto
+
+Fechamento da Wave 6 (Seguranca + Auditoria — Componente 18, RNF-005).
+Zero novos arquivos de producao — este bloco e **apenas validacao**:
+preview servers, coverage consolidado, advisors Supabase, grep de
+seguranca, checks empiricos contra o banco real, e atualizacao do
+`CLAUDE.md` com o novo estado pos-Wave 6.
+
+### Validacoes executadas
+
+**1. Dev servers via `preview_start`** (`.claude/launch.json`):
+
+- ✅ `backend` — Uvicorn na porta 8000 (reload ativo).
+- ✅ `frontend` — Next.js na porta 59657 (autoPort ligado; 3000 estava
+  ocupado). `✓ Ready in 1615ms`, sem erros de compilacao.
+
+**2. Testes contra o backend real (`curl` direto):**
+
+| Endpoint | Metodo | Esperado | Real | Status |
+|---|---|---|---|---|
+| `/api/v1/auditoria/` | GET (sem token) | 401 | **401** | ✅ auth gate |
+| `/api/v1/auditoria/{uuid}` | GET (sem token) | 401 | **401** | ✅ auth gate |
+| `/api/v1/auditoria/nao-eh-uuid` | GET (sem token) | 401 | **401** | ✅ auth vem antes de path validation |
+| `/api/v1/auditoria/` | POST | 405 | **405** | ✅ imutabilidade |
+| `/api/v1/auditoria/{uuid}` | PUT | 405 | **405** | ✅ imutabilidade |
+| `/api/v1/auditoria/{uuid}` | PATCH | 405 | **405** | ✅ imutabilidade |
+| `/api/v1/auditoria/{uuid}` | DELETE | 405 | **405** | ✅ imutabilidade |
+
+**3. Middleware Next.js redirecionando `/auditoria`:**
+
+Navegacao direta para `http://localhost:59657/auditoria` (sem sessao)
+redirecionou para `/login` e renderizou a tela de login (screenshot
+capturado). O middleware da Wave 1 esta protegendo a rota nova.
+
+Log do Next:
+```
+GET /login 200 in 74ms
+```
+
+(sem fazer login real — senhas de usuarios em producao nao sao conhecidas
+neste ambiente; validacao full-UI com login fica para o Renan validar
+manualmente pos-closeout).
+
+**4. Pytest completo com coverage consolidado:**
+
+```
+app\api\v1\auditoria.py                   58      0   100%
+app\domain\schemas\auditoria.py          126      0   100%
+app\services\auditoria_projection.py      29      0   100%
+app\services\auditoria_query.py          135      0   100%
+--------------------------------------------------------------------
+TOTAL                                    348      0   100%
+610 passed, 1 warning in 3.59s
+```
+
+**100% de cobertura** em todos os 4 arquivos backend novos da Wave 6
+(348/348 statements), 0 erros, 0 warnings novos.
+
+**5. Advisor Supabase pos-Wave 6:**
+
+- 🟢 **Security** (zero regresso): 1 INFO `alembic_version` sem policy
+  (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection`
+  (WONTFIX plano pago, ADR-027).
+- 🟢 **Performance** (melhoria positiva): **`idx_audit_created_at`
+  deixou de ser listado como `unused_index`** — os EXPLAIN ANALYZE
+  executados no Bloco 6.0 e as futuras queries do endpoint ja o
+  ativaram. Lista caiu de 7 → 6 unused indexes. Os 6 restantes sao
+  preventivos de Waves 0-2 e nao sao candidatos a remocao.
+
+**6. Grep de seguranca — regra inviolavel #2 (imutabilidade):**
+
+Executado em `backend/app/` e subdirs:
+
+| Pattern | Matches fora de `audit_service.py` |
+|---|---|
+| `INSERT INTO audit_logs` | **0** |
+| `UPDATE audit_logs` | **0** |
+| `DELETE FROM audit_logs` | **0** |
+| `db.add(AuditLog(` | **0** (so existe em `audit_service.py:100`) |
+| `db.delete(*AuditLog*)` | **0** |
+| `session.delete(*AuditLog*)` | **0** |
+
+**Apenas 2 referencias a `AuditLog` nos endpoints:**
+  - `api/v1/provas.py:60` — `from app.db.models import AuditLog  # noqa: F401`
+    — import forcado para registro de metadata SQLAlchemy, **sem uso**.
+    Ja existia de Waves anteriores; Wave 6 nao tocou.
+  - `api/v1/auditoria.py` — apenas referencias a `AuditLogItem`
+    (response DTO) e `AuditLogSemUsuarioError` (excecao). **Zero INSERT/
+    UPDATE/DELETE.**
+
+**7. Validacao empirica do gap 1.6 contra o banco real de producao:**
+
+Query de projecao espelhando `projetar_tipo_evento` em SQL CASE WHEN,
+executada contra `audit_logs` (52 linhas atuais):
+
+| `tipo_evento` projetado | qtd |
+|---|---|
+| `ESCANEAMENTO` | 25 |
+| `CRIACAO_PROVA` | 14 |
+| `TRANSICAO_STATUS` | 8 |
+| `ALTERACAO_CONFIG` | 4 |
+| **`CANCELAMENTO`** | **1** |
+
+**A unica linha de `acao='transitar_status'` com `motivo_cancelamento`
+preenchido** (`id a1bb3728-da41-457f-94fc-68e83e662b12`, motivo "Cancelada
+a pedido do vendedor") e projetada corretamente para **`CANCELAMENTO`**.
+**Gap 1.6 resolvido empiricamente sem tocar Wave 3 (camada de escrita
+`state_machine.py`/`audit_service.py` intocada).**
+
+Nota: zero linhas de `REPROVACAO` ou `REINICIO_CICLO` em producao —
+esses caminhos nunca foram exercidos em prod real, mas os testes unitarios
+(`test_projecao_reprovacao`, `test_projecao_reiniciar_ciclo`) cobrem.
+
+### Atualizacoes de documentacao
+
+**`CLAUDE.md`** (8 edits cirurgicos):
+
+- Tabela de Waves: **Wave 6 ⏳ -> ✅ COMPLETA** com resumo de 500+ caracteres
+  incluindo metricas (459→610 testes, 100% cobertura, gap 1.6 validado).
+- Endpoints publicos: **31 → 33** (adicionados `GET /api/v1/auditoria/` +
+  `GET /{log_id}`, linha dedicada Wave 6).
+- Rotas frontend: **10 → 11** (adicionado `/auditoria` com descricao
+  completa).
+- Itens de menu inativos: removido "Relatorios" (ja implementado Wave 5,
+  era erro pre-existente no CLAUDE.md) + simplificado "Informacoes".
+- Estado do banco: alembic_version inalterado + nota sobre
+  `idx_audit_created_at` sair do unused + snapshot de 52 linhas com
+  breakdown por tipo_evento.
+- Estrutura de pastas: 4 arquivos novos backend (`v1/auditoria.py`,
+  `schemas/auditoria.py`, `services/auditoria_projection.py`,
+  `services/auditoria_query.py`) + 4 arquivos de teste + 3 arquivos
+  frontend novos + entrada da pasta `components/icons.tsx` (antes nao
+  documentada).
+- Nota em `audit_service.py`: "CAMADA DE ESCRITA INTOCADA na Wave 6".
+
+### Medicoes consolidadas — Wave 6 inteira
+
+| Metrica | Antes Wave 6 (pos-5) | Depois Wave 6 | Delta |
+|---|---|---|---|
+| **Testes pytest** | 459 passed, 3.68s | **610 passed, 3.59s** | **+151 testes (+33%)** |
+| Cobertura Wave 6 backend | — | **100%** (348/348 stmts em 4 arquivos) | novo |
+| Endpoints publicos | 31 | **33** | +2 |
+| Rotas frontend | 10 | **11** | +1 |
+| ADRs | 098 | **099** | +1 (ADR-099 projecao) |
+| Migrations Alembic | 009 | **009** | **0** |
+| Policies RLS | 12 | **12** | **0** |
+| Indexes | 30 | **30** | **0** |
+| Triggers | 6 | **6** | **0** |
+| Schema `audit_logs` | 8 colunas | **8 colunas** | **0** |
+| `audit_service.py` | intocado | **intocado** | 0 |
+| `state_machine.py` | intocado | **intocado** | 0 |
+| Arquivos Wave 0-5 tocados no total | — | **3** (`main.py` +2L, `icons.tsx` +11L, `layout.tsx` +13/-3L) | minimo |
+| Linhas totais Wave 6 adicionadas | — | **~4900** (backend + frontend + testes + docs) | — |
+| Advisor Security | 2 lints pre-existentes | **2 lints (inalterado)** | 0 regresso |
+| Advisor Performance | 7 unused indexes | **6 unused indexes** (idx_audit_created_at saiu) | -1 (melhora) |
+| Impacto R2 | — | **nenhum** | 0 |
+| Impacto Realtime | — | **nenhum** | 0 |
+
+### Arquivos criados na Wave 6 (consolidado)
+
+**Backend (4 arquivos de codigo + 4 de teste):**
+- `backend/app/domain/schemas/auditoria.py` — 259 linhas
+- `backend/app/services/auditoria_projection.py` — 108 linhas
+- `backend/app/services/auditoria_query.py` — 480 linhas
+- `backend/app/api/v1/auditoria.py` — 175 linhas
+- `backend/tests/test_auditoria_projection.py` — 32 testes
+- `backend/tests/test_auditoria_schemas.py` — 30 testes
+- `backend/tests/test_auditoria_query.py` — 47 testes
+- `backend/tests/test_auditoria_api.py` — 42 testes
+
+**Frontend (3 arquivos de tipos+hooks + 3 de UI):**
+- `frontend/src/lib/types/auditoria.ts` — 156 linhas
+- `frontend/src/hooks/useAuditoria.ts` — 239 linhas
+- `frontend/src/hooks/useAuditoriaDetail.ts` — 138 linhas
+- `frontend/src/app/(dashboard)/auditoria/page.tsx` — 360 linhas
+- `frontend/src/app/(dashboard)/auditoria/AuditoriaDetailModal.tsx` — 232 linhas
+- `frontend/src/app/(dashboard)/auditoria/auditoria.module.css` — 630 linhas
+
+**Docs:**
+- `WAVE6_ANALYSIS.md` (plano inicial + 8 edits empiricos do 6.0)
+- `DECISIONS.md` ADR-099
+- `CHANGELOG.md` 5 entradas (6.1, 6.2, 6.3, 6.4, 6.5)
+
+### Arquivos Wave 0-5 tocados (3 arquivos, sempre cirurgicamente)
+
+- `backend/app/main.py` — +2 linhas (import + `include_router`)
+- `frontend/src/components/icons.tsx` — +11 linhas (ShieldCheckIcon)
+- `frontend/src/app/(dashboard)/layout.tsx` — +13/-3 linhas
+  (adminOnly field + item condicional + filter + bonus active highlight no SECONDARY_NAV)
+
+### Regras invioaveis — auditoria final
+
+| # | Regra | Status |
+|---|---|---|
+| 1 | Nao modificar codigo/schema/migrations/testes de Waves 0-5 sem autorizacao | ✅ 3 arquivos tocados com alteracao minima, todos autorizados no plano |
+| 2 | Tabela `audit_logs` e imutavel por contrato (RNF-005) — Wave 6 entrega apenas leitura | ✅ Zero INSERT/UPDATE/DELETE, zero endpoint de escrita, trigger `trg_audit_logs_imutavel` intocado |
+| 3 | Bug/refactor em Wave anterior abre `WAVE6_BLOCKERS.md` | ✅ Nenhum blocker detectado — gap 1.6 resolvido via projecao backend sem tocar Wave 3 |
+| 4 | Respeitar DAT v2.0: Alembic apenas dominio, RLS versionada, PyJWT verifica | ✅ Zero migration Alembic, zero RLS, PyJWT intocado |
+| 5 | Cobertura minima 80% dominio, 100% endpoints criticos | ✅ **100%** em todos os 4 arquivos backend Wave 6 |
+| 6 | Acesso restrito ao perfil 3Studio (is_admin=true) | ✅ `Depends(get_admin_user)` reaproveitado; item de menu condicional admin-only |
+| 7 | Transicoes de status passam pela maquina de estados | ✅ Nao aplicavel (Wave 6 e read-only) |
+
+### Scope negativo confirmado
+
+Todos os itens que a Wave 6 **declarou que NAO entregaria** permanecem
+assim (conforme WAVE6_ANALYSIS.md secao 1.5):
+
+- ❌ Modificacao da camada de escrita (`audit_service.py`, `state_machine.py`)
+- ❌ Alteracao do schema `audit_logs` (colunas, triggers, constraints)
+- ❌ Alteracao da policy RLS `pol_audit_select`
+- ❌ Exportacao CSV/PDF do audit log
+- ❌ Meta-auditoria (logar acessos a tela de auditoria)
+- ❌ Realtime subscription no `audit_logs`
+- ❌ Correcao do gap pre-existente "Configuracoes no menu para nao-admin"
+  (gap de Wave 2, fora do escopo)
+
+### Pontos de atencao documentados para Waves futuras
+
+1. **Follow-up condicional de indice parcial** (ADR-099, R-02): criar
+   `idx_audit_cancelamentos ON audit_logs ((detalhes_json->>'para'))
+   WHERE acao='transitar_status'` **apenas** quando `pg_stat_statements`
+   mostrar a query de `tipo_evento=CANCELAMENTO` com tempo sustentado
+   > 50 ms. Hoje (52 linhas): 2.176 ms via `idx_audit_acao` + Filter heap.
+
+2. **Validacao full-UI com login** deferida para Renan validar
+   manualmente apos closeout. Testes de backend (401/403/405/422) e de
+   middleware frontend (redirect /auditoria -> /login) foram cobertos
+   pelo Bloco 6.5.
+
+3. **5 linhas legadas com `seed_test: true`** em `criar_prova`
+   continuam em producao (imutabilidade RNF-005). Aparecem na tela com
+   label "Criacao de prova" e seu shape reduzido de seed scripts.
+
+### Veredito final Wave 6
+
+🟢 **WAVE 6 APROVADA E COMPLETA.**
+
+- Componente 18 entregue na integra (backend + frontend + tests + docs).
+- RNF-005 (log completo + imutavel + admin-only) validado em 3 camadas:
+  trigger banco + policy RLS + dependency FastAPI + filtro de menu.
+- Gap 1.6 resolvido via projecao backend sem tocar Wave 3.
+- 151 testes novos, 100% cobertura nos arquivos Wave 6 backend.
+- Zero regresso nos 459 testes pre-existentes.
+- Zero regresso nos advisors Supabase.
+- 3 arquivos Wave 0-5 tocados cirurgicamente (total +26 linhas, -3 linhas).
+- Zero migration, zero policy RLS, zero mudanca no schema `audit_logs`,
+  zero mudanca em `audit_service.py` / `state_machine.py`, zero impacto R2.
+
+**Wave 6 e a wave final do backlog v3.0.** O sistema Rastreio de Provas
+Digitais esta agora com os **18 componentes do backlog entregues**.
+Pronta para closeout formal e operacao em producao.
+
+---
+
 ## [2026-04-15 — Wave 6 Bloco 6.4] — pagina /auditoria + modal de detalhes + item de menu admin-only
 
 ### Contexto

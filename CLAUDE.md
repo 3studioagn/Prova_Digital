@@ -16,19 +16,20 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **3 — Scanner + Transicoes** | ✅ **COMPLETA** + Review C11 + Auditoria Senior | Camera HTML5, scanner QR, assinatura digital, maquina de estados, reprovacao, roteamento, timeline visual (C12), cancelamento admin (C13), reinicio de ciclo admin (C14). Review C11: bugs stale error, canvas responsivo, modal fluido, entrada manual de codigo QR. Auditoria: 0 CRITICAL, 3 HIGH corrigidos (scan filter admin, getToken try/catch, focus trap modais) | 23+ |
 | **4 — Dashboard + Atrasos** | ✅ **COMPLETA** + Auditoria Senior | Dashboard tempo real (RF-014, US-013) com layout Figma: 5 contadores (criadas hoje, com vendedor, aprovadas, na clicheria, atrasadas c/ breakdown por vendedor) + 2 atalhos rapidos. Query consolidada + cache TTL 5s (ADR-092). Calculo de atraso horas corridas (RN-008). Supabase Realtime (postgres_changes) + fallback polling 10s. Auditoria: 0 CRITICAL, 1 HIGH corrigido (click Na clicheria), 2 MEDIUM corrigidos (breakpoint mobile, GROUP BY), 2 LOW corrigidos (ValueError guard, CHANGELOG). ADR-094 | — |
 | **5 — Relatorios + Export** | ✅ **COMPLETA** + Auditoria Senior Ronda 1 + Ronda 2 (Bloco A + Bloco B) | Relatorios gerenciais (C16): 6 indicadores RF-015 + 3 graficos Recharts (PieChart, BarChart tempo medio, BarChart top vendedores) + tabelas vendedor/atrasadas + filtro periodo + exportacao CSV (`;` pt-BR). C17 (Atalhos) ja atendido pelos atalhos do dashboard Wave 4. **Ronda 1 (ADR-095/096):** 0 CRITICAL, 1 HIGH rejeitado, 4 MEDIUM corrigidos, 11 LOW corrigidos, cobertura `relatorio.py` 100%, 449 testes. **Ronda 2 Bloco A (ADR-097):** 4 MEDIUM corrigidos (M-01 CSV Injection sanitizer + 2 testes; M-02 tooltips cross-period + ADR-095 addendum 3.2 formalizando 3 regimes; M-03 botao Aplicar disabled; M-04 SQL-level assertion via `stmt.compile()` + 2 testes — mitigacao barata do H-01 rejeitado), 1 HIGH candidato (render loop via `createClient`) desmontado por singleton interno de `@supabase/ssr`. Testes 449 → 453. **Ronda 2 Bloco B (ADR-098):** 6 LOWs selecionados corrigidos: L-01 pattern `createClient` alinhado, L-02 coverage do fallback ValueError (+2 testes), L-03 `Cache-Control: no-store` no CSV, L-04 safety valve CSV com `X-CSV-Truncated` header (+2 testes), L-05 `AbortController`+timeout nos 2 hooks frontend, L-10 `taxa_reprovacao_geral_pct` centralizada no backend (+2 testes). Validacao empirica via preview_eval: 5s idle = 0 fetches (L-01), AbortController aborta request anterior (L-05), UI exibe taxa do backend (L-10). Cobertura `relatorio.py` continua **100%**. Testes 453 → **459**. Bundle `/relatorios` 113 → **114 kB** (+1 kB AbortController). LOWs aceitos para polish futuro (L-06 a L-09, L-11, L-12). Zero arquivo Wave 0-4 tocado em ambas as rondas. Removido `test_planilha.xlsx` (lixo local). ADR-095 addendum 3.2, ADR-097, ADR-098 | — |
-| **6 — Auditoria + Polish** | ⏳ | Tela de audit_log, cleanup de orfaos R2, rotacao de secrets, hardening final | — |
+| **6 — Seguranca + Auditoria** | ✅ **COMPLETA** | Interface de consulta ao log de auditoria imutavel (Componente 18, RNF-005): endpoints `GET /api/v1/auditoria/` + `GET /{id}` com keyset pagination + 7 filtros + projecao backend de `tipo_evento` resolvendo o gap 1.6 (cancelamento logado como `transitar_status`). Frontend `/auditoria` admin-only com tabela filtravel + modal de detalhes com JSON pretty-printed + focus trap + 7 chips coloridos por tipo_evento. **Zero toque** em Waves 0-5 exceto `main.py` (+2 linhas include_router), `layout.tsx` (+13/-3 linhas item "Auditoria" condicional), `icons.tsx` (+11 linhas ShieldCheckIcon). **ADR-099** (projecao backend). Testes 459 → **610** (+151 novos, **100% cobertura** nos 4 arquivos backend: 348/348 stmts). Advisor Supabase: idx_audit_created_at saiu do unused_index (primeira utilizacao). Gap 1.6 validado empiricamente em producao contra 1 cancelamento real. Zero migration Alembic, zero nova policy RLS (a `pol_audit_select` existente de Wave 2 cobre). Zero toque no schema `audit_logs`, zero toque em `audit_service.py`. | — |
 
 **Estado atual do banco de producao:**
-- `alembic_version = 009`
+- `alembic_version = 009` (inalterado desde Wave 3; Wave 6 nao criou migrations)
 - **6 tabelas de dominio** + `alembic_version` (todas com RLS habilitada)
-- **12 policies RLS** otimizadas com `(SELECT auth.uid())` (ADR-029 + ADR-082: +1 `pol_movimentacoes_insert` + `pol_movimentacoes_select` expandida para MOTORISTA/CLICHERIA)
-- **30 indexes** cobrindo filtros dos Componentes 07 e futuros
+- **12 policies RLS** otimizadas com `(SELECT auth.uid())` (ADR-029 + ADR-082). Wave 6 reaproveita a `pol_audit_select` existente (admin-only SELECT) sem modificacoes.
+- **30 indexes** cobrindo filtros dos Componentes 07 e futuros. Wave 6 usa os 5 indexes existentes de `audit_logs` (PK + 4 btree) — `idx_audit_created_at` saiu do status `unused_index` no advisor apos a Wave 6 comecar a usa-lo.
+- **`audit_logs` com 52 linhas em producao** (Wave 6 Bloco 6.5 snapshot): 25 escaneamentos, 14 criacoes, 9 transicoes de status (1 cancelamento real), 4 alteracoes de config. 100% dos eventos imutaveis via trigger `trg_audit_logs_imutavel`.
 - **3 usuarios ativos**: 2 admins (`admin@3studio.com.br` + `ops@3studio.com.br`) + 1 vendedor FILIAL (`mariosouza@teste.com.br`)
-- **Advisor Supabase limpo** exceto: 1 INFO `rls_enabled_no_policy` em `alembic_version` (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection` (WONTFIX plano pago, ADR-027)
+- **Advisor Supabase limpo** exceto: 1 INFO `rls_enabled_no_policy` em `alembic_version` (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection` (WONTFIX plano pago, ADR-027). **Zero regresso pos-Wave 6.**
 
 - **1 tabela na publicacao `supabase_realtime`**: `provas_digitais` (INSERT/UPDATE para dashboard tempo real)
 
-**Endpoints publicos em producao (31 rotas):**
+**Endpoints publicos em producao (33 rotas):**
 
 | Prefix | Endpoints | Wave |
 |---|---|---|
@@ -38,9 +39,10 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | `/api/v1/provas` | `GET /dashboard` | 4 |
 | `/api/v1/provas` | `GET /relatorios`, `GET /relatorios/csv` | 5 |
 | `/api/v1/configuracoes` | `GET /`, `GET /{chave}`, `PATCH /{chave}` | 2 |
+| `/api/v1/auditoria` | `GET /`, `GET /{log_id}` (admin only, RNF-005) | 6 |
 | `/health*` | `/health`, `/health/db`, `/health/r2` | 0 |
 
-**Rotas frontend em producao (10 paginas):**
+**Rotas frontend em producao (11 paginas):**
 - `/login` — Wave 1
 - `/dashboard` — Wave 4 C15 (contadores tempo real + Realtime + layout Figma)
 - `/usuarios` — Wave 1 (CRUD + modais)
@@ -50,10 +52,10 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 - `/configuracoes` — Wave 2 C09 (tempo atraso + template etiqueta)
 - `/escanear` — Wave 3 C10+C11 (scanner QR + assinatura digital + transicao de status + entrada manual de codigo QR)
 - `/relatorios` — Wave 5 C16 (relatorios gerenciais + 3 graficos Recharts + tabelas + filtro periodo + export CSV)
+- `/auditoria` — Wave 6 C18 (tabela filtravel do audit_log imutavel + modal de detalhes + 7 chips tipo_evento + admin-only via item de menu condicional; RNF-005)
 
 **Itens do menu ainda inativos (placeholders para Waves futuras):**
-- "Relatorios" — Wave 5
-- "Informacoes" — possivel Wave 6
+- "Informacoes" — placeholder sem href (Wave futura pode adicionar "Sobre/Ajuda")
 
 ---
 
@@ -127,21 +129,25 @@ provaDigital/
 │   │   ├── api/
 │   │   │   ├── deps.py          # Auth dependencies (get_current_user, get_admin_user, require_role)
 │   │   │   ├── v1/users.py      # 6 endpoints CRUD usuarios
-│   │   │   ├── v1/provas.py     # 10 endpoints Wave 2+3: C06-C08 (8) + POST /scan (C10) + POST /{id}/transicoes (C11)
-│   │   │   └── v1/configuracoes.py # 3 endpoints Wave 2 C09: GET/, GET/{chave}, PATCH/{chave}
+│   │   │   ├── v1/provas.py     # 18 endpoints Wave 2-5: upload/CRUD + scan + transicoes + dashboard + relatorios
+│   │   │   ├── v1/configuracoes.py # 3 endpoints Wave 2 C09: GET/, GET/{chave}, PATCH/{chave}
+│   │   │   └── v1/auditoria.py  # 2 endpoints Wave 6 C18: GET/ (listagem keyset), GET/{log_id} (detalhe) — admin-only
 │   │   ├── domain/
 │   │   │   └── schemas/
 │   │   │       ├── user.py      # Pydantic v2: UserCreate, UserUpdate, UserResponse
 │   │   │       ├── prova.py     # Pydantic v2 Wave 2: Upload/ProvaCreate/ProvaResponse + sanitize_filename
 │   │   │       ├── configuracao.py # Pydantic v2 Wave 2 C09: whitelist + validators por chave
 │   │   │       ├── dashboard.py   # Pydantic v2 Wave 4 C15: DashboardContadores + DashboardResponse
-│   │   │       └── relatorio.py  # Pydantic v2 Wave 5 C16: RelatorioResponse + VendedorRelatorio + ProvaAtrasada + StatusCount
-│   │   └── services/            # Wave 2 (ADR-040) + Wave 3 (ADR-081)
+│   │   │       ├── relatorio.py  # Pydantic v2 Wave 5 C16: RelatorioResponse + VendedorRelatorio + ProvaAtrasada + StatusCount
+│   │   │       └── auditoria.py  # Pydantic v2 Wave 6 C18: TipoEventoEnum (7 valores) + AuditoriaFiltros (whitelist+validators) + AuditLogItem + AuditoriaListResponse
+│   │   └── services/            # Wave 2 (ADR-040) + Wave 3 (ADR-081) + Wave 6 (ADR-099)
 │   │       ├── state_machine.py # Transicoes + atores + determinar_rota + executar_transicao (Wave 3 A.1)
 │   │       ├── qrcode_service.py # HMAC-SHA256 hash + PNG via qrcode[pil] (ADR-033/034)
 │   │       ├── etiqueta_service.py # PDF via fpdf2, templates A4/80mm (ADR-035)
-│   │       ├── audit_service.py # log_audit helper (ADR-039)
-│   │       └── r2_signed.py     # presigned URL + HeadObject + Range GET (ADR-031)
+│   │       ├── audit_service.py # log_audit helper (ADR-039) — CAMADA DE ESCRITA INTOCADA na Wave 6
+│   │       ├── r2_signed.py     # presigned URL + HeadObject + Range GET (ADR-031)
+│   │       ├── auditoria_projection.py # Wave 6 C18 — funcao pura projetar_tipo_evento (ADR-099, resolve gap 1.6)
+│   │       └── auditoria_query.py # Wave 6 C18 — cursor codec + filter builder + listar_audit_logs + buscar_audit_log_por_id
 │   ├── migrations/
 │   │   ├── env.py               # Alembic config (asyncpg→psycopg2)
 │   │   ├── versions/
@@ -163,16 +169,20 @@ provaDigital/
 │   │       ├── 006_movimentacoes_insert_and_expand_select.sql  # ADR-082 — INSERT admin + SELECT c/ MOTORISTA/CLICHERIA
 │   │       ├── 007_enable_realtime_provas.sql                 # Wave 4 — provas_digitais na publicacao supabase_realtime
 │   │       └── apply_rls.py
-│   └── tests/
+│   └── tests/                    # 610 testes, 100% cobertura em todos os arquivos Wave 6 (348/348 stmts)
 │       ├── conftest.py          # Fixtures: make_user, admin_user, mock_db, vendedor_matriz/filial
 │       ├── test_schemas.py      # 13 testes validacao Pydantic
 │       ├── test_users_api.py    # Testes integracao endpoints usuarios
-│       ├── test_state_machine.py # 26 testes Wave 2 — maquina de estados
-│       ├── test_qrcode_service.py # 13 testes Wave 2 — hash + PNG
-│       ├── test_etiqueta_service.py # 7 testes Wave 2 — PDF etiqueta
-│       ├── test_audit_service.py # 4 testes Wave 2 — audit helper
-│       ├── test_provas_api.py   # 59 testes Wave 2 C06+C07+C08 (15+23+21)
-│       └── test_configuracoes_api.py # 26 testes Wave 2 C09 — endpoints configuracoes
+│       ├── test_state_machine.py # Wave 2 — maquina de estados
+│       ├── test_qrcode_service.py # Wave 2 — hash + PNG
+│       ├── test_etiqueta_service.py # Wave 2 — PDF etiqueta
+│       ├── test_audit_service.py # Wave 2 — audit_service helper
+│       ├── test_provas_api.py   # Wave 2 C06+C07+C08
+│       ├── test_configuracoes_api.py # Wave 2 C09
+│       ├── test_auditoria_projection.py # Wave 6 — 32 testes matriz projecao + edge cases (ADR-099)
+│       ├── test_auditoria_schemas.py # Wave 6 — 30 testes validators AuditoriaFiltros + DTOs
+│       ├── test_auditoria_query.py # Wave 6 — 47 testes cursor codec + timezone + filter builder + listar/buscar
+│       └── test_auditoria_api.py # Wave 6 — 42 testes integracao HTTP + RBAC 401/403 + imutabilidade 405 + 422
 ├── frontend/
 │   ├── package.json             # Next.js 14, @supabase/ssr, @supabase/supabase-js, framer-motion
 │   ├── tsconfig.json            # strict, ES2017, path aliases @/*
@@ -197,14 +207,19 @@ provaDigital/
 │       │   ├── useReiniciarCiclo.ts     # Wave 3 C14 — POST /{id}/reiniciar-ciclo wrapper
 │       │   ├── useDashboard.ts          # Wave 4 C15 — GET /dashboard wrapper
 │       │   ├── useRelatorios.ts         # Wave 5 C16 — GET /relatorios wrapper
-│       │   └── useExportCsv.ts          # Wave 5 C16 — GET /relatorios/csv download
+│       │   ├── useExportCsv.ts          # Wave 5 C16 — GET /relatorios/csv download
+│       │   ├── useAuditoria.ts          # Wave 6 C18 — listagem keyset + filters + loadMore + AbortController+timeout
+│       │   └── useAuditoriaDetail.ts    # Wave 6 C18 — GET /{log_id} pontual para modal + 404 amigavel
+│       ├── components/
+│       │   └── icons.tsx        # Biblioteca de 12 icones SVG inline (+ShieldCheckIcon na Wave 6 para menu Auditoria)
 │       ├── lib/
 │       │   ├── api.ts           # apiFetch wrapper (token injection, ApiError). Nao usar p/ binarios
 │       │   ├── types/
 │       │   │   ├── prova.ts     # Wave 2 C06-C08 — tipos completos + STATUS_LABELS + ROTA_LABELS
 │       │   │   ├── usuario.ts   # Wave 2 — tipos TS espelho de schemas/user.py
 │       │   │   ├── configuracao.ts # Wave 2 C09 — tipos + type guards
-│       │   │   └── relatorio.ts   # Wave 5 C16 — tipos RelatorioResponse + VendedorRelatorio + ProvaAtrasada
+│       │   │   ├── relatorio.ts   # Wave 5 C16 — tipos RelatorioResponse + VendedorRelatorio + ProvaAtrasada
+│       │   │   └── auditoria.ts   # Wave 6 C18 — TIPO_EVENTO_VALUES (tuple) + TipoEventoEnum (union) + TIPO_EVENTO_LABELS + DTOs snake_case + AuditoriaFilters camelCase
 │       │   └── supabase/
 │       │       ├── client.ts    # Browser client (@supabase/ssr)
 │       │       ├── server.ts    # Server client + cookies()
@@ -244,6 +259,10 @@ provaDigital/
 │               ├── relatorios/   # Wave 5 (Componente 16)
 │               │   ├── page.tsx                     # metricas + 3 graficos Recharts + tabelas + filtro + CSV
 │               │   └── relatorios.module.css
+│               ├── auditoria/     # Wave 6 (Componente 18, RNF-005)
+│               │   ├── page.tsx                     # tabela audit_log filtravel + 7 filtros + "Carregar mais" + admin-only
+│               │   ├── AuditoriaDetailModal.tsx     # modal focus trap + JSON pretty-printed dark-mode + link "Abrir prova"
+│               │   └── auditoria.module.css         # grid filtros + 7 chips coloridos por tipo_evento + responsivo 3 breakpoints
 │               └── configuracoes/ # Wave 2 (Componente 09)
 │                   ├── page.tsx # Tempo atraso + template etiqueta
 │                   └── configuracoes.module.css
