@@ -2,6 +2,149 @@
 
 ---
 
+## [2026-04-15 — Wave 6 Bloco 6.1] — schemas Pydantic + projecao de tipo_evento (ADR-099)
+
+### Contexto
+
+Inicio da **Wave 6 — Seguranca e Auditoria** com o **Componente 18 (Interface
+de Log de Auditoria, RNF-005)**. Wave 6 entrega apenas a camada de LEITURA do
+`audit_logs` — zero toque na camada de escrita (ADR-039 continua intocado),
+zero migration Alembic, zero nova policy RLS, zero impacto no R2.
+
+O Bloco 6.0 (reconhecimento, sem commit) varreu o estado real do banco,
+validou os 5 indices atuais cobrindo todos os filtros propostos via 5
+EXPLAIN ANALYZE, inventariou o `detalhes_json` das 50 linhas em producao
+(zero PII sensivel — zero ocorrencias de `password`/`token`/`secret`/
+`api_key`), confirmou o baseline do pytest em 459 passed.
+
+**Bloco 6.1 entrega 3 arquivos novos** (2 de codigo + 2 de teste) + 8 edits
+empiricos no `WAVE6_ANALYSIS.md`:
+
+1. **`app/domain/schemas/auditoria.py`** — schemas Pydantic v2 do endpoint
+   `GET /api/v1/auditoria/` (a ser implementado no Bloco 6.2):
+   - `TipoEventoEnum` — 7 valores derivados (CRIACAO_PROVA, ESCANEAMENTO,
+     CANCELAMENTO, REPROVACAO, TRANSICAO_STATUS, REINICIO_CICLO,
+     ALTERACAO_CONFIG).
+   - `TIPO_EVENTO_LABELS` — dict com labels pt-BR.
+   - `ACOES_VALIDAS` — whitelist frozenset com os 5 valores reais de
+     `audit_logs.acao` em producao (Waves 2-5).
+   - `AuditoriaFiltros` — query params com 7 campos opcionais + validators
+     (whitelist de `acao`, dedupe de `tipo_evento`, mutuamente exclusivo
+     `acao` vs `tipo_evento`, `data_inicio <= data_fim`, `limit` 1-100).
+   - `AuditLogItem`, `UsuarioAuditoria`, `ProvaAuditoria`,
+     `AuditoriaListResponse`, `FiltrosAplicados` — DTOs de resposta
+     enriquecidos (frozen).
+   - Cap `TOTAL_ESTIMADO_CAP = 100_001` para `COUNT(*)` — sinal "100k+" na UI.
+
+2. **`app/services/auditoria_projection.py`** — funcao pura
+   `projetar_tipo_evento(acao, detalhes_json)` que resolve o **gap 1.6** do
+   plano: cancelamento (C13) e logado pelo `state_machine.py` como
+   `acao="transitar_status"` com `detalhes_json.para="CANCELADA"`, em vez
+   de ter `acao` propria. A projecao backend e a fonte unica da verdade
+   sobre tipos derivados — testavel em isolamento, zero toque na Wave 3.
+   - Fallback para `acao` desconhecida: retorna `TRANSICAO_STATUS` + emite
+     `logger.warning` apontando para o proprio arquivo (nao raise — evita
+     quebrar a listagem inteira quando Waves futuras adicionarem `acao`
+     sem atualizar a matriz).
+   - Helper `label_tipo_evento(tipo)` encapsula reverse-lookup.
+
+3. **`tests/test_auditoria_projection.py`** — 32 testes unitarios cobrindo
+   toda a matriz 1.6 + edge cases + fallback + parametrizados.
+
+4. **`tests/test_auditoria_schemas.py`** — 30 testes unitarios dos
+   validators cruzados e instanciacao dos DTOs (fecha 100% de cobertura
+   do `schemas/auditoria.py` ja no Bloco 6.1, antes dos testes de
+   integracao do Bloco 6.2).
+
+### Decisoes-chave
+
+**ADR-099 — Projecao de `tipo_evento` para audit log** (registrado em
+`DECISIONS.md`):
+
+- Matriz de derivacao:
+  `criar_prova` -> `CRIACAO_PROVA`
+  `escanear_prova` -> `ESCANEAMENTO`
+  `transitar_status` + `detalhes.para=CANCELADA` -> `CANCELAMENTO`
+  `transitar_status` + `detalhes.para=REPROVADA_PELO_VENDEDOR` -> `REPROVACAO`
+  `transitar_status` + outro `para` -> `TRANSICAO_STATUS`
+  `reiniciar_ciclo` -> `REINICIO_CICLO`
+  `atualizar_configuracao` -> `ALTERACAO_CONFIG`
+  desconhecida -> `TRANSICAO_STATUS` + warning.
+- Cap `TOTAL_ESTIMADO_CAP = 100_001` — sinaliza "100k+" para a UI sem
+  precisar de estimativa via `pg_class.reltuples`.
+- Follow-up condicional: criar `idx_audit_cancelamentos` parcial em
+  `((detalhes_json->>'para')) WHERE acao='transitar_status'` apenas quando
+  `pg_stat_statements` mostrar a query Q3 com tempo sustentado > 50 ms.
+  Hoje (50 linhas, Bloco 6.0): 2.176 ms via `idx_audit_acao` + Filter heap.
+- Fallback `acao` desconhecida logado como warning, nao raise —
+  preservacao da listagem completa tem prioridade sobre deteccao precoce
+  de drift de codigo.
+
+### Edits empiricos no `WAVE6_ANALYSIS.md`
+
+- A1+A2: "ativar item de menu" -> "criar item de menu" (confirmado no 6.0
+  que `layout.tsx` NAO tem item "Auditoria" — precisa ser criado).
+- A3: novo campo `adminOnly?: boolean` em `NavItemSpec` — entrada no Bloco 6.4.
+- A4: R-03 (Vazamento de PII) downgradeado de Alto -> Baixo apos varredura
+  empirica (50 linhas, 0 PII sensivel).
+- A5: documentado que 5 linhas legadas com `seed_test: true` ficarao na
+  tela por imutabilidade RNF-005.
+- A6: 1 linha real de cancelamento ja em producao -> fixture do Bloco 6.2
+  vai usar dado real.
+- A7: 0 linhas de `reiniciar_ciclo` -> fixture dedicada cria 1 em memoria.
+- A8: R-02 (JSONB Seq Scan) reclassificado como "follow-up condicional"
+  apos 5 EXPLAIN ANALYZE confirmar execution time < 3 ms em todas as 5
+  queries representativas.
+
+### Medicoes
+
+| Metrica | Antes (Wave 5) | Depois (Wave 6 Bloco 6.1) | Delta |
+|---|---|---|---|
+| Testes pytest | 459 passed | **521 passed** | +62 (+32 projection, +30 schemas) |
+| Tempo pytest | 3.68 s | 3.54 s | -0.14 s |
+| Cobertura `auditoria_projection.py` | — | **100%** (29/29 stmts) | novo |
+| Cobertura `schemas/auditoria.py` | — | **100%** (126/126 stmts) | novo |
+| Arquivos novos backend | 0 | **4** (2 codigo + 2 testes) | +4 |
+| Arquivos Wave 0-5 tocados | 0 | **0** | 0 |
+| Migrations Alembic | 009 | **009** | 0 |
+| Policies RLS | 12 | **12** | 0 |
+| `alembic_version` | 009 | **009** | 0 |
+| Advisors (security/performance) | unchanged | **unchanged** | 0 |
+| Ruff check | limpo | **limpo** | 0 |
+
+### Validacao empirica
+
+- `pytest -q`: 521 passed, 1 warning (HMAC pre-existente, intencional).
+- `pytest --cov` nos arquivos novos: 100% em ambos.
+- `ruff check`: 0 erros em todos os 4 arquivos novos (ajustes de import sort
+  aplicados via `--fix`).
+- 5 EXPLAIN ANALYZE contra banco real (50 linhas) no Bloco 6.0: zero Seq
+  Scan em `audit_logs`, todos os filtros usam indices existentes, execution
+  time < 3 ms.
+- Varredura de `detalhes_json`: 0 ocorrencias de `password`/`token`/
+  `secret`/`api_key` em qualquer das 50 linhas de producao.
+
+### Arquivos criados
+
+- `backend/app/domain/schemas/auditoria.py` — 259 linhas (schemas Pydantic v2)
+- `backend/app/services/auditoria_projection.py` — 108 linhas (funcao pura)
+- `backend/tests/test_auditoria_projection.py` — 294 linhas (32 testes)
+- `backend/tests/test_auditoria_schemas.py` — 369 linhas (30 testes)
+
+### Arquivos modificados
+
+- `WAVE6_ANALYSIS.md` — 8 edits empiricos (A1-A8) refletindo as descobertas
+  do Bloco 6.0.
+
+### Veredito final
+
+🟢 **Bloco 6.1 aprovado.** Zero regresso nos 459 testes pre-existentes,
+100% de cobertura nos 2 arquivos de codigo novos, ruff limpo, nenhum arquivo
+Wave 0-5 tocado. Wave 6 pronta para seguir ao **Bloco 6.2** (query builder +
+endpoints API).
+
+---
+
 ## [2026-04-14 — Auditoria Wave 5 Ronda 2 Bloco B] — 6 LOWs selecionados + hardening defensivo
 
 ### Contexto

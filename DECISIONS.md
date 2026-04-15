@@ -2,6 +2,133 @@
 
 ---
 
+## ADR-099 — Projecao de `tipo_evento` para audit log (Wave 6, Componente 18)
+
+**Data:** 2026-04-15
+
+**Contexto:**
+A Wave 6 entrega o Componente 18 (Interface de Log de Auditoria) — uma tela
+admin-only para consultar o `audit_logs` imutavel gerado desde a Wave 3
+(ADR-039). A camada de escrita usa apenas 5 valores crus de `acao`
+(`criar_prova`, `escanear_prova`, `transitar_status`, `reiniciar_ciclo`,
+`atualizar_configuracao`), mas a UI precisa distinguir visualmente 3
+sub-eventos dentro de `transitar_status`:
+  1. **Cancelamento** — logado hoje como `transitar_status` +
+     `detalhes_json.para='CANCELADA'` (`state_machine.py:348` cai no branch
+     default, nao tem `acao` dedicada).
+  2. **Reprovacao** — idem, com `detalhes_json.para='REPROVADA_PELO_VENDEDOR'`.
+  3. **Transicao comum** — qualquer outro `para`.
+
+A regra inviolavel #1 da Wave 6 proibe modificar a camada de escrita (Wave 3).
+Alem disso, Waves 0-5 estao congeladas. Ou seja, a distincao precisa acontecer
+na camada de LEITURA — sem tocar `state_machine.py`, sem tocar
+`audit_service.py`, sem tocar o schema `audit_logs`.
+
+**Decisao:**
+Introduzir uma **funcao pura de projecao** em
+`app/services/auditoria_projection.py` — `projetar_tipo_evento(acao,
+detalhes_json) -> TipoEventoEnum` — que mapeia a tupla `(acao, detalhes_json)`
+para um enum de 7 valores derivados:
+
+| `acao` cru | `detalhes_json.para` | `tipo_evento` derivado |
+|---|---|---|
+| `criar_prova` | — | `CRIACAO_PROVA` |
+| `escanear_prova` | — | `ESCANEAMENTO` |
+| `transitar_status` | `CANCELADA` | `CANCELAMENTO` |
+| `transitar_status` | `REPROVADA_PELO_VENDEDOR` | `REPROVACAO` |
+| `transitar_status` | outro valor | `TRANSICAO_STATUS` |
+| `reiniciar_ciclo` | — | `REINICIO_CICLO` |
+| `atualizar_configuracao` | — | `ALTERACAO_CONFIG` |
+| (desconhecida) | — | `TRANSICAO_STATUS` + `logger.warning` |
+
+A regra e **codigo Python puro**, em um unico arquivo, 100% testavel em
+isolamento (sem banco, sem FastAPI, sem mock) e 100% coberto pelos 32 testes
+de `test_auditoria_projection.py` + a matriz parametrizada.
+
+**Fallback para `acao` desconhecida:**
+Se Waves futuras adicionarem uma nova `acao` sem atualizar esta funcao, o
+comportamento e: retornar `TRANSICAO_STATUS` + emitir `logger.warning` que
+aponta para o arquivo a ser atualizado. Escolha **deliberada**: preferimos
+listar a entrada como "transicao comum" a levantar excecao, porque excecao
+aqui quebraria a listagem inteira da tela de auditoria — transformando um
+descuido de manutencao em um bug P0 visivel para o admin.
+
+**Encoding das decisoes de escopo da Wave 6:**
+Esta ADR tambem registra as 3 decisoes tomadas na Fase 3 do plano Wave 6:
+  1. **Gap do cancelamento** resolvido via projecao backend, nao via
+     modificacao do `state_machine.py` (regra inviolavel #1).
+  2. **Nenhuma policy RLS nova** em `audit_logs` — a `pol_audit_select` ja
+     existente (SELECT `is_admin=true` via `(SELECT auth.uid())`) cobre. O
+     trigger `trg_audit_logs_imutavel` bloqueia UPDATE/DELETE. INSERT via
+     `service_role` do backend bypassa RLS por design (ADR-046/049).
+  3. **Nenhuma exportacao CSV** na Wave 6 — nao ha RF explicito (RF-015 so
+     cobre relatorios da Wave 5).
+
+**Cap de `total_estimado`:**
+O `COUNT(*)` filtrado na paginacao keyset tem um cap em `100_001`. Se a
+query interna retornar >= este valor, o response expoe exatamente `100_001`
+e a UI exibe "100k+". Evita estimativa via `pg_class.reltuples` (impreciso
+com filtros) e mantem o response determinista. A 50 linhas (hoje), o
+`COUNT(*)` e instantaneo; a 10k linhas ainda sera < 10 ms.
+
+**Follow-up condicional (indice parcial):**
+A query Q3 (filtro `tipo_evento=CANCELAMENTO`) usa hoje `idx_audit_acao` +
+Filter heap para extrair `detalhes_json->>'para'`. Validado empiricamente
+no Bloco 6.0 via EXPLAIN ANALYZE: 2.176 ms para 50 linhas, 7 rows removed
+by filter. Nenhum Seq Scan. A 10k linhas, estimativa proporcional < 50 ms.
+A 100k linhas, possivel dor.
+
+**Acao condicional:** criar
+`CREATE INDEX idx_audit_cancelamentos ON audit_logs ((detalhes_json->>'para'))
+WHERE acao='transitar_status'` **apenas** quando `pg_stat_statements` mostrar
+Q3 com tempo sustentado > 50 ms. **Nao criar especulativamente.**
+
+**Alternativas consideradas e descartadas:**
+1. **Introduzir `acao="cancelar_prova"` em `state_machine.py`**: resolveria
+   na raiz, mas toca Wave 3 — proibido pela regra inviolavel #1 da Wave 6.
+   Se o time decidir corrigir no futuro, abre `WAVE6_BLOCKERS.md` + autoriza.
+2. **Derivar `tipo_evento` na query SQL via CASE WHEN**: poluiria a query,
+   misturaria logica de dominio com SQL, dificultaria testes. A regra fica
+   no SQL e nao pode ser testada sem banco.
+3. **Derivar `tipo_evento` no frontend via switch/case TS**: duplicaria a
+   regra em 2 linguagens — drift garantido na hora de adicionar um sub-
+   evento novo.
+4. **View materializada** com `tipo_evento` ja calculado: exige refresh,
+   migration Alembic, RLS dedicada. Overengineering para 50 linhas e 7
+   tipos derivados.
+5. **Campo `tipo_evento` computado na tabela via `GENERATED ALWAYS AS`**:
+   requer migration Alembic + altera schema. Proibido pela regra inviolavel
+   #2 (imutabilidade + zero toque no schema) e seria irreversivel.
+
+**Consequencias:**
+- Nenhuma migration Alembic nesta Wave (confirmado: `alembic_version=009`
+  permanece).
+- Nenhuma mudanca em RLS, trigger, schema ou qualquer artefato das Waves 0-5.
+- Nova `acao` em Wave futura exige atualizar `auditoria_projection.py` +
+  `ACOES_VALIDAS` em `schemas/auditoria.py` + testes — e um risco de drift
+  monitorado pelo teste `test_projecao_acao_desconhecida_fallback` (warning
+  apontando para o proprio arquivo).
+- `idx_audit_created_at` (marcado como `unused_index` pelo advisor no Bloco
+  6.0) vai sair do status "unused" no Bloco 6.2, quando o endpoint de
+  listagem for implementado. Comportamento esperado.
+- `detalhes_json` e exposto AS-IS no response (sem sanitizacao). Justificado
+  pela varredura empirica do Bloco 6.0: zero ocorrencias de
+  `password`/`token`/`secret`/`api_key` em qualquer das 50 linhas de
+  producao. O unico dado "sensivel-leve" e nome de cliente + nome de
+  vendedor + IP real — exatamente o que RNF-005 exige auditar.
+
+**Referencias:**
+- `WAVE6_ANALYSIS.md` secoes 1.6, 3.2, 4, 7.1
+- `app/services/auditoria_projection.py`
+- `app/domain/schemas/auditoria.py`
+- `tests/test_auditoria_projection.py` (32 testes, 100% cobertura)
+- `tests/test_auditoria_schemas.py` (30 testes, 100% cobertura)
+- ADR-039 (Wave 2 — `audit_service` helper)
+- ADR-046, ADR-049 (scoping filter + service_role bypassa RLS)
+- ADR-082 (RLS 006 — `pol_movimentacoes_insert`, referencia para paridade)
+
+---
+
 ## ADR-001 — PyJWT em vez de python-jose
 **Data:** 2026-04-07
 **Contexto:** Precisamos verificar JWTs emitidos pelo Supabase Auth no backend.
