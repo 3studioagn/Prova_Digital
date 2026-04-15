@@ -17,6 +17,7 @@ import {
   PlusIcon,
   ScanIcon,
   SearchIcon,
+  ShieldCheckIcon,
   UserIcon,
 } from "@/components/icons";
 import styles from "./layout.module.css";
@@ -33,12 +34,18 @@ const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes (RNF-003)
  * Cada item do menu. Quando `href` e omitido, renderizamos um <span> com o
  * mesmo visual do <Link>, mas nao-navegavel — essas rotas sao de Wave 2+ e
  * sao adicionadas trocando o span por um Link assim que a pagina existir.
+ *
+ * `adminOnly` (Wave 6): quando `true`, o item so aparece para usuarios com
+ * `is_admin=true`. Introduzido para o item "Auditoria" (Componente 18) —
+ * outros itens continuam visiveis para todos os perfis (comportamento
+ * pre-existente das Waves 1-5, nao mexido aqui por regra inviolavel).
  */
 interface NavItemSpec {
   key: string;
   label: string;
   icon: ReactNode;
   href?: string;
+  adminOnly?: boolean;
 }
 
 const MAIN_NAV: NavItemSpec[] = [
@@ -52,6 +59,13 @@ const MAIN_NAV: NavItemSpec[] = [
 
 const SECONDARY_NAV: NavItemSpec[] = [
   { key: "configuracoes", label: "Configuracoes", icon: <GearIcon />, href: "/configuracoes" },
+  {
+    key: "auditoria",
+    label: "Auditoria",
+    icon: <ShieldCheckIcon />,
+    href: "/auditoria",
+    adminOnly: true,
+  },
   { key: "informacoes", label: "Informacoes", icon: <InfoIcon /> },
 ];
 
@@ -237,8 +251,14 @@ export default function DashboardLayout({
           <div className={styles.navDivider} role="separator" />
 
           <nav className={styles.nav} aria-label="Navegacao secundaria">
-            {SECONDARY_NAV.map((item) => (
-              <NavEntry key={item.key} item={item} active={false} />
+            {SECONDARY_NAV.filter(
+              (item) => !item.adminOnly || user?.is_admin === true,
+            ).map((item) => (
+              <NavEntry
+                key={item.key}
+                item={item}
+                active={Boolean(item.href && pathname === item.href)}
+              />
             ))}
           </nav>
         </div>

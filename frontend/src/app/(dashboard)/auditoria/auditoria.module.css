@@ -1,0 +1,678 @@
+/* Auditoria — Wave 6, Componente 18 (RNF-005)
+ *
+ * Layout:
+ *   - Card de filtros (grid 4 colunas + chips de tipo_evento + acoes)
+ *   - Card de tabela (Quando | Quem | Evento | Prova | IP)
+ *   - Botao "Carregar mais" no rodape do card
+ *   - Modal de detalhes overlay
+ *
+ * Tokens visuais seguem o padrao das Waves 4-5 (cards #fafafa, radius 31px,
+ * botoes pill com --color-accent).
+ */
+
+/* =============================================================================
+   Container e loading/error states (padrao /relatorios Wave 5)
+============================================================================= */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-bottom: 2rem;
+}
+
+.loadingContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-card-text-dim);
+  font-size: var(--fs-lg);
+}
+
+.errorContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  height: 100%;
+  color: var(--color-danger);
+  font-size: var(--fs-base);
+}
+
+.retryButton {
+  padding: 0.5rem 1.5rem;
+  background: var(--color-accent);
+  color: var(--color-text-dark);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.retryButton:hover {
+  background: var(--color-accent-hover);
+}
+
+/* =============================================================================
+   Card de filtros
+============================================================================= */
+
+.filterCard {
+  background: #fafafa;
+  border: 1px solid rgba(202, 202, 202, 0.4);
+  border-radius: 31px;
+  box-shadow: 0 0 13.6px rgba(0, 0, 0, 0.04);
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.filterGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+.filterField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.filterLabel {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.filterInput {
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(202, 202, 202, 0.5);
+  border-radius: 12px;
+  font-size: 0.9rem;
+  background: #f5f5f5;
+  color: #333;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+.filterInput:focus {
+  border-color: var(--color-accent);
+}
+
+select.filterInput {
+  cursor: pointer;
+}
+
+/* Chips de tipo_evento (multi-select toggle) */
+
+.tipoEventoGroup {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tipoEventoChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chipToggle {
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(202, 202, 202, 0.7);
+  background: #f5f5f5;
+  color: rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-pill);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chipToggle:hover {
+  border-color: var(--color-accent);
+  color: #000;
+}
+
+.chipActive {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #000;
+}
+
+/* Acoes do filtro */
+
+.filterActions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.applyBtn {
+  padding: 0.85rem 2.5rem;
+  background: var(--color-accent);
+  color: #000;
+  border: none;
+  border-radius: 54px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.applyBtn:hover {
+  background: var(--color-accent-hover);
+}
+
+.applyBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clearBtn,
+.refreshBtn {
+  padding: 0.85rem 2rem;
+  background: #e9e9e9;
+  color: #333;
+  border: none;
+  border-radius: 54px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.clearBtn:hover,
+.refreshBtn:hover {
+  background: #dcdcdc;
+}
+
+.refreshBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* =============================================================================
+   Card de tabela
+============================================================================= */
+
+.tableCard {
+  background: #fafafa;
+  border: 1px solid rgba(202, 202, 202, 0.4);
+  border-radius: 31px;
+  box-shadow: 0 0 13.6px rgba(0, 0, 0, 0.04);
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.tableHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.tableCount {
+  font-size: 0.9rem;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.tableCount strong {
+  color: #000;
+  font-weight: 600;
+}
+
+.tableScroll {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+
+.table th {
+  text-align: left;
+  padding: 0.85rem 0.75rem;
+  color: rgba(0, 0, 0, 0.4);
+  font-weight: 500;
+  font-size: 0.875rem;
+  border-bottom: 1px solid rgba(202, 202, 202, 0.4);
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 0.85rem 0.75rem;
+  color: #333;
+  border-bottom: 1px solid rgba(202, 202, 202, 0.2);
+  vertical-align: middle;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.tableRow {
+  cursor: pointer;
+  transition: background 0.12s ease;
+  outline: none;
+}
+
+.tableRow:hover {
+  background: rgba(255, 203, 92, 0.1);
+}
+
+.tableRow:focus-visible {
+  background: rgba(255, 203, 92, 0.15);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.cellWhen {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: #555;
+  font-size: 0.875rem;
+}
+
+.who {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.whoSetor {
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.45);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cellProva {
+  white-space: nowrap;
+}
+
+.provaLink {
+  color: var(--color-accent);
+  text-decoration: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.provaLink:hover {
+  text-decoration: underline;
+}
+
+.noProva {
+  color: rgba(0, 0, 0, 0.3);
+}
+
+.cellIp {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8125rem;
+  color: #666;
+  white-space: nowrap;
+}
+
+/* Chips de tipo_evento (cores por tipo — 7 variantes) */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.85rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: #e8e8e8;
+  color: #333;
+  letter-spacing: 0.01em;
+}
+
+.chip_CRIACAO_PROVA {
+  background: #d4f5d6;
+  color: #1f6524;
+}
+
+.chip_ESCANEAMENTO {
+  background: #cfe8ff;
+  color: #0c4a8a;
+}
+
+.chip_CANCELAMENTO {
+  background: #ffd5d5;
+  color: #8a0c0c;
+}
+
+.chip_REPROVACAO {
+  background: #ffe3c5;
+  color: #8a4a0c;
+}
+
+.chip_TRANSICAO_STATUS {
+  background: #e5e5e5;
+  color: #404040;
+}
+
+.chip_REINICIO_CICLO {
+  background: #fff4c2;
+  color: #7a6200;
+}
+
+.chip_ALTERACAO_CONFIG {
+  background: #e7d9ff;
+  color: #4a1f8a;
+}
+
+/* Empty state */
+
+.emptyMsg {
+  text-align: center;
+  color: rgba(0, 0, 0, 0.3);
+  padding: 2rem;
+  font-size: 0.9rem;
+}
+
+/* Botao "Carregar mais" */
+
+.loadMoreWrap {
+  display: flex;
+  justify-content: center;
+  padding-top: 0.5rem;
+}
+
+.loadMoreBtn {
+  padding: 0.85rem 3rem;
+  background: #000;
+  color: #fff;
+  border: none;
+  border-radius: 54px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.loadMoreBtn:hover {
+  opacity: 0.85;
+}
+
+.loadMoreBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* =============================================================================
+   Modal de detalhes
+============================================================================= */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  z-index: 1000;
+}
+
+.modalContent {
+  background: #fff;
+  border-radius: 24px;
+  width: 100%;
+  max-width: 900px;
+  max-height: calc(100vh - 4rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.modalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.5rem 2rem 1rem;
+  border-bottom: 1px solid rgba(202, 202, 202, 0.4);
+  gap: 1rem;
+}
+
+.modalTitleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #111;
+}
+
+.modalSubtitle {
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+
+.modalCloseBtn {
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.modalCloseBtn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #111;
+}
+
+.modalBody {
+  padding: 1.5rem 2rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modalLoading,
+.modalError {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 0.95rem;
+}
+
+.modalError {
+  color: var(--color-danger);
+}
+
+.modalGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.modalSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.modalSectionFull {
+  grid-column: 1 / -1;
+}
+
+.modalSectionTitle {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.modalMuted {
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.kvList {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.kvRow {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  align-items: baseline;
+}
+
+.kvRow dt {
+  color: rgba(0, 0, 0, 0.5);
+  font-weight: 500;
+}
+
+.kvRow dd {
+  margin: 0;
+  color: #111;
+  word-break: break-word;
+}
+
+.kvCode {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8125rem;
+  background: #f3f3f3;
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+  color: #333;
+}
+
+.kvUa {
+  font-size: 0.75rem;
+  color: #555;
+  word-break: break-all;
+}
+
+.jsonBox {
+  margin: 0;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 1rem;
+  border-radius: 12px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 1rem 2rem 1.5rem;
+  border-top: 1px solid rgba(202, 202, 202, 0.4);
+}
+
+.btnPrimary,
+.btnSecondary {
+  padding: 0.7rem 1.75rem;
+  border: none;
+  border-radius: var(--radius-pill);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.btnPrimary {
+  background: #000;
+  color: #fff;
+}
+
+.btnPrimary:hover {
+  opacity: 0.85;
+}
+
+.btnSecondary {
+  background: #e9e9e9;
+  color: #333;
+}
+
+.btnSecondary:hover {
+  background: #dcdcdc;
+}
+
+/* =============================================================================
+   Responsivo
+============================================================================= */
+
+@media (max-width: 1099px) {
+  .filterGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 899px) {
+  .modalGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 599px) {
+  .filterGrid {
+    grid-template-columns: 1fr;
+  }
+  .filterCard,
+  .tableCard {
+    padding: 1.25rem 1rem;
+  }
+  .modalOverlay {
+    padding: 0.5rem;
+  }
+  .modalContent {
+    max-height: calc(100vh - 1rem);
+    border-radius: 16px;
+  }
+  .modalHeader,
+  .modalBody {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+  .modalFooter {
+    padding: 0.75rem 1.25rem 1.25rem;
+  }
+  .kvRow {
+    grid-template-columns: 90px 1fr;
+  }
+}

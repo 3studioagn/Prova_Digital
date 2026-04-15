@@ -2,6 +2,194 @@
 
 ---
 
+## [2026-04-15 — Wave 6 Bloco 6.4] — pagina /auditoria + modal de detalhes + item de menu admin-only
+
+### Contexto
+
+Sequencia do Bloco 6.3 — entrega a **camada UI final** da interface de
+auditoria (Componente 18, RNF-005): pagina Next.js client component
+consumindo `useAuditoria` e `useAuditoriaDetail`, modal de detalhes com
+JSON pretty-printed, e a **primeira mudanca em `layout.tsx`** da Wave 6
+(ativar item "Auditoria" no `SECONDARY_NAV` condicional a `is_admin`).
+
+Wave 6 continua respeitando as regras invioaveis: apenas 2 arquivos
+Wave 0-5 tocados no 6.4 (`layout.tsx` +13 linhas; `icons.tsx` +11 linhas),
+zero toque no backend, zero migration, zero policy RLS.
+
+### Arquivos criados
+
+1. **`frontend/src/app/(dashboard)/auditoria/page.tsx`** (360 linhas) —
+   client component unico (padrao `/relatorios` Wave 5, sem server
+   component separado — o gate admin-only e feito pelo backend via
+   `get_admin_user` no endpoint):
+
+   - **Filtros picker + applied** (padrao M-03 Wave 5): `pickerInicio`,
+     `pickerFim`, `pickerUsuario`, `pickerNroReq`, `pickerTipos` sao o
+     estado do formulario. `applied` e o objeto `AuditoriaFilters` que
+     alimenta o hook. Botao "Aplicar" copia picker -> applied. "Limpar"
+     zera tudo. `isApplyDisabled` compara picker vs applied via
+     comparacao normalizada (incluindo sort de arrays de `tipoEvento`).
+
+   - **Fetch de usuarios para o dropdown "Autor":** `useEffect` no mount
+     chama `GET /api/v1/users/?page=1&page_size=100` (endpoint da Wave 1)
+     e popula um `<select>`. Se a chamada falhar, o filtro de autor fica
+     vazio mas a listagem continua funcional (catch silent).
+
+   - **Tabela com 5 colunas:** Quando (formatado pt-BR), Quem (nome +
+     setor), Evento (chip colorido), Prova (link para `/provas/{id}` com
+     `stopPropagation` para nao disparar o click da linha), IP. Cada
+     linha tem `role="button"`, `tabIndex={0}`, `onKeyDown` Enter/Space,
+     e `aria-label` descritivo — linha inteira e clicavel e acessivel.
+
+   - **"Carregar mais"** (keyset pagination acumulativa) via
+     `loadMore()` do hook. Desabilitado durante `loadingMore`. Some
+     quando `!hasMore`.
+
+   - **Contador `aria-live="polite"`** mostrando
+     "Mostrando X de Y eventos", com `Y` renderizado como "100k+"
+     quando `total_estimado >= TOTAL_ESTIMADO_CAP`.
+
+   - **Loading/error/empty states** padronizados com retry button.
+
+2. **`frontend/src/app/(dashboard)/auditoria/AuditoriaDetailModal.tsx`**
+   (232 linhas) — modal de detalhes com `useFocusTrap`, ESC, body scroll
+   lock, click no overlay, `role="dialog"` + `aria-modal` +
+   `aria-labelledby`. Conteudo:
+
+   - **Header** com titulo (`tipo_evento_label`) + subtitle (timestamp
+     formatado com segundos) + botao close.
+
+   - **Body** em grid 2 colunas (colapsa em mobile): 4 secoes curtas
+     (Quem, Prova, Evento, Origem) em `<dl>` semanticamente correto +
+     1 secao full-width com JSON pretty-printed (pre tag com
+     `JSON.stringify(..., null, 2)` estilo dark-mode).
+
+   - **Footer** com link "Abrir prova" (quando `prova != null`) +
+     botao Fechar.
+
+3. **`frontend/src/app/(dashboard)/auditoria/auditoria.module.css`**
+   (630 linhas) — CSS Modules isolado seguindo tokens da Wave 4-5
+   (cards `#fafafa`, `border-radius: 31px`, pills `radius-pill`,
+   `--color-accent`):
+
+   - Grid de filtros 4 colunas com colapso responsivo
+     (1099px -> 2 col, 599px -> 1 col).
+   - Chip toggles para multi-select de `tipo_evento`.
+   - **7 variantes de cor para `.chip_<TIPO>`** — cada `TipoEventoEnum`
+     tem sua cor pastel + texto contrastante:
+     - `CRIACAO_PROVA` verde, `ESCANEAMENTO` azul, `CANCELAMENTO` vermelho,
+     - `REPROVACAO` laranja, `TRANSICAO_STATUS` cinza,
+     - `REINICIO_CICLO` amarelo, `ALTERACAO_CONFIG` roxo.
+   - Modal com grid 2 colunas, `.jsonBox` dark-mode (`#1e1e1e` / `#d4d4d4`),
+     footer sticky.
+   - Responsivo em 3 breakpoints (1099px, 899px, 599px).
+
+### Arquivos Wave 0-5 modificados
+
+1. **`frontend/src/components/icons.tsx`** (+11 linhas) — adiciona
+   `ShieldCheckIcon` (SVG shield com check central) para representar
+   "auditoria/registro verificado" no item de menu. Nao modifica os 10
+   icones existentes.
+
+2. **`frontend/src/app/(dashboard)/layout.tsx`** (+13 linhas, -3 linhas) —
+   tres mudancas:
+
+   - Import do `ShieldCheckIcon` junto com os demais.
+
+   - Novo campo `adminOnly?: boolean` em `NavItemSpec` com docstring
+     explicando o racional (outros itens continuam visiveis para todos
+     os perfis — comportamento pre-existente das Waves 1-5, nao mexido
+     aqui por regra inviolavel).
+
+   - Insercao do item `{ key: "auditoria", label: "Auditoria",
+     icon: <ShieldCheckIcon />, href: "/auditoria", adminOnly: true }`
+     em `SECONDARY_NAV`, entre `configuracoes` e `informacoes`.
+
+   - **Filtro condicional na renderizacao** de `SECONDARY_NAV` via
+     `.filter((item) => !item.adminOnly || user?.is_admin === true)`.
+     Usuarios nao-admin nao veem o item. `MAIN_NAV` continua inalterado.
+
+   - Bonus: `active={Boolean(item.href && pathname === item.href)}`
+     adicionado na renderizacao do `SECONDARY_NAV` (antes era `false`
+     hard-coded — agora `configuracoes` tambem recebe highlight quando
+     ativo, efeito colateral positivo da refatoracao).
+
+### Validacao
+
+- `npx tsc --noEmit` no `frontend/`: **0 erros** de tipo.
+- `npx next lint` nos 4 arquivos tocados (novos + modificados):
+  **0 warnings, 0 errors**.
+- `pytest` backend completo: **610 passed** (zero side-effect — Bloco 6.4
+  nao toca em backend).
+
+### Decisoes-chave do Bloco 6.4
+
+1. **Client component unico** (sem server component separado) — segue o
+   padrao de `/relatorios` (Wave 5). O gate admin-only e feito pelo
+   backend via `get_admin_user`. Server component com `redirect()`
+   duplicaria a logica sem ganho real, alem de exigir conversao entre
+   cookies SSR e token client que traz complexidade desnecessaria.
+
+2. **Filtro por autor via `<select>` populado por fetch de
+   `/api/v1/users/`** em vez de input UUID cru. UX superior e o endpoint
+   ja existe desde a Wave 1. Se a chamada falhar, o select fica vazio
+   mas o resto da tela continua operacional (fault-tolerant).
+
+3. **Linha inteira clicavel com teclado** — `role="button"`,
+   `tabIndex={0}`, `onKeyDown` Enter/Space, `aria-label` descritivo.
+   O link da prova dentro da celula usa `stopPropagation` para evitar
+   que o click do link abra o modal acidentalmente.
+
+4. **`chip_<TIPO>` com 7 variantes de cor** — cada `TipoEventoEnum` tem
+   sua cor pastel unica. Mantido como classes CSS (nao estilos inline)
+   para respeitar o padrao L-07 da auditoria Wave 5.
+
+5. **Item de menu "Auditoria" entre configuracoes e informacoes** —
+   mantem a ordem visual das secoes administrativas sem bagunca o
+   layout existente.
+
+6. **`active` highlight agora funciona no `SECONDARY_NAV`** — side
+   effect positivo da refatoracao, `configuracoes` tambem ganha o
+   highlight quando ativo. Mudanca trivial e consistente com `MAIN_NAV`.
+
+### Medicoes
+
+| Metrica | Antes (6.3) | Depois (6.4) | Delta |
+|---|---|---|---|
+| Arquivos frontend novos Wave 6 | 3 | **6** (+ page, modal, css) | +3 |
+| Arquivos Wave 0-5 modificados no 6.4 | 0 | **2** (`layout.tsx`, `icons.tsx`) | +2 |
+| Rotas frontend | 9 | **10** (+ `/auditoria`) | +1 |
+| Linhas TS/CSS novas | 533 | **1755** (360 page + 232 modal + 630 css + 533 anteriores) | +1222 |
+| `tsc --noEmit` | limpo | **limpo** | 0 erros |
+| `next lint` nos arquivos tocados | limpo | **limpo** | 0 warnings |
+| `pytest` backend | 610 passed | **610 passed** | 0 |
+| Migrations Alembic | 009 | **009** | 0 |
+| Policies RLS | 12 | **12** | 0 |
+
+### Arquivos criados no Bloco 6.4
+
+- `frontend/src/app/(dashboard)/auditoria/page.tsx` — 360 linhas
+- `frontend/src/app/(dashboard)/auditoria/AuditoriaDetailModal.tsx` — 232 linhas
+- `frontend/src/app/(dashboard)/auditoria/auditoria.module.css` — 630 linhas
+
+### Arquivos modificados no Bloco 6.4
+
+- `frontend/src/components/icons.tsx` — +11 linhas (novo `ShieldCheckIcon`)
+- `frontend/src/app/(dashboard)/layout.tsx` — +13 / -3 linhas
+  (import + `adminOnly` field + item novo + filtro condicional)
+
+### Veredito final
+
+🟢 **Bloco 6.4 aprovado.** 3 arquivos novos + 2 modificados minimamente,
+`tsc` limpo, `next lint` limpo, backend regressao 610 inalterada.
+Item "Auditoria" visivel apenas para admin no menu lateral, pagina
+`/auditoria` renderiza a listagem com filtros, tabela clicavel com
+chips de tipo_evento coloridos, modal de detalhes com JSON
+pretty-printed e focus trap. Wave 6 pronta para **Bloco 6.5** —
+validacao E2E via preview + auditoria interna + closeout.
+
+---
+
 ## [2026-04-15 — Wave 6 Bloco 6.3] — types TS + hooks frontend para auditoria
 
 ### Contexto

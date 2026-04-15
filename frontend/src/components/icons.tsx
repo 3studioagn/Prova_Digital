@@ -126,3 +126,14 @@ export function CloseIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function ShieldCheckIcon(props: IconProps) {
+  // Wave 6 — Componente 18 (Auditoria). Um shield com check central,
+  // sinalizando "auditoria/registro verificado" no item de menu admin-only.
+  return (
+    <svg {...baseProps} {...props} aria-hidden={props["aria-label"] ? undefined : true}>
+      <path d="M12 3 4 6v6c0 4.75 3.24 8.25 8 9 4.76-.75 8-4.25 8-9V6l-8-3Z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}
