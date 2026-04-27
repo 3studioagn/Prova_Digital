@@ -2,6 +2,120 @@
 
 ---
 
+## [2026-04-27 — Wave 5 Bloco 5.3] — Frontend rota /relatorios + hooks + filtros URL-persisted
+
+### Contexto
+
+Bloco 5.3 da Wave 5. Materializa a UI de Relatorios (Componente 16 — RF-015,
+US-014) consumindo os endpoints do Bloco 5.2. Foco em UX consistente com
+o resto do projeto + estrategia de cache cliente.
+
+Continuidade do tema central da wave: **minimizar queries** (Mario 2026-04-27).
+Frontend implementa 2 das 4 camadas do plano (WAVE5_ANALYSIS §4.4):
+  - **Camada 1 (HTTP/ETag/304)**: hook envia `If-None-Match` e trata 304
+    sem reserializar — zero bytes ao cliente em revalidacao.
+  - **Camada 3 (Realtime)**: subscription a `provas_digitais` invalida
+    cache local + refetch debounced 2s. Polling fallback 30s.
+  - (Camadas 2 e 4 vivem no backend — Bloco 5.2.)
+
+### Entregue
+
+**Types (espelho TS dos schemas Pydantic):**
+- `frontend/src/lib/types/report.ts`: `ReportScope`, `ReportFilters`,
+  discriminated union `ReportResponse` (4 sub-shapes), helpers
+  `formatPct/formatHoras/formatNum/formatDataBrt`. Reusa `Localizacao`,
+  `Rota`, `StatusProva` de `prova.ts`.
+
+**Hooks (3 novos):**
+- `useReportFilters.ts`: filtros URL-persistidos via `useSearchParams` +
+  `router.replace`. Expoe `filters`, `setFilter(key, value)`, `resetFilters`,
+  `toQueryString()`. Tipagem estrita — narrowing exaustivo por scope.
+- `useReport.ts` (~225 LOC): cache local em `useRef<Map<key, {etag, data}>>`,
+  fetch com `If-None-Match` automatico, race protection via `latestReqRef`,
+  AbortController em refetch, estados explicitos (loading/refreshing/error/data),
+  `refresh()` para retry, `invalidate()` para Realtime.
+- `useReportExport.ts`: download blob CSV com `URL.createObjectURL`, parse
+  de `Content-Disposition` (RFC 5987), revogacao do object URL no finally.
+
+**Componentes de filtro (4 novos):**
+- `ScopeSelector.tsx`: tabs com 4 perspectivas, navegacao por setas
+  esquerda/direita (WAI-ARIA tablist).
+- `DateRangeFilter.tsx`: 2 inputs date BRT + 4 presets (Hoje, 7d, 30d, 90d).
+  Conversao BRT->UTC na borda.
+- `SearchInput.tsx`: debounce 300ms, max 200 chars, strip de espacos.
+- `ExportButton.tsx`: dropdown com 4 datasets, focus trap (reusa
+  `useFocusTrap` da Wave 3), Escape/click-fora fecha.
+
+**Pagina nova `/relatorios`:**
+- `app/(dashboard)/relatorios/page.tsx`: orquestrador com Suspense boundary
+  (necessario para `useSearchParams` em Next 14). Estados loading/error/empty
+  explicitos. Renderiza placeholder de KPIs por scope com `switch` exaustivo
+  na discriminated union — Bloco 5.4 substitui por componentes dedicados
+  com graficos.
+- `app/(dashboard)/relatorios/relatorios.module.css`: tokens herdados de
+  globals.css. Responsivo: < 768px filtros empilhados; < 480px KPI grid 1col.
+
+**Realtime + polling fallback (replicando padrao do Dashboard Wave 4):**
+- Subscribe `postgres_changes` em `provas_digitais` -> debouncedInvalidate (2s)
+- Polling 30s default; cancelado quando Realtime conecta; reativado em
+  CHANNEL_ERROR / TIMED_OUT.
+
+**Sidebar:**
+- `app/(dashboard)/layout.tsx`: 1 linha — `href: "/relatorios"` adicionado
+  ao item `relatorios` ja existente do MAIN_NAV (item antes era placeholder
+  sem href). Autorizado pelo escopo do Componente 16.
+
+### Validacoes
+
+- `tsc --noEmit`: limpo (TypeScript estrito, zero `any` sem comentario).
+- `next lint`: 0 warnings, 0 errors.
+- `next build`: OK, 12/12 paginas geradas. `/relatorios` 6.71 kB / 156 kB
+  First Load JS (compativel com tamanho das outras paginas).
+- `preview_start frontend`: middleware redireciona nao-autenticados para
+  `/login` (esperado). Sem erros no console do browser, sem erros no
+  servidor.
+- Smoke E2E manual com login de admin fica para Mario validar
+  (limitacao: este bloco nao tem credenciais para automatizar login).
+
+### Estado da arquitetura "minimizar queries"
+
+| Camada | Implementada? | Onde |
+|---|---|---|
+| HTTP/ETag/304 (cliente envia If-None-Match) | ✅ Bloco 5.3 | `useReport.ts` |
+| Cache local em `useRef<Map>` | ✅ Bloco 5.3 | `useReport.ts` |
+| Cache backend TTL 60s | ✅ Bloco 5.2 | `report_cache.py` |
+| ETag SHA-256 deterministico | ✅ Bloco 5.1 | `report_etag.py` |
+| Realtime invalida cache do front | ✅ Bloco 5.3 | `relatorios/page.tsx` |
+| SQLAlchemy compiled cache | ✅ default SA 2.0 | gratuito |
+| Polling fallback 30s | ✅ Bloco 5.3 | `relatorios/page.tsx` |
+
+### Arquivos criados
+
+- `frontend/src/lib/types/report.ts`
+- `frontend/src/hooks/useReportFilters.ts`
+- `frontend/src/hooks/useReport.ts`
+- `frontend/src/hooks/useReportExport.ts`
+- `frontend/src/app/(dashboard)/relatorios/page.tsx`
+- `frontend/src/app/(dashboard)/relatorios/relatorios.module.css`
+- `frontend/src/app/(dashboard)/relatorios/ScopeSelector.tsx`
+- `frontend/src/app/(dashboard)/relatorios/DateRangeFilter.tsx`
+- `frontend/src/app/(dashboard)/relatorios/SearchInput.tsx`
+- `frontend/src/app/(dashboard)/relatorios/ExportButton.tsx`
+
+### Arquivos modificados
+
+- `frontend/src/app/(dashboard)/layout.tsx` (1 linha — adiciona `href: "/relatorios"`)
+
+### Proximo passo
+
+**Bloco 5.4** — Frontend perspectivas dedicadas:
+- 4 componentes (`ReportGeral`, `Report3Studio`, `ReportVendedores`,
+  `ReportClicheria`) substituem o placeholder de KPIs.
+- Graficos SVG inline + Framer Motion (sem reinstalar Recharts).
+- Componentes compartilhados: `KpiCard`, `PeriodoBadge`, `EmptyState`.
+
+---
+
 ## [2026-04-27 — Wave 5 Bloco 5.2] — Backend API: handler unico /reports + CSV streaming + audit
 
 ### Contexto
