@@ -403,6 +403,551 @@
   margin: 0.5rem 0 0;
 }
 
+/* ─── KPI: variantes warning/success ────────────────────────────────── */
+
+.kpiHint {
+  font-size: 0.78rem;
+  color: rgba(0, 0, 0, 0.45);
+  margin-top: -0.25rem;
+}
+
+.kpiValueWarn {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #b91c1c;
+  letter-spacing: -0.01em;
+}
+
+.kpiValueSuccess {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #15803d;
+  letter-spacing: -0.01em;
+}
+
+/* ─── PeriodoBadge ───────────────────────────────────────────────────── */
+
+.periodoBadge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.7);
+  font-weight: 500;
+}
+
+/* ─── EmptyState (dentro de cards) ───────────────────────────────────── */
+
+.emptyBlock {
+  padding: 2rem 1rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.emptyTitle {
+  font-size: 0.95rem;
+  color: rgba(0, 0, 0, 0.65);
+  margin: 0;
+  font-weight: 500;
+}
+
+.emptyHint {
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.45);
+  margin: 0;
+  font-style: italic;
+}
+
+/* ─── Charts (BarChart + TimeSeriesChart) ────────────────────────────── */
+
+.chartsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.chartCard {
+  background: #fafafa;
+  border: 1px solid rgba(202, 202, 202, 0.4);
+  border-radius: 16px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 260px;
+}
+
+.chartTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: #000;
+}
+
+.chartContainer {
+  position: relative;
+  width: 100%;
+}
+
+.chartEmpty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 0.9rem;
+}
+
+.barChartSvg {
+  width: 100%;
+  display: block;
+}
+
+.barChartLabels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.barChartRow {
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.barChartLabel {
+  flex-shrink: 0;
+  color: #000;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.barChartValue {
+  margin-left: auto;
+  padding-right: 0.5rem;
+  color: rgba(0, 0, 0, 0.7);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeSeriesSvg {
+  width: 100%;
+  display: block;
+}
+
+.chartAxisLabel {
+  font-size: 9px;
+  fill: rgba(0, 0, 0, 0.55);
+}
+
+.chartDetails {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.chartDetails > summary {
+  cursor: pointer;
+  padding: 0.25rem 0;
+  user-select: none;
+}
+
+.chartTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.chartTable th,
+.chartTable td {
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.chartTable th {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+/* ─── Tabela de dados (ranking de vendedores) ────────────────────────── */
+
+.tableCard {
+  background: #fafafa;
+  border: 1px solid rgba(202, 202, 202, 0.4);
+  border-radius: 16px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tableWrapper {
+  overflow-x: auto;
+}
+
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.dataTable th,
+.dataTable td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  text-align: left;
+}
+
+.dataTable th {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.02);
+  white-space: nowrap;
+}
+
+.dataTable tbody tr:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.tableNumeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tableWarn {
+  color: #b91c1c;
+  font-weight: 600;
+}
+
+.localizacaoBadgeMatriz,
+.localizacaoBadgeFilial {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.localizacaoBadgeMatriz {
+  background: rgba(255, 203, 92, 0.18);
+  color: #6b5400;
+}
+
+.localizacaoBadgeFilial {
+  background: rgba(92, 184, 255, 0.18);
+  color: #00497a;
+}
+
+/* ─── Lista de atrasadas em poder ─────────────────────────────────────── */
+
+.atrasadasList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.atrasadasItem {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(255, 89, 89, 0.06);
+  border: 1px solid rgba(255, 89, 89, 0.18);
+  border-radius: 10px;
+}
+
+.atrasadasNome {
+  font-weight: 600;
+  flex: 1;
+}
+
+.atrasadasMeta {
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.atrasadasContador {
+  font-weight: 700;
+  color: #b91c1c;
+  font-variant-numeric: tabular-nums;
+  background: #fff;
+  padding: 0.15rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 38, 38, 0.18);
+}
+
+/* ─── srOnly (acessibilidade) ────────────────────────────────────────── */
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ─── Layout match imagem do Mario (Wave 5 ajustes) ───────────────────── */
+
+/* Linha 1 do Geral: 4 KPIs lado a lado */
+.kpiRowGeral {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+/* Linha 2 do Geral: 3 charts lado a lado */
+.chartsRowGeral {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+/* ─── DonutChart ──────────────────────────────────────────────────────── */
+
+.donutContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.donutSvg {
+  width: 200px;
+  height: 200px;
+  flex-shrink: 0;
+}
+
+.donutCenterValue {
+  font-size: 28px;
+  font-weight: 700;
+  fill: #000;
+}
+
+.donutCenterHint {
+  font-size: 11px;
+  fill: rgba(0, 0, 0, 0.55);
+  font-weight: 500;
+}
+
+.donutLegend {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 140px;
+}
+
+.donutLegend li {
+  margin: 0;
+}
+
+.donutLegendItem,
+.donutLegendItemActive {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.3rem 0.5rem;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.75);
+  font-family: inherit;
+  transition: background 0.15s ease;
+}
+
+.donutLegendItem:hover,
+.donutLegendItemActive {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.donutLegendItem:disabled {
+  cursor: default;
+}
+
+.donutLegendDot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.donutLegendLabel {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Tooltip flutuante (compartilhado por BarChart e DonutChart) ────── */
+
+.chartTooltip {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.88);
+  color: #fff;
+  padding: 0.45rem 0.7rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  pointer-events: none;
+  z-index: 30;
+  min-width: 100px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  white-space: nowrap;
+}
+
+.chartTooltipLabel {
+  font-weight: 600;
+  margin-bottom: 0.15rem;
+}
+
+.chartTooltipValue {
+  color: rgba(255, 255, 255, 0.85);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Lista de Provas Atrasadas (linhas detalhadas, no Geral) ────────── */
+
+.atrasadasCount {
+  color: rgba(0, 0, 0, 0.45);
+  font-weight: 400;
+  font-size: 0.95rem;
+}
+
+.atrasadasProvasList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.atrasadasProvaItem {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  background: rgba(255, 89, 89, 0.05);
+  border: 1px solid rgba(255, 89, 89, 0.15);
+  border-radius: 10px;
+}
+
+.atrasadasProvaInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.atrasadasProvaNome {
+  font-weight: 600;
+  color: #000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.atrasadasProvaMeta {
+  font-size: 0.8rem;
+  color: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.atrasadasProvaStatus {
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.7);
+  font-weight: 500;
+  padding: 0.2rem 0.6rem;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.atrasadasProvaTempo {
+  font-weight: 700;
+  color: #b91c1c;
+  font-variant-numeric: tabular-nums;
+  background: #fff;
+  padding: 0.25rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  font-size: 0.9rem;
+  min-width: 70px;
+  text-align: center;
+}
+
+.atrasadasFooter {
+  text-align: center;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.55);
+  padding: 0.5rem;
+  font-style: italic;
+}
+
+/* ─── Responsivo: < 1100px reduz para 2 col, < 768px 1 col ───────────── */
+
+@media (max-width: 1100px) {
+  .kpiRowGeral {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .chartsRowGeral {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .kpiRowGeral {
+    grid-template-columns: 1fr;
+  }
+
+  .donutContainer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .donutSvg {
+    align-self: center;
+  }
+
+  .atrasadasProvaItem {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+  }
+
+  .atrasadasProvaInfo {
+    grid-column: 1 / 3;
+  }
+}
+
 /* ─── Mobile (RNF-006: telas a partir de 5 polegadas) ────────────────── */
 
 @media (max-width: 767px) {

@@ -185,6 +185,12 @@ class VendedorMetrica(BaseModel):
     volume: int
     """Provas processadas pelo vendedor no periodo."""
 
+    aprovacoes: int
+    """Numero absoluto de aprovacoes do vendedor no periodo (count sobre ciclos)."""
+
+    reprovacoes: int
+    """Numero absoluto de reprovacoes do vendedor no periodo (count sobre ciclos)."""
+
     taxa_aprovacao: float
     """Aprovacoes / (aprovacoes + reprovacoes) sobre ciclos. 0.0 se denominador zero."""
 
@@ -209,6 +215,28 @@ class VendedorAtrasoAtual(BaseModel):
     vendedor_nome: str
     localizacao: LocalizacaoEnum
     qtd_atrasadas: int
+
+
+class ProvaAtrasadaItem(BaseModel):
+    """Item da lista de provas atrasadas (visao Geral, top 20).
+
+    Detalha individualmente cada prova nao-terminal cuja ultima
+    movimentacao excede o tempo de atraso (ADR-099 — horas corridas).
+    Snapshot do momento da query, nao filtrado por periodo.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    nome: str
+    nro_requerimento: str
+    cliente: str
+    vendedor_nome: str
+    status: StatusProvaEnum
+    horas_atrasada: float
+    """Horas corridas alem do tempo limite de atraso configurado."""
+    ultima_movimentacao_at: datetime
+    """Timestamp da ultima movimentacao (ou created_at se nao houver mov)."""
 
 
 class IndicadoresClicheria(BaseModel):
@@ -249,6 +277,18 @@ class ReportResponseGeral(BaseModel):
 
     distribuicao_rota: list[DistRota]
     """Provas criadas no periodo agrupadas pela rota."""
+
+    ranking: list[VendedorMetrica]
+    """Top vendedores por volume no periodo. Reusa o mesmo schema do
+    scope=vendedores. Limit hard 200 (mesmo do scope vendedores)."""
+
+    provas_atrasadas: list[ProvaAtrasadaItem]
+    """Top 20 provas atualmente atrasadas (snapshot, ordenado por
+    `ultima_movimentacao_at` ASC — mais antigas primeiro)."""
+
+    provas_atrasadas_total: int
+    """Contagem total de provas atrasadas (sem cap). Permite UI exibir
+    'Provas Atrasadas (N)' mesmo quando a lista esta capada em 20."""
 
     atualizado_em: datetime
     """Timestamp UTC do calculo dos indicadores."""

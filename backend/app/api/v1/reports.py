@@ -75,6 +75,7 @@ from app.domain.schemas.report import (
     IndicadoresGeral,
     PeriodoMeta,
     PontoSerie,
+    ProvaAtrasadaItem,
     ReportResponse3Studio,
     ReportResponseClicheria,
     ReportResponseGeral,
@@ -241,6 +242,227 @@ def _aplicar_filtros_provas(stmt, filters: ReportFilters):
     return stmt
 
 
+async def _query_ranking_vendedores(
+    filters: ReportFilters, db: AsyncSession, cutoff: datetime
+) -> tuple[list[VendedorMetrica], int, int]:
+    """Calcula ranking de vendedores + totals por localizacao.
+
+    Compartilhado entre `_aggregate_geral` (apenas ranking) e
+    `_aggregate_vendedores` (ranking + totais para DistLocalizacao).
+
+    3 subqueries internas:
+      a) `volume_subq`: provas criadas no periodo, group by vendedor.
+      b) `decisoes_subq`: pares (RETIRADA, DECISAO) por ciclo, group by vendedor —
+         retorna aprovacoes, reprovacoes, tempo medio.
+      c) `atrasadas_subq`: snapshot de provas em poder do vendedor com
+         ultima_mov < cutoff (RN-008/ADR-099).
+
+    Final: JOIN das 3 subqueries com `usuarios` filtrando setor=VENDEDOR e
+    ativo=true. Ordenado por volume DESC, nome ASC. Limit 200.
+
+    Returns:
+        (ranking, matriz_total, filial_total) onde os totais sao a soma
+        do `volume` por localizacao.
+    """
+    retirada_subq = (
+        select(
+            Movimentacao.prova_id,
+            Movimentacao.ciclo,
+            func.min(Movimentacao.created_at).label("retirada_at"),
+        )
+        .where(Movimentacao.status_novo == StatusProvaEnum.RETIRADA_PELO_VENDEDOR)
+        .group_by(Movimentacao.prova_id, Movimentacao.ciclo)
+        .subquery()
+    )
+    delta_dec = func.extract(
+        "epoch", Movimentacao.created_at - retirada_subq.c.retirada_at
+    )
+
+    decisoes_subq = (
+        select(
+            ProvaDigital.vendedor_id.label("vid"),
+            func.count(Movimentacao.id).label("decisoes"),
+            func.count(Movimentacao.id)
+            .filter(
+                Movimentacao.status_novo == StatusProvaEnum.APROVADA_PELO_VENDEDOR
+            )
+            .label("aprovacoes"),
+            func.count(Movimentacao.id)
+            .filter(
+                Movimentacao.status_novo == StatusProvaEnum.REPROVADA_PELO_VENDEDOR
+            )
+            .label("reprovacoes"),
+            func.avg(delta_dec).label("media_dec_seg"),
+        )
+        .select_from(Movimentacao)
+        .join(ProvaDigital, ProvaDigital.id == Movimentacao.prova_id)
+        .join(
+            retirada_subq,
+            and_(
+                retirada_subq.c.prova_id == Movimentacao.prova_id,
+                retirada_subq.c.ciclo == Movimentacao.ciclo,
+            ),
+        )
+        .where(
+            Movimentacao.status_novo.in_(
+                (
+                    StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+                    StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
+                )
+            ),
+            Movimentacao.created_at >= filters.from_,
+            Movimentacao.created_at < filters.to,
+        )
+        .group_by(ProvaDigital.vendedor_id)
+        .subquery()
+    )
+
+    volume_subq = (
+        select(
+            ProvaDigital.vendedor_id.label("vid"),
+            func.count().label("vol"),
+        )
+        .where(_periodo_filter(filters))
+        .group_by(ProvaDigital.vendedor_id)
+        .subquery()
+    )
+
+    ultima_mov = _ultima_mov_subq()
+    atrasadas_subq = (
+        select(
+            ProvaDigital.vendedor_id.label("vid"),
+            func.count().label("qtd_atrasadas"),
+        )
+        .where(
+            ProvaDigital.status.in_(_VENDEDOR_EM_PODER),
+            func.coalesce(ultima_mov, ProvaDigital.created_at) < cutoff,
+        )
+        .group_by(ProvaDigital.vendedor_id)
+        .subquery()
+    )
+
+    stmt_ranking = (
+        select(
+            Usuario.id.label("vendedor_id"),
+            Usuario.nome,
+            Usuario.localizacao,
+            func.coalesce(volume_subq.c.vol, 0).label("volume"),
+            func.coalesce(decisoes_subq.c.aprovacoes, 0).label("aprovacoes"),
+            func.coalesce(decisoes_subq.c.reprovacoes, 0).label("reprovacoes"),
+            decisoes_subq.c.media_dec_seg,
+            func.coalesce(atrasadas_subq.c.qtd_atrasadas, 0).label("qtd_atrasadas"),
+        )
+        .select_from(Usuario)
+        .outerjoin(volume_subq, volume_subq.c.vid == Usuario.id)
+        .outerjoin(decisoes_subq, decisoes_subq.c.vid == Usuario.id)
+        .outerjoin(atrasadas_subq, atrasadas_subq.c.vid == Usuario.id)
+        .where(Usuario.setor == SetorEnum.VENDEDOR, Usuario.ativo.is_(True))
+        .order_by(func.coalesce(volume_subq.c.vol, 0).desc(), Usuario.nome.asc())
+        .limit(200)
+    )
+    if filters.vendedor_id is not None:
+        stmt_ranking = stmt_ranking.where(Usuario.id == filters.vendedor_id)
+    rows = (await db.execute(stmt_ranking)).all()
+
+    ranking: list[VendedorMetrica] = []
+    matriz_total = 0
+    filial_total = 0
+    for r in rows:
+        aprov = int(r.aprovacoes)
+        reprov = int(r.reprovacoes)
+        decisoes = aprov + reprov
+        ranking.append(
+            VendedorMetrica(
+                vendedor_id=r.vendedor_id,
+                vendedor_nome=r.nome,
+                localizacao=r.localizacao,
+                volume=int(r.volume),
+                aprovacoes=aprov,
+                reprovacoes=reprov,
+                taxa_aprovacao=round(taxa(aprov, decisoes), 4),
+                taxa_reprovacao=round(taxa(reprov, decisoes), 4),
+                tempo_medio_retirada_a_decisao_horas=arredondar_horas(
+                    (float(r.media_dec_seg) / 3600.0)
+                    if r.media_dec_seg is not None
+                    else None
+                ),
+                provas_atrasadas_em_poder=int(r.qtd_atrasadas),
+            )
+        )
+        if r.localizacao == LocalizacaoEnum.MATRIZ:
+            matriz_total += int(r.volume)
+        elif r.localizacao == LocalizacaoEnum.FILIAL:
+            filial_total += int(r.volume)
+
+    return ranking, matriz_total, filial_total
+
+
+async def _query_provas_atrasadas(
+    db: AsyncSession, *, cutoff: datetime, now_utc: datetime, limit: int
+) -> tuple[list[ProvaAtrasadaItem], int]:
+    """Snapshot das provas atualmente atrasadas (RN-008/ADR-099, horas corridas).
+
+    Retorna (lista_top_N, total_sem_cap). Lista ordenada por
+    `ultima_movimentacao_at` ASC (mais antigas primeiro). `total_sem_cap`
+    permite UI exibir 'Provas Atrasadas (N)' mesmo com lista capada.
+
+    Reusa a SQL do `_stream_overdue` (linha por prova) — mesmas garantias
+    de uso de indices (idx_movimentacoes_prova_data, idx_provas_status).
+    """
+    ultima_mov = _ultima_mov_subq()
+    coalesced = func.coalesce(ultima_mov, ProvaDigital.created_at)
+    horas_atrasada_expr = cast(
+        func.extract("epoch", now_utc - coalesced) / 3600.0, Float
+    )
+
+    base_filter = and_(
+        ProvaDigital.status.not_in(_TERMINAL_STATUSES),
+        coalesced < cutoff,
+    )
+
+    # Q1: contagem total (sem limit)
+    stmt_total = select(func.count()).select_from(ProvaDigital).where(base_filter)
+    total = int((await db.execute(stmt_total)).scalar_one() or 0)
+
+    if total == 0:
+        return [], 0
+
+    # Q2: top N detalhada
+    stmt_lista = (
+        select(
+            ProvaDigital.id,
+            ProvaDigital.nome,
+            ProvaDigital.nro_requerimento,
+            ProvaDigital.cliente,
+            Usuario.nome.label("vendedor_nome"),
+            ProvaDigital.status,
+            horas_atrasada_expr.label("horas_atrasada"),
+            coalesced.label("ultima_at"),
+        )
+        .select_from(ProvaDigital)
+        .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
+        .where(base_filter)
+        .order_by(coalesced.asc())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt_lista)).all()
+
+    items = [
+        ProvaAtrasadaItem(
+            id=r.id,
+            nome=r.nome,
+            nro_requerimento=r.nro_requerimento,
+            cliente=r.cliente,
+            vendedor_nome=r.vendedor_nome,
+            status=r.status,
+            horas_atrasada=round(float(r.horas_atrasada), 2),
+            ultima_movimentacao_at=r.ultima_at,
+        )
+        for r in rows
+    ]
+    return items, total
+
+
 # ─── Agregadores por scope ────────────────────────────────────────────────
 
 
@@ -382,16 +604,15 @@ async def _aggregate_geral(
     taxa_reprovacao = taxa(reprovacoes, total_decididos)
 
     # Q5: snapshot atrasadas (nao filtrado por periodo — momento atual)
-    ultima_mov = _ultima_mov_subq()
-    stmt_atr = (
-        select(func.count())
-        .select_from(ProvaDigital)
-        .where(
-            ProvaDigital.status.not_in(_TERMINAL_STATUSES),
-            func.coalesce(ultima_mov, ProvaDigital.created_at) < cutoff,
-        )
+    # + lista detalhada top 20 (ProvaAtrasadaItem)
+    provas_atrasadas, qtd_atrasadas = await _query_provas_atrasadas(
+        db, cutoff=cutoff, now_utc=now_utc, limit=20
     )
-    qtd_atrasadas = int((await db.execute(stmt_atr)).scalar_one() or 0)
+
+    # Q6: ranking de vendedores no periodo (helper compartilhado com scope=vendedores)
+    ranking, _matriz_total, _filial_total = await _query_ranking_vendedores(
+        filters, db, cutoff=cutoff
+    )
 
     # ── Montar response ──────────────────────────────────────────────────
     indicadores = IndicadoresGeral(
@@ -445,6 +666,9 @@ async def _aggregate_geral(
         serie_temporal=serie_temporal,
         distribuicao_status=distribuicao_status,
         distribuicao_rota=distribuicao_rota,
+        ranking=ranking,
+        provas_atrasadas=provas_atrasadas,
+        provas_atrasadas_total=qtd_atrasadas,
         atualizado_em=now_utc,
     )
 
@@ -570,76 +794,14 @@ async def _aggregate_vendedores(
     cutoff = limite_atraso(now_utc, tempo_atraso_horas)
     total_dias = calcular_total_dias(filters.from_, filters.to)
 
-    # Q1: ranking por vendedor (volume + decisoes + tempos por ciclo)
-    # Pares (RETIRADA, DECISAO) com vendedor_id agrupado.
-    retirada_subq = (
-        select(
-            Movimentacao.prova_id,
-            Movimentacao.ciclo,
-            func.min(Movimentacao.created_at).label("retirada_at"),
-        )
-        .where(Movimentacao.status_novo == StatusProvaEnum.RETIRADA_PELO_VENDEDOR)
-        .group_by(Movimentacao.prova_id, Movimentacao.ciclo)
-        .subquery()
-    )
-    delta_dec = func.extract(
-        "epoch", Movimentacao.created_at - retirada_subq.c.retirada_at
+    # Q1: ranking + totais por localizacao (helper compartilhado com scope=geral)
+    ranking, matriz_total, filial_total = await _query_ranking_vendedores(
+        filters, db, cutoff=cutoff
     )
 
-    # Subquery agregando por vendedor — provas + decisoes + tempo medio
-    decisoes_subq = (
-        select(
-            ProvaDigital.vendedor_id.label("vid"),
-            func.count(Movimentacao.id).label("decisoes"),
-            func.count(Movimentacao.id)
-            .filter(
-                Movimentacao.status_novo == StatusProvaEnum.APROVADA_PELO_VENDEDOR
-            )
-            .label("aprovacoes"),
-            func.count(Movimentacao.id)
-            .filter(
-                Movimentacao.status_novo == StatusProvaEnum.REPROVADA_PELO_VENDEDOR
-            )
-            .label("reprovacoes"),
-            func.avg(delta_dec).label("media_dec_seg"),
-        )
-        .select_from(Movimentacao)
-        .join(ProvaDigital, ProvaDigital.id == Movimentacao.prova_id)
-        .join(
-            retirada_subq,
-            and_(
-                retirada_subq.c.prova_id == Movimentacao.prova_id,
-                retirada_subq.c.ciclo == Movimentacao.ciclo,
-            ),
-        )
-        .where(
-            Movimentacao.status_novo.in_(
-                (
-                    StatusProvaEnum.APROVADA_PELO_VENDEDOR,
-                    StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
-                )
-            ),
-            Movimentacao.created_at >= filters.from_,
-            Movimentacao.created_at < filters.to,
-        )
-        .group_by(ProvaDigital.vendedor_id)
-        .subquery()
-    )
-
-    # Subquery: volume de provas por vendedor (criadas no periodo)
-    volume_subq = (
-        select(
-            ProvaDigital.vendedor_id.label("vid"),
-            func.count().label("vol"),
-        )
-        .where(_periodo_filter(filters))
-        .group_by(ProvaDigital.vendedor_id)
-        .subquery()
-    )
-
-    # Subquery: atrasadas em poder (snapshot, status RETIRADA/APROVADA atual)
+    # Q2: lista atrasadas em poder (top 10) — recria subquery (independente do helper)
     ultima_mov = _ultima_mov_subq()
-    atrasadas_subq = (
+    atrasadas_em_poder_subq = (
         select(
             ProvaDigital.vendedor_id.label("vid"),
             func.count().label("qtd_atrasadas"),
@@ -651,68 +813,16 @@ async def _aggregate_vendedores(
         .group_by(ProvaDigital.vendedor_id)
         .subquery()
     )
-
-    # Q1 final: JOIN das subqueries com usuarios
-    stmt_ranking = (
-        select(
-            Usuario.id.label("vendedor_id"),
-            Usuario.nome,
-            Usuario.localizacao,
-            func.coalesce(volume_subq.c.vol, 0).label("volume"),
-            func.coalesce(decisoes_subq.c.aprovacoes, 0).label("aprovacoes"),
-            func.coalesce(decisoes_subq.c.reprovacoes, 0).label("reprovacoes"),
-            decisoes_subq.c.media_dec_seg,
-            func.coalesce(atrasadas_subq.c.qtd_atrasadas, 0).label("qtd_atrasadas"),
-        )
-        .select_from(Usuario)
-        .outerjoin(volume_subq, volume_subq.c.vid == Usuario.id)
-        .outerjoin(decisoes_subq, decisoes_subq.c.vid == Usuario.id)
-        .outerjoin(atrasadas_subq, atrasadas_subq.c.vid == Usuario.id)
-        .where(Usuario.setor == SetorEnum.VENDEDOR, Usuario.ativo.is_(True))
-        .order_by(func.coalesce(volume_subq.c.vol, 0).desc(), Usuario.nome.asc())
-        .limit(200)
-    )
-    if filters.vendedor_id is not None:
-        stmt_ranking = stmt_ranking.where(Usuario.id == filters.vendedor_id)
-    ranking_rows = (await db.execute(stmt_ranking)).all()
-
-    ranking: list[VendedorMetrica] = []
-    matriz_total = 0
-    filial_total = 0
-    for r in ranking_rows:
-        decisoes = int(r.aprovacoes) + int(r.reprovacoes)
-        ranking.append(
-            VendedorMetrica(
-                vendedor_id=r.vendedor_id,
-                vendedor_nome=r.nome,
-                localizacao=r.localizacao,
-                volume=int(r.volume),
-                taxa_aprovacao=round(taxa(int(r.aprovacoes), decisoes), 4),
-                taxa_reprovacao=round(taxa(int(r.reprovacoes), decisoes), 4),
-                tempo_medio_retirada_a_decisao_horas=arredondar_horas(
-                    (float(r.media_dec_seg) / 3600.0)
-                    if r.media_dec_seg is not None
-                    else None
-                ),
-                provas_atrasadas_em_poder=int(r.qtd_atrasadas),
-            )
-        )
-        if r.localizacao == LocalizacaoEnum.MATRIZ:
-            matriz_total += int(r.volume)
-        elif r.localizacao == LocalizacaoEnum.FILIAL:
-            filial_total += int(r.volume)
-
-    # Q2: lista atrasadas em poder (top 10)
     stmt_atr_top = (
         select(
             Usuario.id,
             Usuario.nome,
             Usuario.localizacao,
-            atrasadas_subq.c.qtd_atrasadas,
+            atrasadas_em_poder_subq.c.qtd_atrasadas,
         )
-        .select_from(atrasadas_subq)
-        .join(Usuario, Usuario.id == atrasadas_subq.c.vid)
-        .order_by(atrasadas_subq.c.qtd_atrasadas.desc(), Usuario.nome.asc())
+        .select_from(atrasadas_em_poder_subq)
+        .join(Usuario, Usuario.id == atrasadas_em_poder_subq.c.vid)
+        .order_by(atrasadas_em_poder_subq.c.qtd_atrasadas.desc(), Usuario.nome.asc())
         .limit(10)
     )
     atr_rows = (await db.execute(stmt_atr_top)).all()

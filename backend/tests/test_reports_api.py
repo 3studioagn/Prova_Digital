@@ -81,6 +81,9 @@ def _payload_geral(total: int = 5, atrasadas: int = 1) -> ReportResponseGeral:
         serie_temporal=[],
         distribuicao_status=[],
         distribuicao_rota=[],
+        ranking=[],
+        provas_atrasadas=[],
+        provas_atrasadas_total=atrasadas,
         atualizado_em=datetime.now(UTC),
     )
 

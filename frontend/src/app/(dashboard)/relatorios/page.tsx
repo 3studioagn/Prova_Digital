@@ -28,12 +28,13 @@ import { DateRangeFilter } from "./DateRangeFilter";
 import { ExportButton } from "./ExportButton";
 import { ScopeSelector } from "./ScopeSelector";
 import { SearchInput } from "./SearchInput";
-import {
-  formatHoras,
-  formatNum,
-  formatPct,
-} from "@/lib/types/report";
+import { Report3Studio } from "./perspectivas/Report3Studio";
+import { ReportClicheria } from "./perspectivas/ReportClicheria";
+import { ReportGeral } from "./perspectivas/ReportGeral";
+import { ReportVendedores } from "./perspectivas/ReportVendedores";
+import { PeriodoBadge } from "./shared/PeriodoBadge";
 import type { ReportResponse } from "@/lib/types/report";
+import type { StatusProva } from "@/lib/types/prova";
 
 import styles from "./relatorios.module.css";
 
@@ -148,13 +149,16 @@ function RelatoriosContent() {
         <div>
           <h1 className={styles.title}>Relatorios</h1>
           {data && (
-            <p className={styles.subtitle}>
-              Periodo: {data.periodo.total_dias} dia
-              {data.periodo.total_dias !== 1 ? "s" : ""}
+            <div className={styles.subtitle}>
+              <PeriodoBadge
+                fromIso={data.periodo.from}
+                toIso={data.periodo.to}
+                totalDias={data.periodo.total_dias}
+              />
               {refreshing && (
                 <span className={styles.refreshingBadge}>Atualizando...</span>
               )}
-            </p>
+            </div>
           )}
         </div>
 
@@ -202,7 +206,10 @@ function RelatoriosContent() {
       )}
 
       {data ? (
-        <PerspectivaPlaceholder data={data} />
+        <PerspectivaRenderer
+          data={data}
+          onStatusClick={(status) => setFilter("status", status)}
+        />
       ) : (
         <div className={styles.emptyState}>Nenhum dado disponivel.</div>
       )}
@@ -210,186 +217,27 @@ function RelatoriosContent() {
   );
 }
 
-// ─── Renderer placeholder (Bloco 5.4 substitui por perspectivas dedicadas) ─
-
-function PerspectivaPlaceholder({ data }: { data: ReportResponse }) {
-  // Match exaustivo via discriminated union
+/**
+ * Roteia para a perspectiva certa via discriminated union.
+ * Switch exaustivo — TS reclama se um scope nao for tratado.
+ */
+function PerspectivaRenderer({
+  data,
+  onStatusClick,
+}: {
+  data: ReportResponse;
+  onStatusClick: (status: StatusProva) => void;
+}) {
   switch (data.scope) {
     case "geral":
-      return (
-        <section
-          className={styles.scopePanel}
-          id="report-panel-geral"
-          aria-labelledby="report-panel-geral"
-        >
-          <KpiGrid>
-            <KpiCard label="Total de provas" value={formatNum(data.indicadores.total_provas)} />
-            <KpiCard
-              label="Tempo medio de ciclo"
-              value={formatHoras(data.indicadores.tempo_medio_ciclo_horas)}
-            />
-            <KpiCard
-              label="Tempo mediano de ciclo"
-              value={formatHoras(data.indicadores.tempo_mediano_ciclo_horas)}
-            />
-            <KpiCard
-              label="Tempo medio de aprovacao"
-              value={formatHoras(data.indicadores.tempo_medio_aprovacao_horas)}
-            />
-            <KpiCard
-              label="Taxa de reprovacao"
-              value={formatPct(data.indicadores.taxa_reprovacao)}
-            />
-            <KpiCard
-              label="Atrasadas (agora)"
-              value={formatNum(data.indicadores.qtd_atrasadas)}
-            />
-          </KpiGrid>
-          <p className={styles.placeholderNote}>
-            Graficos detalhados (serie temporal + distribuicoes) chegam no Bloco 5.4.
-          </p>
-        </section>
-      );
-
+      return <ReportGeral data={data} onStatusClick={onStatusClick} />;
     case "3studio":
-      return (
-        <section
-          className={styles.scopePanel}
-          id="report-panel-3studio"
-        >
-          <KpiGrid>
-            <KpiCard label="Provas criadas" value={formatNum(data.indicadores.provas_criadas)} />
-            <KpiCard
-              label="Media diaria"
-              value={data.indicadores.media_diaria_criacao.toFixed(2)}
-            />
-            <KpiCard
-              label="Reinicios de ciclo"
-              value={formatNum(data.indicadores.reinicios_de_ciclo)}
-            />
-            <KpiCard
-              label="Devolvidas (motorista)"
-              value={formatNum(data.indicadores.devolvidas_motorista)}
-            />
-            <KpiCard
-              label="Reprovadas aguardando"
-              value={formatNum(data.indicadores.reprovadas_aguardando_acao)}
-            />
-            <KpiCard
-              label="Cancelamentos"
-              value={formatNum(data.indicadores.cancelamentos)}
-            />
-            <KpiCard
-              label="Tempo medio ate 1ª mov"
-              value={formatHoras(
-                data.indicadores.tempo_medio_criacao_ate_primeira_mov_horas,
-              )}
-            />
-          </KpiGrid>
-          {data.cancelamentos_top.length > 0 && (
-            <div className={styles.simpleList}>
-              <h2 className={styles.simpleListTitle}>Top motivos de cancelamento</h2>
-              <ul className={styles.simpleListUl}>
-                {data.cancelamentos_top.map((c) => (
-                  <li key={c.motivo}>
-                    <strong>{c.quantidade}×</strong> {c.motivo}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
-      );
-
+      return <Report3Studio data={data} />;
     case "vendedores":
-      return (
-        <section
-          className={styles.scopePanel}
-          id="report-panel-vendedores"
-        >
-          <KpiGrid>
-            <KpiCard
-              label="Vendedores Matriz"
-              value={formatNum(data.distribuicao_localizacao.matriz)}
-            />
-            <KpiCard
-              label="Vendedores Filial"
-              value={formatNum(data.distribuicao_localizacao.filial)}
-            />
-            <KpiCard label="Total no ranking" value={formatNum(data.ranking.length)} />
-          </KpiGrid>
-          {data.ranking.length > 0 && (
-            <div className={styles.simpleList}>
-              <h2 className={styles.simpleListTitle}>Ranking por volume</h2>
-              <ul className={styles.simpleListUl}>
-                {data.ranking.slice(0, 10).map((v) => (
-                  <li key={v.vendedor_id}>
-                    <strong>{v.vendedor_nome}</strong>
-                    {" — "}
-                    {formatNum(v.volume)} provas, {formatPct(v.taxa_aprovacao)} aprov.
-                    {v.provas_atrasadas_em_poder > 0 && (
-                      <span className={styles.warnInline}>
-                        {" "}
-                        · {v.provas_atrasadas_em_poder} atrasadas
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <p className={styles.placeholderNote}>
-            Tabela completa + lista de atrasadas em poder no Bloco 5.4.
-          </p>
-        </section>
-      );
-
+      return <ReportVendedores data={data} />;
     case "clicheria":
-      return (
-        <section
-          className={styles.scopePanel}
-          id="report-panel-clicheria"
-        >
-          <KpiGrid>
-            <KpiCard
-              label="Recebidas no periodo"
-              value={formatNum(data.indicadores.recebidas_no_periodo)}
-            />
-            <KpiCard
-              label="Tempo medio aguardando"
-              value={formatHoras(
-                data.indicadores.tempo_medio_aguardando_recebimento_horas,
-              )}
-            />
-            <KpiCard
-              label="Em transito agora"
-              value={formatNum(data.indicadores.em_transito_atual)}
-            />
-            <KpiCard
-              label="Via PADRAO"
-              value={formatNum(data.indicadores.por_origem_rota.via_padrao)}
-            />
-            <KpiCard
-              label="Via DIRETA"
-              value={formatNum(data.indicadores.por_origem_rota.via_direta)}
-            />
-          </KpiGrid>
-        </section>
-      );
+      return <ReportClicheria data={data} />;
   }
-}
-
-function KpiGrid({ children }: { children: React.ReactNode }) {
-  return <div className={styles.kpiGrid}>{children}</div>;
-}
-
-function KpiCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={styles.kpiCard}>
-      <span className={styles.kpiLabel}>{label}</span>
-      <span className={styles.kpiValue}>{value}</span>
-    </div>
-  );
 }
 
 // ─── Suspense wrapper (necessario para useSearchParams em Next 14) ────

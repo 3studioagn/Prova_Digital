@@ -2,6 +2,203 @@
 
 ---
 
+## [2026-04-27 — Wave 5 Bloco 5.4] — Frontend perspectivas dedicadas + graficos SVG inline interativos + ReportGeral expandido
+
+### Contexto
+
+Bloco 5.4 da Wave 5. Substitui o placeholder de KPIs do Bloco 5.3 por
+componentes dedicados por perspectiva, com graficos SVG inline animados
+via Framer Motion (sem reinstalar Recharts — decisao do ANALYSIS §5.4).
+
+**Ajustes apos review do Mario** (mesmo bloco, commit consolidado):
+expandida a perspectiva Geral com **mais informacoes solidas e
+performaticas**: novos campos no schema (`ranking`, `provas_atrasadas`,
+contagens absolutas em VendedorMetrica), novo `DonutChart` SVG
+**interativo** (hover destaca + click filtra), `BarChart`/`TimeSeriesChart`
+com hover e tooltip, e layout do Geral reescrito conforme imagem de
+referencia (4 KPIs + 3 charts + tabela vendedores + lista provas atrasadas).
+
+Cada perspectiva expoe seu shape de dados com narrowing exaustivo via
+discriminated union — `<PerspectivaRenderer>` no page.tsx faz o switch
+sobre `data.scope` e renderiza o componente certo.
+
+### Entregue
+
+**3 componentes shared (em `relatorios/shared/`):**
+- `KpiCard.tsx`: card de KPI com `label`, `value`, `hint` opcional,
+  `highlight` (warning/success/neutral), animacao de entrada com stagger
+  por `delayIndex`.
+- `EmptyState.tsx`: estado vazio reutilizavel — mensagem + hint opcional,
+  `role="status"`.
+- `PeriodoBadge.tsx`: badge de periodo aplicado em formato BRT
+  (DD/MM – DD/MM · N dias).
+
+**2 componentes de grafico (SVG inline):**
+- `BarChart.tsx` (~150 LOC): bar chart horizontal genérico:
+  - Animacao Framer Motion (width 0 -> final, stagger 40ms).
+  - Acessibilidade: `role="img"` + `aria-label` + `<details>` com tabela
+    de dados para screen readers.
+  - API: `data: {label, value, color?}[]`, `formatValue` opcional, fallback
+    de `emptyMessage`.
+- `TimeSeriesChart.tsx` (~110 LOC): bar chart vertical para series por dia:
+  - Bar por dia com altura proporcional, animacao bottom -> top.
+  - Eixo X com labels BRT (max 6 visiveis para nao poluir).
+  - Tabela de dados acessivel embaixo.
+
+**4 perspectivas dedicadas (em `relatorios/perspectivas/`):**
+- `ReportGeral.tsx`: 6 KPIs + 3 graficos (serie temporal, distribuicao
+  por status, distribuicao por rota). KPIs com highlight automatico
+  (taxa_reprovacao > 20% = warning; qtd_atrasadas > 0 = warning).
+- `Report3Studio.tsx`: 7 KPIs + bar chart de top motivos de cancelamento.
+  Highlights automaticos para reinicios e reprovadas aguardando.
+- `ReportVendedores.tsx`: 4 KPIs + tabela completa de ranking
+  (7 colunas) + lista de atrasadas em poder. Tabela com badges de
+  localizacao (Matriz amarelo / Filial azul) e celula de atrasadas em
+  destaque vermelho quando > 0. Animacao por linha.
+- `ReportClicheria.tsx`: 4 KPIs + bar chart de provas por origem de rota
+  (PADRAO via motorista vs DIRETA do filial). KPI "recebidas" com highlight
+  success quando > 0.
+
+**Ajustes pos-review (mesmo bloco):**
+
+**Backend — schema expandido:**
+- `VendedorMetrica`: +`aprovacoes: int` e +`reprovacoes: int` (contagens
+  absolutas; antes so existiam taxas).
+- Novo `ProvaAtrasadaItem`: linha por prova atrasada (id, nome, nro, cliente,
+  vendedor, status, horas_atrasada, ultima_movimentacao_at). Snapshot por
+  prova — diferente de `VendedorAtrasoAtual` que e por vendedor.
+- `ReportResponseGeral`: +`ranking: VendedorMetrica[]` (reusa schema do
+  scope vendedores) +`provas_atrasadas: ProvaAtrasadaItem[]` (top 20) +
+  `provas_atrasadas_total: int` (contagem real, sem cap).
+
+**Backend — refator + 2 helpers extraidos em reports.py:**
+- `_query_ranking_vendedores(filters, db, cutoff)`: helper compartilhado
+  entre `_aggregate_geral` e `_aggregate_vendedores`. Retorna
+  `(ranking, matriz_total, filial_total)`. Elimina duplicacao SQL pesada
+  (~80 LOC).
+- `_query_provas_atrasadas(db, cutoff, now_utc, limit)`: snapshot ordenado
+  por `ultima_movimentacao_at` ASC. Retorna `(items, total_sem_cap)`.
+- `_aggregate_geral` ganha 2 chamadas a esses helpers (cache de 60s
+  cobre — sem aumento de queries por usuario; +2 queries por cache miss).
+
+**Frontend — DonutChart novo (SVG interativo):**
+- `shared/DonutChart.tsx` (~290 LOC): SVG inline com arcos calculados via
+  trigonometria polar, animacao Framer Motion, paleta default 10 cores.
+- **Hover**: segmento expande 4px + tooltip flutuante com valor + %, outros
+  ficam opacity 0.4.
+- **Click**: callback `onSegmentClick(key)` — caller decide acao.
+- Centro com total + label opcional.
+- Legenda lateral clicavel (mesma callback).
+- Acessibilidade: role=img + aria-label + tabela em `<details>`.
+
+**Frontend — BarChart agora interativo:**
+- Hover destaca barra ativa + tooltip flutuante seguindo o cursor.
+- Click via `onItemClick(key)` opcional.
+- API expandida: `BarChartItem` agora aceita `key?: string` (default = label).
+
+**Frontend — ReportGeral reescrito (layout match imagem do Mario):**
+- Linha 1: 4 KPIs (Total geral, Tempo medio aprovacao, Taxa reprovacao,
+  Distribuicao por rota como texto inline).
+- Linha 2: 3 cards de chart:
+  - DonutChart "Provas Ativas" (status nao-terminais, click filtra
+    `setFilter("status", x)` no proprio relatorio — opcao C aprovada).
+  - BarChart horizontal "Tempo Medio de Aprovacao" por vendedor.
+  - BarChart horizontal "Vendedor com Mais Artes" por volume.
+- Linha 3: Tabela "Metricas por Vendedor" (Nome, Localizacao, Total,
+  Aprovadas, Reprovadas, Taxa Rep. %, Tempo Medio).
+- Linha 4: Lista detalhada "Provas Atrasadas (N)" com nome, requerimento,
+  cliente, vendedor, status pill e horas-atrasada destacadas em vermelho.
+  Footer com "+N adicionais — exporte CSV" se total > cap.
+
+**CSS Module — classes novas:**
+- `.kpiRowGeral` grid 4col, `.chartsRowGeral` grid 3col (responsivo
+  collapsa para 2/1).
+- `.donutContainer`, `.donutSvg`, `.donutCenterValue/Hint`, `.donutLegend*`,
+  `.donutLegendDot`.
+- `.chartTooltip*` — tooltip flutuante compartilhado (Donut + BarChart).
+- `.atrasadasProvasList`, `.atrasadasProvaItem`, `.atrasadasProvaInfo/Nome/
+  Meta/Status/Tempo`, `.atrasadasFooter`, `.atrasadasCount`.
+
+**Testes backend atualizados:**
+- `test_report_schemas.py`: VendedorMetrica com aprovacoes/reprovacoes,
+  ReportResponseGeral com ranking/provas_atrasadas/total, +classe nova
+  `TestProvaAtrasadaItem` com 2 testes.
+- `test_reports_api.py`: `_payload_geral` atualizado com novos campos.
+- 633 testes passing (era 631; +2 novos do schema). Zero regressao.
+
+**Refatoracao do page.tsx:**
+- Substituicao do `PerspectivaPlaceholder` (200+ LOC inline) por
+  `PerspectivaRenderer` (10 LOC) com switch exaustivo.
+- `PeriodoBadge` substituiu o texto solto de periodo no header.
+- Remocoes: imports de `formatHoras`, `formatNum`, `formatPct` (movidos
+  para perspectivas) — page.tsx ficou mais limpo.
+
+**Estilos novos no relatorios.module.css (~+200 LOC):**
+- `.kpiHint`, `.kpiValueWarn`, `.kpiValueSuccess` — variantes de KpiCard.
+- `.periodoBadge` — pill arredondado.
+- `.emptyBlock`, `.emptyTitle`, `.emptyHint` — EmptyState.
+- `.chartsGrid`, `.chartCard`, `.chartTitle`, `.chartContainer`,
+  `.chartEmpty`, `.barChartSvg`, `.barChartLabels`, `.barChartRow`,
+  `.barChartLabel`, `.barChartValue` — BarChart.
+- `.timeSeriesSvg`, `.chartAxisLabel` — TimeSeriesChart.
+- `.chartDetails`, `.chartTable`, `.srOnly` — tabela acessivel sob `<details>`.
+- `.tableCard`, `.tableWrapper`, `.dataTable`, `.tableNumeric`,
+  `.tableWarn` — tabela de ranking.
+- `.localizacaoBadgeMatriz`, `.localizacaoBadgeFilial` — badges coloridas.
+- `.atrasadasList`, `.atrasadasItem`, `.atrasadasNome`, `.atrasadasMeta`,
+  `.atrasadasContador` — lista de atrasadas em poder.
+
+### Validacoes
+
+- `pytest backend/tests/`: **633 passed** (424 + 168 + 39 + 2 schema novos),
+  0 regressao.
+- `ruff check`: limpo em backend/.
+- `tsc --noEmit`: limpo. Switch exaustivo no PerspectivaRenderer garante
+  cobertura de todos os 4 scopes em build-time.
+- `next lint`: 0 warnings, 0 errors.
+- `next build`: OK, 12/12 paginas.
+  - `/relatorios`: 6.71 → **11.4 kB** (+4.7 kB pelos componentes novos
+    incluindo DonutChart + tooltip + tabela vendedores + lista atrasadas).
+  - First Load JS: 156 → **200 kB** (+44 kB Framer Motion compartilhado —
+    aceitavel para o trade-off "sem Recharts").
+- `preview_start frontend`: middleware redireciona, sem erros JS no console
+  nem no servidor.
+
+### Estado da arquitetura "minimizar queries"
+
+Inalterada — Bloco 5.4 e puramente UI/visual. Hooks do Bloco 5.3 (cache
+local + ETag + Realtime invalidation) continuam servindo as 4 perspectivas.
+
+### Arquivos criados
+
+- `frontend/src/app/(dashboard)/relatorios/shared/KpiCard.tsx`
+- `frontend/src/app/(dashboard)/relatorios/shared/EmptyState.tsx`
+- `frontend/src/app/(dashboard)/relatorios/shared/PeriodoBadge.tsx`
+- `frontend/src/app/(dashboard)/relatorios/shared/BarChart.tsx`
+- `frontend/src/app/(dashboard)/relatorios/shared/TimeSeriesChart.tsx`
+- `frontend/src/app/(dashboard)/relatorios/perspectivas/ReportGeral.tsx`
+- `frontend/src/app/(dashboard)/relatorios/perspectivas/Report3Studio.tsx`
+- `frontend/src/app/(dashboard)/relatorios/perspectivas/ReportVendedores.tsx`
+- `frontend/src/app/(dashboard)/relatorios/perspectivas/ReportClicheria.tsx`
+
+### Arquivos modificados
+
+- `frontend/src/app/(dashboard)/relatorios/page.tsx` (substitui placeholder
+  por PerspectivaRenderer; usa PeriodoBadge no header).
+- `frontend/src/app/(dashboard)/relatorios/relatorios.module.css` (+200 LOC
+  de estilos para charts, tabela, badges, atrasadas list).
+
+### Proximo passo
+
+**Bloco 5.5** — Componente 17 (Atalhos Rapidos):
+- Hook `useGlobalShortcuts` para keyboard shortcuts globais (g+s, g+p,
+  g+r, ?).
+- Modal `<KeyboardShortcutsHelp />` com focus trap.
+- 3º card "Acessar Relatorios" no dashboard (autorizado pelo escopo).
+- Documentacao em CLAUDE.md.
+
+---
+
 ## [2026-04-27 — Wave 5 Bloco 5.3] — Frontend rota /relatorios + hooks + filtros URL-persisted
 
 ### Contexto

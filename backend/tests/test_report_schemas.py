@@ -25,6 +25,7 @@ from app.domain.schemas.report import (
     IndicadoresGeral,
     PeriodoMeta,
     PontoSerie,
+    ProvaAtrasadaItem,
     ReportResponse,
     ReportResponse3Studio,
     ReportResponseClicheria,
@@ -211,6 +212,8 @@ class TestVendedorMetrica:
             vendedor_nome="Joao",
             localizacao=LocalizacaoEnum.MATRIZ,
             volume=10,
+            aprovacoes=8,
+            reprovacoes=2,
             taxa_aprovacao=0.8,
             taxa_reprovacao=0.2,
             tempo_medio_retirada_a_decisao_horas=5.5,
@@ -218,6 +221,8 @@ class TestVendedorMetrica:
         )
         assert m.localizacao == LocalizacaoEnum.MATRIZ
         assert m.volume == 10
+        assert m.aprovacoes == 8
+        assert m.reprovacoes == 2
 
     def test_tempo_none_aceito(self):
         m = VendedorMetrica(
@@ -225,6 +230,8 @@ class TestVendedorMetrica:
             vendedor_nome="Joao",
             localizacao=LocalizacaoEnum.FILIAL,
             volume=0,
+            aprovacoes=0,
+            reprovacoes=0,
             taxa_aprovacao=0.0,
             taxa_reprovacao=0.0,
             tempo_medio_retirada_a_decisao_horas=None,
@@ -242,6 +249,36 @@ class TestVendedorAtrasoAtual:
             qtd_atrasadas=3,
         )
         assert v.qtd_atrasadas == 3
+
+
+class TestProvaAtrasadaItem:
+    def test_basico(self):
+        p = ProvaAtrasadaItem(
+            id=uuid.uuid4(),
+            nome="Cartaz Promo",
+            nro_requerimento="REQ-2026-001",
+            cliente="ACME",
+            vendedor_nome="Joao",
+            status=StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
+            horas_atrasada=12.5,
+            ultima_movimentacao_at=datetime(2026, 4, 25, tzinfo=UTC),
+        )
+        assert p.horas_atrasada == 12.5
+        assert p.status == StatusProvaEnum.RETIRADA_PELO_VENDEDOR
+
+    def test_horas_zero_aceito(self):
+        """Horas = 0 e valido (caso borda — exatamente no limite)."""
+        p = ProvaAtrasadaItem(
+            id=uuid.uuid4(),
+            nome="X",
+            nro_requerimento="REQ-1",
+            cliente="C",
+            vendedor_nome="V",
+            status=StatusProvaEnum.CRIADA,
+            horas_atrasada=0.0,
+            ultima_movimentacao_at=datetime(2026, 4, 27, tzinfo=UTC),
+        )
+        assert p.horas_atrasada == 0.0
 
 
 # ─── IndicadoresClicheria ─────────────────────────────────────────────────
@@ -288,6 +325,9 @@ class TestReportResponseGeral:
             serie_temporal=[],
             distribuicao_status=[],
             distribuicao_rota=[],
+            ranking=[],
+            provas_atrasadas=[],
+            provas_atrasadas_total=0,
             atualizado_em=datetime.now(UTC),
         )
         assert r.scope == "geral"
@@ -299,9 +339,14 @@ class TestReportResponseGeral:
             serie_temporal=[],
             distribuicao_status=[],
             distribuicao_rota=[],
+            ranking=[],
+            provas_atrasadas=[],
+            provas_atrasadas_total=0,
             atualizado_em=datetime.now(UTC),
         )
         assert r.serie_temporal == []
+        assert r.ranking == []
+        assert r.provas_atrasadas == []
 
     def test_aceita_listas_populadas(self):
         r = ReportResponseGeral(
@@ -314,6 +359,9 @@ class TestReportResponseGeral:
                 DistStatus(status=StatusProvaEnum.CRIADA, quantidade=2)
             ],
             distribuicao_rota=[DistRota(rota=RotaEnum.PADRAO, quantidade=8)],
+            ranking=[],
+            provas_atrasadas=[],
+            provas_atrasadas_total=0,
             atualizado_em=datetime.now(UTC),
         )
         assert len(r.serie_temporal) == 1
@@ -401,6 +449,9 @@ class TestDiscriminatedUnion:
             "serie_temporal": [],
             "distribuicao_status": [],
             "distribuicao_rota": [],
+            "ranking": [],
+            "provas_atrasadas": [],
+            "provas_atrasadas_total": 0,
             "atualizado_em": "2026-04-27T10:00:00+00:00",
         }
         r = adapter.validate_python(data)

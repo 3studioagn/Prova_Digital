@@ -125,6 +125,10 @@ export interface VendedorMetrica {
   vendedor_nome: string;
   localizacao: Localizacao;
   volume: number;
+  /** Numero absoluto de aprovacoes do vendedor no periodo. */
+  aprovacoes: number;
+  /** Numero absoluto de reprovacoes do vendedor no periodo. */
+  reprovacoes: number;
   taxa_aprovacao: number;
   taxa_reprovacao: number;
   tempo_medio_retirada_a_decisao_horas: number | null;
@@ -136,6 +140,19 @@ export interface VendedorAtrasoAtual {
   vendedor_nome: string;
   localizacao: Localizacao;
   qtd_atrasadas: number;
+}
+
+export interface ProvaAtrasadaItem {
+  id: string;
+  nome: string;
+  nro_requerimento: string;
+  cliente: string;
+  vendedor_nome: string;
+  status: StatusProva;
+  /** Horas corridas alem do tempo limite (ADR-099). */
+  horas_atrasada: number;
+  /** Timestamp ISO-8601 UTC da ultima movimentacao (ou created_at). */
+  ultima_movimentacao_at: string;
 }
 
 export interface IndicadoresClicheria {
@@ -155,6 +172,12 @@ export interface ReportResponseGeral {
   serie_temporal: PontoSerie[];
   distribuicao_status: DistStatusItem[];
   distribuicao_rota: DistRotaItem[];
+  /** Top vendedores por volume no periodo (max 200). */
+  ranking: VendedorMetrica[];
+  /** Top 20 provas atualmente atrasadas (snapshot). */
+  provas_atrasadas: ProvaAtrasadaItem[];
+  /** Contagem total de atrasadas (sem cap) — UI mostra "(N)" no header. */
+  provas_atrasadas_total: number;
   /** Timestamp UTC do calculo. */
   atualizado_em: string;
 }
