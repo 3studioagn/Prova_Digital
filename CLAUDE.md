@@ -15,20 +15,20 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **2 — Nucleo do Dominio** | ✅ **COMPLETA** (sign-off Sessao 22 pos-auditoria externa) | Cadastro de prova + etiqueta + QR Code (C06), Listagem com filtros (C07), Detalhe + modal etiqueta/QR (C08), Configuracoes do sistema (C09) | 7-22 |
 | **3 — Scanner + Transicoes** | ✅ **COMPLETA** + Review C11 + Auditoria Senior | Camera HTML5, scanner QR, assinatura digital, maquina de estados, reprovacao, roteamento, timeline visual (C12), cancelamento admin (C13), reinicio de ciclo admin (C14). Review C11: bugs stale error, canvas responsivo, modal fluido, entrada manual de codigo QR. Auditoria: 0 CRITICAL, 3 HIGH corrigidos (scan filter admin, getToken try/catch, focus trap modais) | 23+ |
 | **4 — Dashboard + Atrasos** | ✅ **COMPLETA** + Auditoria Senior | Dashboard tempo real (RF-014, US-013) com layout Figma: 5 contadores (criadas hoje, com vendedor, aprovadas, na clicheria, atrasadas c/ breakdown por vendedor) + 2 atalhos rapidos. Query consolidada + cache TTL 5s (ADR-092). Calculo de atraso horas corridas (RN-008). Supabase Realtime (postgres_changes) + fallback polling 10s. Auditoria: 0 CRITICAL, 1 HIGH corrigido (click Na clicheria), 2 MEDIUM corrigidos (breakpoint mobile, GROUP BY), 2 LOW corrigidos (ValueError guard, CHANGELOG). ADR-094 | — |
-| **5 — Relatorios + Export** | ⏳ | CSV export, metricas por vendedor, dashboards gerenciais | — |
+| **5 — Relatorios + Atalhos** | ✅ **COMPLETA** | Componente 16 (Relatorios) + Componente 17 (Atalhos). Endpoint UNICO discriminado por scope (geral/3studio/vendedores/clicheria) com cache TTL 60s + ETag SHA-256 + Realtime invalidation (4 camadas, ~20x reducao queries). Frontend `/relatorios` com 4 perspectivas, gráficos SVG inline interativos (DonutChart + BarChart + TimeSeriesChart, todos com hover/tooltip; click no donut filtra status). CSV streaming UTF-8 BOM com 4 datasets + audit `REPORT_EXPORTED`. Atalhos globais por teclado (g+s, g+p, g+r admin, ?) + 3º card "Acessar Relatorios" no dashboard. ADRs 095-101. Migration 010 (recovery) + 011 (clarify descricao). 633 testes (era 424); 0 regressao. | 5.0-5.6 |
 | **6 — Auditoria + Polish** | ⏳ | Tela de audit_log, cleanup de orfaos R2, rotacao de secrets, hardening final | — |
 
 **Estado atual do banco de producao:**
-- `alembic_version = 009`
+- `alembic_version = 011` (migration 011 aplicada no closeout da Wave 5, 2026-04-27 — ADR-099 cosmetica)
 - **6 tabelas de dominio** + `alembic_version` (todas com RLS habilitada)
 - **12 policies RLS** otimizadas com `(SELECT auth.uid())` (ADR-029 + ADR-082: +1 `pol_movimentacoes_insert` + `pol_movimentacoes_select` expandida para MOTORISTA/CLICHERIA)
-- **30 indexes** cobrindo filtros dos Componentes 07 e futuros
+- **32 indexes** cobrindo filtros dos Componentes 07 + relatorios da Wave 5 (migration 010: +`idx_provas_vendedor_status` +`idx_movimentacoes_status_novo_created_at` — ADR-095)
 - **3 usuarios ativos**: 2 admins (`admin@3studio.com.br` + `ops@3studio.com.br`) + 1 vendedor FILIAL (`mariosouza@teste.com.br`)
 - **Advisor Supabase limpo** exceto: 1 INFO `rls_enabled_no_policy` em `alembic_version` (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection` (WONTFIX plano pago, ADR-027)
 
 - **1 tabela na publicacao `supabase_realtime`**: `provas_digitais` (INSERT/UPDATE para dashboard tempo real)
 
-**Endpoints publicos em producao (29 rotas):**
+**Endpoints publicos em producao (31 rotas):**
 
 | Prefix | Endpoints | Wave |
 |---|---|---|
@@ -36,21 +36,22 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | `/api/v1/provas` | `POST /upload-url`, `POST /`, `GET /`, `GET /{id}`, `GET /{id}/imagem-url`, `GET /{id}/movimentacoes`, `GET /{id}/etiqueta.pdf`, `GET /{id}/qr-code.png` | 2 |
 | `/api/v1/provas` | `POST /scan`, `POST /{id}/transicoes`, `POST /{id}/cancelar`, `POST /{id}/reiniciar-ciclo` | 3 |
 | `/api/v1/provas` | `GET /dashboard` | 4 |
+| `/api/v1/reports` | `GET /` (scope discriminado), `GET /export` (CSV streaming) | 5 |
 | `/api/v1/configuracoes` | `GET /`, `GET /{chave}`, `PATCH /{chave}` | 2 |
 | `/health*` | `/health`, `/health/db`, `/health/r2` | 0 |
 
-**Rotas frontend em producao (9 paginas):**
+**Rotas frontend em producao (10 paginas):**
 - `/login` — Wave 1
-- `/dashboard` — Wave 4 C15 (contadores tempo real + Realtime + layout Figma)
+- `/dashboard` — Wave 4 C15 + Wave 5 C17 (3º card Acessar Relatorios)
 - `/usuarios` — Wave 1 (CRUD + modais)
 - `/nova-prova` — Wave 2 C06 (form + dropzone + preview etiqueta)
 - `/provas` — Wave 2 C07 (listagem + filtros URL-persisted + paginacao)
 - `/provas/[id]` — Wave 2 C08 (detalhe + modal etiqueta/QR + timeline placeholder)
 - `/configuracoes` — Wave 2 C09 (tempo atraso + template etiqueta)
 - `/escanear` — Wave 3 C10+C11 (scanner QR + assinatura digital + transicao de status + entrada manual de codigo QR)
+- `/relatorios` — Wave 5 C16 (4 perspectivas com gráficos SVG inline interativos: Geral, 3Studio, Vendedores, Clicheria + CSV export streaming + atalhos teclado globais)
 
 **Itens do menu ainda inativos (placeholders para Waves futuras):**
-- "Relatorios" — Wave 5
 - "Informacoes" — possivel Wave 6
 
 ---

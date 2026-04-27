@@ -2,6 +2,109 @@
 
 ---
 
+## [2026-04-27 — Wave 5 Bloco 5.6] — Closeout: ADRs finais + WAVE5_CLOSEOUT.md + atualizacao CLAUDE.md
+
+### Contexto
+
+Bloco 5.6 — ultimo da Wave 5. Encerra a wave com:
+1. Registro dos 5 ADRs finais (096, 097, 098, 100, 101) em DECISIONS.md.
+2. `docs/waves/WAVE5_CLOSEOUT.md` com DoD check, metricas finais e
+   lessons learned.
+3. CLAUDE.md atualizado: status da Wave 5 = ✅ COMPLETA, contadores
+   corrigidos (31 endpoints, 32 indexes, 10 rotas frontend, alembic 010).
+
+### Entregue — sem código novo neste bloco
+
+**ADRs (DECISIONS.md):**
+- **ADR-096** — Endpoint UNICO discriminado por scope vs. 4-5 separados.
+  Justificativa, alternativas rejeitadas (5 endpoints, dict generico,
+  GraphQL), beneficios (1 hook + 1 cache key + switch exaustivo TS).
+- **ADR-097** — HTTP ETag + Cache server-side TTL 60s + Realtime
+  invalidation (Wave 5 Blocos 5.2/5.3). Documenta as 3 camadas
+  formalmente; custo medido (~20x reducao queries).
+- **ADR-098** — Atalhos globais por teclado estilo GitHub + 3º card
+  no dashboard (Wave 5 Bloco 5.5). Justifica duas camadas
+  complementares (visual + teclado) e escolha do leader-key.
+- **ADR-100** — Estrategia de timezone: UTC no banco, conversao na
+  borda. Documenta os 5 pontos: banco UTC, backend UTC, front BRT->UTC
+  no input, front UTC->BRT no display, defaults tz-aware.
+- **ADR-101** — Taxa de reprovacao calculada sobre CICLOS (RN-006), nao
+  provas. Compara opcao A (provas) vs. B (ciclos) e justifica B
+  (reflete retrabalho real, alinha com log imutavel, premia precisao).
+
+**Closeout (`docs/waves/WAVE5_CLOSEOUT.md`):**
+- DoD check com 8 criterios atendidos.
+- Mapa RF/RN/RNF -> implementacao validada.
+- 4 camadas de cache documentadas com custo medido.
+- 6 commits da wave + metricas backend/frontend/banco.
+- Lessons learned (o que funcionou, o que melhorar, padroes
+  consolidados).
+- Pendencias autorizadas (migration 011, smoke E2E manual, RN-008
+  re-avaliacao).
+
+**CLAUDE.md atualizado:**
+- Wave 5 = ✅ COMPLETA na tabela de progresso.
+- `alembic_version = 010` (com nota de 011 pendente).
+- 32 indexes (ADR-095).
+- 31 endpoints publicos (+`/api/v1/reports`, `/api/v1/reports/export`).
+- 10 rotas frontend (+`/relatorios`).
+- "Relatorios" removido da lista de placeholders inativos.
+
+### Migration 011 aplicada em producao
+
+**Aplicada via Supabase MCP `apply_migration` em 2026-04-27 com autorizacao do Mario** (opcao "a" — apply now via MCP):
+
+```sql
+UPDATE public.configuracoes_sistema
+SET descricao = 'Tempo em horas corridas sem movimentacao para classificar prova como Atrasada. Padrao: 48h.'
+WHERE chave = 'tempo_atraso_horas_uteis';
+
+UPDATE public.alembic_version
+SET version_num = '011'
+WHERE version_num = '010';
+```
+
+**Verificacao pos-aplicacao:**
+- `alembic_version = '011'` ✅
+- `configuracoes_sistema.descricao` atualizada ✅
+- Registro em `supabase_migrations.schema_migrations` com nome
+  `011_clarify_tempo_atraso_descricao` ✅
+- Repo + producao agora 100% sincronizados.
+
+### Validacoes finais
+
+- `pytest backend/tests/`: **633 passed**, 0 regressao.
+- `ruff check`: limpo (app/ + tests/ + scripts/).
+- `tsc --noEmit`: limpo.
+- `next lint`: 0 warnings/errors.
+- `next build`: 12/12 paginas.
+
+### Arquivos criados
+
+- `docs/waves/WAVE5_CLOSEOUT.md`
+
+### Arquivos modificados
+
+- `DECISIONS.md` (+5 ADRs: 096, 097, 098, 100, 101)
+- `CLAUDE.md` (Wave 5 status COMPLETA, contadores atualizados)
+- `CHANGELOG.md` (esta entrada)
+
+### Wave 5 — encerramento
+
+| Bloco | Status | Commit |
+|---|---|---|
+| **5.0** Recovery + clarify | ✅ | `e8fb464` |
+| **5.1** Backend dominio (puro) | ✅ | `95b8ce8` |
+| **5.2** Backend API + CSV + audit | ✅ | `7b4ad9b` |
+| **5.3** Frontend rota + hooks + filtros | ✅ | `bf74fba` |
+| **5.4** Perspectivas + graficos SVG interativos | ✅ | `19ffa1a` |
+| **5.5** Componente 17 (atalhos globais) | ✅ | `f9e5bce` |
+| **5.6** ADRs + closeout | ✅ | (este commit) |
+
+**Wave 5 ENTREGUE.** Proxima wave (6 — Auditoria + Polish) quando autorizada.
+
+---
+
 ## [2026-04-27 — Wave 5 Bloco 5.5] — Componente 17: Atalhos globais por teclado + 3º card no dashboard
 
 ### Contexto

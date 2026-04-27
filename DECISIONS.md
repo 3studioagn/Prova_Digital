@@ -2759,3 +2759,275 @@ Mario foi consultado em 2026-04-27 com 3 opcoes (A: implementar horas uteis em W
   - Audit trail: ADR-091 (decisao original) + ADR-099 (reforco Wave 5) + migration 011 (atualiza descricao) - rastro completo.
   - Wave 5 e Wave 4 calculam "atrasadas" identicamente - cross-check automatizado no §7.4 do ANALYSIS impede regressao futura.
   - O "_horas_uteis" no nome da chave vira **divida nominal documentada** - aceitavel ate Wave 7+.
+
+---
+
+## ADR-096 — Endpoint UNICO discriminado por scope vs. 4-5 endpoints separados (Wave 5 Bloco 5.2)
+**Data:** 2026-04-27 (Wave 5 Bloco 5.2)
+
+**Contexto:** A Wave 5 anterior (commit 5db44bb, revertida) implementou 5 endpoints
+separados: `/reports/summary`, `/reports/by-seller`, `/reports/overdue`,
+`/reports/route-distribution`, `/reports/proofs`. Ao refazer a Wave 5, o
+briefing do Mario (2026-04-27) explicitou foco em **minimizar queries** — cada
+roundtrip cliente-servidor importa.
+
+**Decisao:** Endpoint UNICO `GET /api/v1/reports?scope=...` com discriminated
+union Pydantic v2 + TypeScript. Cliente faz 1 request por (scope, filtros);
+servidor executa 1 conjunto de queries; ETag SHA-256 do payload completo
+permite 304 sem reserializacao.
+
+**Alternativas rejeitadas:**
+  - **5 endpoints separados** (caminho do commit antigo): forca cliente a saber
+    qual endpoint chamar para qual scope, multiplica caches/ETags, e duplica
+    estrutura no Pydantic.
+  - **Endpoint generico com `dict[str, Any]`**: perde tipagem estatica, gera
+    runtime checks no frontend, dificulta autocomplete.
+  - **GraphQL**: overhead infraestrutural enorme para 4 perspectivas estaveis.
+
+**Beneficios:**
+  - Frontend tem 1 hook (`useReport`) e 1 cache key por filtros — nao 5.
+  - Switch exaustivo no TS garante cobertura em build-time (TS reclama se
+    novo scope nao for tratado).
+  - Backend tem 1 dispatcher (`_dispatch_aggregator`) que roteia para
+    funcao especifica por scope — facil testar com `unittest.mock.patch`.
+  - ETag funciona naturalmente — payload completo do scope tem identidade
+    propria.
+
+**Trade-off aceito:** Adicionar uma 5a perspectiva no futuro exige editar o
+schema Pydantic, o helper TS, e o dispatcher — 3 lugares. Mas isso e barato
+(~50 LOC) e o ganho de manter superficie de API minima vale.
+
+**Consequencias:**
+  - Endpoint atual: `GET /api/v1/reports?scope={geral|3studio|vendedores|clicheria}`.
+  - Frontend hook unico em `useReport.ts`.
+  - Discriminated union em `report.py` (backend) + `report.ts` (frontend).
+
+---
+
+## ADR-097 — HTTP ETag + Cache server-side TTL 60s + Realtime invalidation (Wave 5 Bloco 5.2/5.3)
+**Data:** 2026-04-27 (Wave 5 Blocos 5.2 e 5.3)
+
+**Contexto:** Mario reforcou em 2026-04-27 que a Wave 5 precisa "minimizar
+queries" — aceitavel custo extra em construcao (cache, ETag), nao aceitavel
+custo extra em runtime de queries pesadas. WAVE5_ANALYSIS §4.4 desenhou
+estrategia em 4 camadas. Este ADR formaliza as 3 primeiras (a quarta — SA
+compiled cache — e default).
+
+**Decisao — 3 camadas combinadas:**
+
+  **Camada 1: HTTP ETag + If-None-Match -> 304:**
+    - Backend gera ETag SHA-256 deterministico do JSON canonico do payload
+      (`compute_etag` em `report_etag.py`). Ordem de chaves estavel (sort_keys),
+      sem espacos.
+    - Cliente envia `If-None-Match: <etag>` em refetch.
+    - Match exato (RFC 7232) -> response `304 Not Modified` com headers
+      preservados, body vazio.
+    - Implementacao backend: comparacao por string em
+      `matches_if_none_match()` (suporta wildcard `*` e lista comma-separated).
+
+  **Camada 2: Cache in-memory TTL 60s no backend:**
+    - `ReportCache` (asyncio-safe, asyncio.Lock no check-and-mutate).
+    - Chave de cache = SHA-256 dos filtros normalizados (JSON canonico) —
+      `to_cache_key(filters)`.
+    - Cache hit no `_get_or_compute` retorna `(payload, etag)` pre-calculados —
+      zero queries DB.
+    - TTL configuravel via env var `REPORTS_CACHE_TTL_SECONDS` (default 60).
+    - Singleton por worker uvicorn. Em N workers = N caches independentes —
+      worst case = N queries cold-start, aceitavel para volume Wave 5.
+
+  **Camada 3: Realtime invalida cache do frontend:**
+    - Frontend assina `postgres_changes` em `provas_digitais` (Wave 4 reuse).
+    - Em INSERT/UPDATE: `invalidate()` no cache local + refetch com
+      `If-None-Match` (debounced 2s).
+    - Backend nao invalida sua propria cache via Realtime — deixa TTL expirar
+      naturalmente. ETag matching cobre o gap (cliente pode ter ETag valido
+      por ate 60s).
+
+**Cabecalhos de resposta:**
+  - `ETag: "<sha256-hex>"` (strong ETag, RFC 7232 §2.3)
+  - `Cache-Control: private, max-age=30, stale-while-revalidate=60`
+
+**Alternativas rejeitadas:**
+  - **Sem cache, queries diretas:** rejeitado — 30 usuarios simultaneos com
+    polling 30s = 3600 queries/hora. Inaceitavel para perspectivas com 6+
+    queries SQL pesadas.
+  - **Redis externo:** rejeitado — adiciona infra para um cache de 60s. In-memory
+    e suficiente para volume Wave 5. Reavaliar em Wave 7+ se escalar.
+  - **Materialized view com REFRESH:** rejeitado em volume baixo (<1MB total
+    nas tabelas) — REFRESH toca disco e e mais caro que a query direta. ANALYSIS
+    §3.3 documenta a decisao.
+  - **Server-Sent Events (SSE) push:** rejeitado — mais complexo que polling
+    + Realtime. Realtime ja resolve o caso de uso ("dados mudaram").
+
+**Custo medido (planning time domina em volume baixo):**
+  - 1 mudanca de status, 30 usuarios: 120 queries -> 1 query (cache hit para
+    os outros 29).
+  - Polling 30s, 30 usuarios: 14400 queries/hora -> ~720 queries/hora (~20x
+    reducao).
+
+**Consequencias:**
+  - 4 modulos novos no backend: `report_filters.py`, `report_metrics.py`,
+    `report_cache.py`, `report_etag.py`.
+  - Hook `useReport` no frontend implementa as 3 camadas no cliente.
+  - Validado em testes (47 unit + 39 integration cobrindo cache, ETag, 304,
+    invalidacao).
+
+---
+
+## ADR-098 — Atalhos globais por teclado estilo GitHub + 3º card no dashboard (Wave 5 Bloco 5.5)
+**Data:** 2026-04-27 (Wave 5 Bloco 5.5)
+
+**Contexto:** RF-016 exige 3 atalhos rapidos: escanear QR Code, listar provas,
+acessar relatorios. Wave 4 entregou 2 cards visuais no dashboard (Escanear +
+Nova Prova) — auditoria Wave 4 marcou divergencia (M-02, ADR-093). Wave 5
+precisa fechar.
+
+**Decisao — duas camadas complementares:**
+
+  **Camada 1: Atalhos visuais (cards no dashboard):**
+    - Manter os 2 cards existentes (Escanear, Nova Prova) — nao tocar Wave 4.
+    - Adicionar 3º card "Acessar Relatorios" (laranja `#ff8a3d`, distinto
+      do preto/Escanear e amarelo/Nova Prova).
+    - Visivel para todos os perfis. RBAC do `/api/v1/reports` (backend)
+      retorna 403 se nao-admin acessar — UI nao precisa esconder.
+    - Click navega via `<Link>` Next.js (consistente com os outros cards).
+
+  **Camada 2: Atalhos por teclado globais (estilo GitHub):**
+    - State machine 2-keystroke: `g` ativa "modo leader" por 1.5s, segunda
+      tecla dispara navegacao.
+    - Atalhos:
+      - `g s` -> `/escanear`
+      - `g p` -> `/provas`
+      - `g r` -> `/relatorios` (apenas admin via flag `adminOnly`)
+      - `?` -> abre/fecha painel de help
+      - `Esc` -> cancela leader / fecha painel
+    - Hook `useGlobalShortcuts` registrado no `(dashboard)/layout.tsx` —
+      ativo em qualquer pagina autenticada.
+    - Modal `KeyboardShortcutsHelp` com `<kbd>` styled, focus trap (reusa
+      `useFocusTrap` da Wave 3), Esc/click-fora fecha.
+
+**Alternativas rejeitadas:**
+  - **Apenas atalhos visuais (sem teclado):** rejeitado — o briefing
+    inicial da Wave 5 (§5 e §1.2) pediu explicitamente keyboard shortcuts
+    estilo GitHub.
+  - **Apenas teclado (sem 3º card):** rejeitado — RF-016 exige presenca
+    visual dos 3 atalhos. Usuarios mouse-only nao descobrem teclado.
+  - **Atalhos sem leader (ex: `Ctrl+S`):** rejeitado — colide com shortcuts
+    do navegador (save, find, etc).
+  - **Atalhos de letra unica (ex: `s`, `p`, `r`):** rejeitado — colide
+    facilmente com inputs e tem alto risco de disparar acidental.
+
+**Filtros e seguranca:**
+  - Atalhos desativados quando foco esta em `<input>`, `<textarea>`,
+    `<select>`, `[contenteditable]` — nao quebra digitacao.
+  - Modificadores (Ctrl/Cmd/Alt/Meta) ignorados — atalhos so disparam com
+    teclas puras.
+  - `g r` filtrado por `is_admin` — vendedor/motorista/clicheria nao veem
+    no painel de help nem podem ativar via teclado.
+
+**Consequencias:**
+  - 3 arquivos novos: `useGlobalShortcuts.ts`, `KeyboardShortcutsHelp.tsx`,
+    `KeyboardShortcutsHelp.module.css`.
+  - Layout: 1 import + 1 hook call + 1 render condicional.
+  - Dashboard: 1 `<Link>` adicional + estilos `.shortcutRelatorios*`.
+  - CLAUDE.md ganha secao "Atalhos de teclado globais" com tabela completa.
+  - RF-016 100% atendido em duas camadas (visual + teclado).
+
+---
+
+## ADR-100 — Estrategia de timezone: UTC no banco, conversao na borda (Wave 5)
+**Data:** 2026-04-27 (Wave 5)
+
+**Contexto:** WAVE5_ANALYSIS §8 (R4) listou timezone como risco da Wave 5 —
+datas inseridas pelo usuario no front estao em fuso local (BRT America/Sao_Paulo,
+offset -3); servidor opera em UTC; querys agregam em UTC. Sem disciplina, bugs
+sutis (provas "criadas hoje" sumindo entre 21h-00h BRT, por exemplo).
+
+**Decisao:**
+
+  1. **Banco em UTC sempre.** PostgreSQL armazena `TIMESTAMPTZ` — internamente
+     UTC, com offset metadata. Movimentacoes, provas, audit_logs — todas
+     gravadas em UTC.
+  2. **Backend opera em UTC.** Filtros do `/reports?from=...&to=...` aceitos
+     como ISO-8601 com offset (`2026-04-27T00:00:00-03:00`) ou Z (UTC). Pydantic
+     converte automaticamente para `datetime` tz-aware. Helper `assert_utc()`
+     em `report_metrics.py` valida em pontos criticos.
+  3. **Frontend converte BRT -> UTC na borda do request.** Componente
+     `DateRangeFilter` aceita `<input type="date">` (formato YYYY-MM-DD em fuso
+     local), aplica offset BRT (-3h) e envia ISO-8601 UTC ao backend.
+     Funcoes `brtDateToIsoUtcStart` / `brtDateToIsoUtcEnd` em `DateRangeFilter.tsx`.
+  4. **Frontend renderiza UTC em BRT.** Helper `formatDataBrt(iso)` em
+     `lib/types/report.ts` usa `Date#toLocaleDateString("pt-BR")` que aplica
+     o fuso do navegador automaticamente. Helpers `formatDataHoraBrt` para
+     timestamps completos.
+  5. **Defaults UTC-aware.** `ReportFilters._defaults_and_invariants` adiciona
+     `tzinfo=timezone.utc` em datetimes naive, garantindo que comparacoes
+     posteriores nao quebrem.
+
+**Alternativas rejeitadas:**
+  - **Backend em BRT:** rejeitado — agendamentos cron, jobs futuros e
+    integracoes assumem UTC.
+  - **Backend recebe BRT direto:** rejeitado — multiplica chance de bugs
+    quando frontend internacionalizar futuramente. Frontend converte na borda.
+  - **Sem timezone (datetimes naive):** rejeitado — Pydantic v2 aceita,
+    Postgres aceita, mas eventualmente alguem assume um fuso e quebra.
+
+**Consequencias:**
+  - Documentacao: este ADR + comentarios em `report_filters.py` + `DateRangeFilter.tsx`.
+  - Helper `assert_utc()` exposto em `report_metrics` para uso em pontos criticos.
+  - Testes de integracao validam que datas BRT do front viram UTC corretamente
+    no backend.
+  - Wave 4 (Dashboard) ja seguia esse padrao desde ADR-091 — Wave 5 reforca.
+
+---
+
+## ADR-101 — Taxa de reprovacao calculada sobre CICLOS (RN-006), nao provas (Wave 5)
+**Data:** 2026-04-27 (Wave 5 Blocos 5.1 e 5.2)
+
+**Contexto:** RN-006 permite reinicio de ciclo de provas reprovadas. Uma prova
+pode ser reprovada no ciclo 1, reiniciada (volta para CRIADA com `ciclo_atual=2`),
+e aprovada no ciclo 2. Como contar essa prova no calculo de "taxa de reprovacao"?
+
+**Opcoes consideradas:**
+  - **(A) Sobre PROVAS:** taxa = reprovadas / (aprovadas + reprovadas) onde
+    cada prova conta 1 vez pelo seu status FINAL.
+  - **(B) Sobre CICLOS:** taxa = reprovacoes-ciclo / (aprovacoes-ciclo +
+    reprovacoes-ciclo) onde cada par (prova_id, ciclo) conta como evento independente.
+
+**Decisao: opcao B — sobre CICLOS.**
+
+**Justificativas:**
+  1. **Refletir retrabalho:** a opcao A esconde o retrabalho — uma prova
+     reprovada 3 vezes e finalmente aprovada conta 1 aprovacao na opcao A,
+     enquanto na B conta 3 reprovacoes + 1 aprovacao (taxa 75%). A taxa
+     real de retrabalho do vendedor e a opcao B.
+  2. **Auditavel:** cada `Movimentacao` com `status_novo IN
+     (APROVADA_PELO_VENDEDOR, REPROVADA_PELO_VENDEDOR)` e um evento
+     unico no log imutavel. Contar movimentacoes alinha com a fonte
+     de verdade.
+  3. **Comparabilidade entre vendedores:** vendedor que sempre acerta na
+     primeira tentativa tem mesma taxa que vendedor que precisa de 2 ciclos
+     pela opcao A — desincentiva qualidade. Opcao B premia precisao.
+  4. **Consistencia entre Geral e Vendedores:** o mesmo numero aparece nas
+     duas perspectivas com a mesma logica.
+
+**Alternativas rejeitadas:**
+  - **Opcao A:** descartada pelas razoes acima.
+  - **Hibrido (taxa sobre ciclos + taxa "final" sobre provas):** rejeitado
+    por confusao na UI — qual numero mostrar onde? Adiar para Wave 7+ se
+    auditor pedir.
+
+**Implementacao:**
+  - Em SQL: COUNT FILTER sobre `Movimentacao` com `status_novo` filtrado.
+  - Em Python: helper `taxa(numerador, denominador)` em `report_metrics.py`
+    com clamp [0.0, 1.0] e fallback 0.0 se denominador zero.
+  - VendedorMetrica expoe `aprovacoes` e `reprovacoes` (counts absolutos
+    sobre ciclos) + taxas calculadas — UI pode mostrar numerador/denominador
+    se quiser auditar.
+
+**Consequencias:**
+  - Provas com ciclos reiniciados afetam a taxa multiple times — desejado.
+  - Documentacao: este ADR + docstrings em `IndicadoresGeral.taxa_reprovacao`
+    e `VendedorMetrica.taxa_reprovacao` + comentario na query de
+    `_query_ranking_vendedores`.
+  - Reavaliar em Wave 7+ se auditor externo cobrar interpretacao alternativa.
