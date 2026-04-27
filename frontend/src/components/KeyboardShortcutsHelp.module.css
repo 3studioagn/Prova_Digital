@@ -1,0 +1,142 @@
+/* KeyboardShortcutsHelp — Wave 5, Componente 17 */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  padding: 1rem;
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dialog {
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  max-width: 480px;
+  width: 100%;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(12px); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem 0.5rem;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #000;
+}
+
+.closeButton {
+  background: transparent;
+  border: 0;
+  font-size: 1.75rem;
+  color: rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.closeButton:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #000;
+}
+
+.content {
+  padding: 0.5rem 1.5rem 1.5rem;
+}
+
+.intro {
+  font-size: 0.9rem;
+  color: rgba(0, 0, 0, 0.7);
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+
+.shortcutList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.shortcutItem {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.6rem 0.75rem;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.shortcutKeys {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  min-width: 110px;
+}
+
+.shortcutThen {
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.45);
+  font-style: italic;
+}
+
+.shortcutLabel {
+  font-size: 0.9rem;
+  color: rgba(0, 0, 0, 0.85);
+  font-weight: 500;
+  flex: 1;
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 0.5rem;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #000;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: rgba(0, 0, 0, 0.5);
+  margin: 1rem 0 0;
+  font-style: italic;
+  text-align: center;
+}

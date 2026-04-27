@@ -307,3 +307,47 @@ Consultar tambem: [DECISIONS.md](DECISIONS.md) | [CHANGELOG.md](CHANGELOG.md) | 
 - `audit_logs`, `movimentacoes` e `etiquetas` tem triggers de imutabilidade
 - Nunca esperar conseguir apagar essas linhas — para "limpar" provas de teste, marcar como `CANCELADA` via UPDATE em `provas_digitais`
 - O objeto R2 correspondente pode ser deletado via boto3, mas e best-effort (nao atomic com a transacao do banco)
+
+---
+
+## Atalhos de teclado globais (Wave 5 Componente 17 — RF-016)
+
+Disponiveis em qualquer pagina autenticada, registrados via
+`useGlobalShortcuts` em `(dashboard)/layout.tsx`. Padrao 2-keystroke
+estilo GitHub: pressionar `g` ativa "modo leader" por 1.5s, depois a
+segunda tecla dispara a acao.
+
+| Atalho | Acao |
+|--------|------|
+| `g` `s` | Ir para `/escanear` |
+| `g` `p` | Ir para `/provas` |
+| `g` `r` | Ir para `/relatorios` (apenas admin — vendedor/motorista/clicheria nao veem) |
+| `?` | Abrir/fechar painel de ajuda dos atalhos (`<KeyboardShortcutsHelp />`) |
+| `Esc` | Fechar painel de ajuda ou cancelar leader |
+
+**Comportamento:**
+- Atalhos sao **desativados** quando o foco esta em `<input>`, `<textarea>`,
+  `<select>` ou elemento `[contenteditable]` — nao quebra digitacao em
+  formularios e buscas.
+- Modificadores (Ctrl/Cmd/Alt/Meta) sao ignorados — atalhos so disparam
+  com a tecla pura. Evita conflito com shortcuts do navegador.
+- `g r` aparece no painel de ajuda **apenas para `is_admin = true`**;
+  vendedores/motoristas/clicheria nao veem o atalho na lista nem podem
+  ativar via teclado. Defesa adicional: backend do `/api/v1/reports`
+  retorna 403 se acesso direto.
+
+**Implementacao:**
+- Hook: `frontend/src/hooks/useGlobalShortcuts.ts`
+- Modal: `frontend/src/components/KeyboardShortcutsHelp.tsx`
+- Estilos: `frontend/src/components/KeyboardShortcutsHelp.module.css`
+- Registro no layout: `frontend/src/app/(dashboard)/layout.tsx`
+  (1 import + 1 hook call + 1 render condicional)
+
+**Atalhos visuais (3 cards no `/dashboard`)** complementam os de teclado
+para usuarios mouse-only:
+- "Escanear QR Code" (preto) -> `/escanear`
+- "Nova Prova" (amarelo) -> `/nova-prova`
+- "Acessar Relatorios" (laranja) -> `/relatorios`
+
+Esses 3 cards estao no `shortcutsCell` (col 1, row 3 do grid Figma do
+Dashboard — Wave 4 ADR-093 expandido pelo Componente 17 da Wave 5).

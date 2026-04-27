@@ -2,6 +2,109 @@
 
 ---
 
+## [2026-04-27 — Wave 5 Bloco 5.5] — Componente 17: Atalhos globais por teclado + 3º card no dashboard
+
+### Contexto
+
+Bloco 5.5 da Wave 5. Implementa o Componente 17 do Backlog (RF-016 —
+Atalhos Rapidos) em duas camadas:
+
+1. **Atalhos visuais** (cards no dashboard) para usuarios mouse-only.
+2. **Atalhos por teclado** globais (estilo GitHub `g+s`, `g+p`, `g+r`)
+   acessiveis em qualquer pagina autenticada.
+
+A camada por teclado complementa a visual — RF-016 exige acesso direto a
+3 acoes (escanear QR Code, listar provas, acessar relatorios) e ambos os
+caminhos cumprem isso.
+
+### Entregue
+
+**Hook `useGlobalShortcuts.ts`:**
+- State machine 2-keystroke estilo GitHub: `g` ativa modo "leader" por
+  1.5s, segunda tecla dispara navegacao.
+- Atalhos:
+  - `g s` -> `/escanear`
+  - `g p` -> `/provas`
+  - `g r` -> `/relatorios` (admin only — filtrado pelo flag `adminOnly`)
+  - `?` -> abre/fecha modal de help
+  - `Esc` -> cancela leader / fecha modal
+- Ignora keystrokes em `<input>`, `<textarea>`, `<select>`,
+  `[contenteditable]` (nao quebra digitacao em formularios).
+- Ignora atalhos com modificadores (Ctrl/Cmd/Alt/Meta) — sem conflito
+  com shortcuts do navegador.
+- Expoe `{ helpOpen, openHelp, closeHelp, visibleShortcuts }`.
+
+**Modal `KeyboardShortcutsHelp.tsx`:**
+- Lista atalhos disponiveis filtrados por permissao do usuario logado.
+- `<kbd>` styled para representar teclas com look de teclado fisico.
+- Acessibilidade: `role="dialog"`, `aria-modal`, `aria-labelledby`,
+  focus trap (reusa `useFocusTrap` da Wave 3), Esc fecha (camada extra
+  alem do hook), click fora fecha, lock scroll do body.
+- Animacoes CSS: fade in 150ms + slide up 200ms.
+
+**Integracao no layout:**
+- `(dashboard)/layout.tsx`: 1 import + 1 hook call + 1 render condicional
+  do `<KeyboardShortcutsHelp>`. Hook recebe `isAdmin: user?.is_admin ??
+  false` — atalhos restritos so aparecem para admins.
+
+**3º card "Acessar Relatorios" no dashboard (autorizado pelo escopo do
+Componente 17):**
+- `dashboard/page.tsx`: +1 `<Link>` no `shortcutsCell` (1 linha JSX nova).
+- `dashboard.module.css`: +`.shortcutRelatorios` e `.shortcutRelatoriosLabel`
+  (laranja `#ff8a3d` para distinguir do preto/Escanear e amarelo/Nova prova).
+- O card e visivel para todos os perfis. RBAC do `/relatorios` (backend)
+  bloqueia nao-admins se digitarem a URL — UI nao precisa esconder.
+
+**Documentacao em CLAUDE.md:**
+- Nova secao "Atalhos de teclado globais" antes do final do arquivo.
+- Tabela com os 5 atalhos + comportamento + arquivos de implementacao.
+
+### Validacoes
+
+- `tsc --noEmit`: limpo.
+- `next lint`: 0 warnings, 0 errors.
+- `next build`: OK, 12/12 paginas.
+  - `/dashboard`: 3.07 kB → 3.18 kB (+0.11 kB pelo 3º card).
+  - `/relatorios`: 11.4 kB (inalterado).
+  - First Load JS: layout +~1 kB pelo hook + modal compartilhado por
+    todas as paginas autenticadas.
+- `preview_start frontend`: middleware redireciona, 0 erros JS no console
+  e no servidor.
+- Backend nao tocado neste bloco — 633 testes continuam passing.
+
+### Estrategia "minimizar queries" — inalterada
+
+Bloco 5.5 e puramente UI/UX. Hooks de relatorios (Bloco 5.3) e cache
+(Bloco 5.2) continuam ativos e cobrindo 100% das interacoes.
+
+### Arquivos criados
+
+- `frontend/src/hooks/useGlobalShortcuts.ts`
+- `frontend/src/components/KeyboardShortcutsHelp.tsx`
+- `frontend/src/components/KeyboardShortcutsHelp.module.css`
+
+### Arquivos modificados
+
+- `frontend/src/app/(dashboard)/layout.tsx` (+3 imports + 1 hook call +
+  1 render do modal)
+- `frontend/src/app/(dashboard)/dashboard/page.tsx` (+1 `<Link>` no
+  shortcutsCell — autorizado pelo escopo Componente 17)
+- `frontend/src/app/(dashboard)/dashboard/dashboard.module.css`
+  (+`.shortcutRelatorios*`)
+- `CLAUDE.md` (nova secao "Atalhos de teclado globais")
+
+### Proximo passo
+
+**Bloco 5.6** — E2E + closeout:
+- Cenarios E2E manuais (Playwright opcional — projeto nao tem CI E2E
+  configurado ainda).
+- Aplicacao da migration 011 em producao (cosmetica, ADR-099).
+- Atualizacao final de CLAUDE.md com status "✅ COMPLETA".
+- ADRs finais (096, 097, 098, 100, 101) em DECISIONS.md.
+- `docs/waves/WAVE5_CLOSEOUT.md` com DoD check + metricas finais.
+
+---
+
 ## [2026-04-27 — Wave 5 Bloco 5.4] — Frontend perspectivas dedicadas + graficos SVG inline interativos + ReportGeral expandido
 
 ### Contexto

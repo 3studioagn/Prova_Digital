@@ -6,7 +6,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
+import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useInactivityTimeout } from "@/hooks/useInactivityTimeout";
+import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
 import {
   ChartIcon,
   CloseIcon,
@@ -147,6 +149,11 @@ export default function DashboardLayout({
   // RNF-003: 30 min inactivity timeout
   useInactivityTimeout(INACTIVITY_TIMEOUT_MS, handleLogout);
 
+  // Wave 5 Componente 17: atalhos de teclado globais (g+s, g+p, g+r, ?)
+  const { helpOpen, closeHelp, visibleShortcuts } = useGlobalShortcuts({
+    isAdmin: user?.is_admin ?? false,
+  });
+
   const firstName = user?.nome ? user.nome.split(" ")[0] : "";
   const greeting = firstName ? `Ola ${firstName}!` : "Ola!";
 
@@ -264,6 +271,12 @@ export default function DashboardLayout({
           <div className={styles.cardInner}>{children}</div>
         </div>
       </main>
+
+      <KeyboardShortcutsHelp
+        open={helpOpen}
+        onClose={closeHelp}
+        shortcuts={visibleShortcuts}
+      />
     </div>
   );
 }
