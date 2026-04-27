@@ -8,6 +8,7 @@ from sqlalchemy import text
 
 from app.api.v1.configuracoes import router as configuracoes_router
 from app.api.v1.provas import router as provas_router
+from app.api.v1.reports import router as reports_router
 from app.api.v1.users import router as users_router
 from app.core.config import settings
 from app.core.r2 import get_r2_client
@@ -64,6 +65,7 @@ app.include_router(provas_router, prefix="/api/v1/provas", tags=["provas"])
 app.include_router(
     configuracoes_router, prefix="/api/v1/configuracoes", tags=["configuracoes"]
 )
+app.include_router(reports_router, prefix="/api/v1/reports", tags=["reports"])
 
 
 @app.get("/health")

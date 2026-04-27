@@ -2,6 +2,135 @@
 
 ---
 
+## [2026-04-27 — Wave 5 Bloco 5.2] — Backend API: handler unico /reports + CSV streaming + audit
+
+### Contexto
+
+Bloco 5.2 da Wave 5. Materializa a arquitetura do Bloco 5.1 em endpoints
+HTTP reais com SQL agregado por scope, cache+ETag funcionais, exportacao
+CSV streaming com cursor server-side, e audit logging em export.
+
+Foco continuo: **minimizar queries** (reforcado por Mario em 2026-04-27).
+Validado via 4 EXPLAIN ANALYZE em producao (read-only) — todos os planos
+viaveis com indices da migration 010 (recovery do Bloco 5.0).
+
+### Entregue
+
+**Novo endpoint UNICO `/api/v1/reports?scope=...`:**
+- Discriminated union por `scope` (geral | 3studio | vendedores | clicheria)
+- 4 agregadores SQL dedicados (cada um com 2-6 queries consolidadas)
+- Cache TTL 60s in-memory + ETag determinante => `If-None-Match` => 304
+- Headers: `ETag`, `Cache-Control: private, max-age=30, stale-while-revalidate=60`
+- RBAC: `get_admin_user` (vendedores/motorista/clicheria/studio-sem-admin = 403)
+- Defaults: ultimos 30 dias (max 366); range invalido = 422
+
+**Novo endpoint `/api/v1/reports/export?dataset=...`:**
+- 4 datasets: `summary`, `by-seller`, `overdue`, `proofs`
+- StreamingResponse com BOM UTF-8 (Excel-compatible)
+- Cursor server-side via `db.stream(... yield_per=500)` em datasets grandes
+- Truncamento hard em 100k linhas com linha `# TRUNCATED`
+- Audit logado ANTES do streaming (`acao=REPORT_EXPORTED`, commit imediato)
+- Filename: `relatorio_{scope}_{dataset}_{from}_{to}.csv`
+- `Cache-Control: no-store` (sempre fresh)
+- `X-Content-Type-Options: nosniff`
+
+**Agregadores SQL — 4 queries consolidadas por scope:**
+- `_aggregate_geral`: provas no periodo + serie temporal + ciclo (medio+mediano)
+  + tempo aprovacao + taxa reprovacao sobre ciclos (ADR-101) + atrasadas snapshot
+- `_aggregate_3studio`: provas/movs no periodo (count filter) + reprovadas atual
+  + tempo medio resposta + top motivos cancelamento
+- `_aggregate_vendedores`: ranking via 3 subqueries (volume, decisoes, atrasadas)
+  + JOIN com usuarios + agregacao por localizacao + lista atrasadas em poder
+- `_aggregate_clicheria`: recebidas no periodo + tempo medio aguardando
+  + em transito snapshot + breakdown por origem rota (PADRAO vs DIRETA)
+
+**Padrao dispatcher (lookup dinamico — patch-friendly):**
+- `_dispatch_aggregator(scope, filters, db)` faz match no scope e
+  chama o agregador via name resolution em runtime, permitindo `unittest.mock.patch`.
+- Bug encontrado em testes (dict-based lookup capturava ref fixa) — refatorado.
+
+**EXPLAIN ANALYZE validado em producao:**
+- Q1 (provas): SeqScan + Aggregate, 1.5ms execution.
+- Q2 (movs): SeqScan + Aggregate, 1.3ms.
+- Q3 (pares ciclo): NestedLoop + HashAggregate, 0.24ms.
+- Q4 (ranking): Sort + GroupAggregate + LeftJoin, 2.1ms.
+- Planning time (7-14ms) domina — confirmado: cache+ETag+compiled-cache e
+  o caminho certo. Indices da migration 010 entrarao em jogo com volume.
+
+**Audit logging:**
+- GET `/reports`: NAO loga (cacheado, idempotente — decisao Mario opcao "a").
+- GET `/reports/export`: loga `acao=REPORT_EXPORTED` com `detalhes` contendo
+  scope, dataset, from, to, q, vendedor_id, rota, status. Commit imediato
+  para garantir auditoria mesmo se download abortar.
+
+**Seed deterministico para staging E2E:**
+- `scripts/seed_reports_fixture.py` (versao nova adaptada — Mario opcao 2):
+  - Idempotente (`--cleanup` marca CANCELADA / desativa users).
+  - 5 usuarios + 8 provas + 25+ movimentacoes.
+  - Cobre: rota PADRAO completa, rota DIRETA completa, reprovacao,
+    reinicio de ciclo (RN-006), cancelamento, atrasadas, rota nula.
+  - Tag `SEED:WAVE5:` em todas as linhas para cleanup seguro.
+
+**Registro do router:**
+- `app/main.py`: 1 import + 1 `app.include_router(reports_router, prefix=...)`.
+- 31 rotas backend em producao (era 29).
+
+**Testes — 39 novos (592 → 631):**
+
+| Suite | Testes | Foco |
+|---|---:|---|
+| `TestReportsRBAC` | 6 | admin OK, todos demais 403, sem token 401 |
+| `TestReportsValidacao` | 6 | scope/datas/q/vendedor_id invalidos -> 422 |
+| `TestReportsScopeRouting` | 4 | agregador certo invocado por scope |
+| `TestReportsCache` | 3 | cache hit, filtros/scopes diferentes separados |
+| `TestReportsETag` | 5 | header presente, 304, 200 com etag stale |
+| `TestReportsErroBackend` | 1 | erro DB -> 502 |
+| `TestReportsExport` | 8 | CSV format, BOM, dispatch, audit, RBAC |
+| `TestReportsAuditLogScope` | 1 | GET /reports NAO loga |
+| `TestReportsFiltros` | 1 | q/rota/status propaga ao agregador |
+| `TestReportsCacheKeyDefault` | 1 | now() congelado => mesma chave |
+| `TestEquivalenciaDashboardRelatorios` | 2 | helpers compartilhados |
+| `TestReportsCacheNoDbCall` | 1 | cache hit nao toca db |
+| **Total novo** | **39** | |
+
+### Validacoes
+
+- `pytest backend/tests/`: **631 passed** (424 + 168 + 39), 0 regressao.
+- Cobertura modulos novos: 73% (697 stmts, 186 miss). 47% em reports.py
+  reflete que agregadores SQL nao sao executados em mocks — sao
+  validados em E2E manual com seed real em staging.
+- Cobertura schemas/services novos do Bloco 5.1: 99% (intacta).
+- `ruff check`: limpo em app/ + tests/ + scripts/seed_reports_fixture.py.
+- 4 EXPLAIN ANALYZE em producao (read-only) confirmando uso esperado de
+  indices.
+
+### Arquivos criados
+
+- `backend/app/api/v1/reports.py` (~900 LOC)
+- `backend/tests/test_reports_api.py` (~600 LOC)
+- `scripts/seed_reports_fixture.py` (~440 LOC)
+
+### Arquivos modificados
+
+- `backend/app/main.py` (+1 import, +1 include_router)
+
+### Notas de integracao
+
+- Endpoint disponivel em `https://provadigital-production.up.railway.app/api/v1/reports`
+  apos deploy (proximo bloco ou closeout — Mario decide).
+- Frontend (Bloco 5.3) consome via novo `useReport` hook.
+- Documentacao OpenAPI auto-gerada inclui os 2 endpoints novos.
+
+### Proximo passo
+
+**Bloco 5.3** — Frontend rota + hooks + filtros (rota /relatorios, hook
+unico useReport com cache local + ETag, ScopeSelector, DateRangeFilter,
+SearchInput, URL-persistence).
+
+**Pausa solicitada por Mario apos este bloco.** Retomada quando ele decidir.
+
+---
+
 ## [2026-04-27 — Wave 5 Bloco 5.1] — Backend dominio/servico (puro) — relatorios
 
 ### Contexto
