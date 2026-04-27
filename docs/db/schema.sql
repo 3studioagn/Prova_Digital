@@ -1,18 +1,19 @@
 -- =============================================================================
 -- SNAPSHOT DO SCHEMA ATUAL — Rastreio de Provas Digitais
--- Atualizado em: 2026-04-10 (Wave 3 Lote A sub-bloco A.2, alembic_version = 009)
+-- Atualizado em: 2026-04-27 (Wave 5 Bloco 5.0, alembic_version = 011)
 -- =============================================================================
 -- Este arquivo e referencia rapida. A fonte de verdade sao as migrations Alembic
 -- em backend/migrations/versions/ e os .sql em backend/migrations/rls/.
 --
--- Estado apos Wave 3 Lote A sub-bloco A.2 (RLS 006 aplicada):
+-- Estado apos Wave 5 Bloco 5.0 (recovery + clarify):
 --   - 6 tabelas de dominio + alembic_version (todas RLS on)
 --   - 12 policies RLS, todas usando `is_admin=true` com `(SELECT auth.uid())`
---   - 30 indexes cobrindo queries de filtro/paginacao/scoping
+--   - 32 indexes cobrindo queries de filtro/paginacao/scoping/relatorios
 --   - 6 triggers (3 imutabilidade + 3 updated_at) com search_path=''
---   - Seeds: tempo_atraso_horas_uteis + template_etiqueta (JSONB estruturado)
+--   - Seeds: tempo_atraso_horas_uteis (texto atualizado para 'horas corridas',
+--            ADR-099) + template_etiqueta (JSONB estruturado)
 --
--- Migrations Alembic aplicadas (1-9):
+-- Migrations Alembic aplicadas (1-11):
 --   001  create_enums_tables_triggers_indexes
 --   002  seed_configuracoes_iniciais
 --   003  fix_constraints_indexes_trigger
@@ -22,6 +23,14 @@
 --   007  enable_rls_on_alembic_version (ADR-025)
 --   008  add_index_on_configuracoes_sistema_updated_by (ADR-026)
 --   009  evolve_template_etiqueta_schema (ADR-036)
+--   010  add_indexes_for_wave5_reports (ADR-095 — recovery + Wave 5)
+--   011  clarify_tempo_atraso_descricao (ADR-099 — RN-008 desvio Wave 5)
+--
+-- NOTA SOBRE 010 e 011 (drift detectado e reconciliado em 2026-04-27):
+--   - 010 ja estava aplicada em producao desde 2026-04-15 via commit 5db44bb
+--     (Wave 5 anterior, revertida no repo mas nao no banco). Recovery 1:1.
+--   - 011 e nova; cosmetica (apenas texto da `descricao`). Aplicacao em
+--     producao planejada para o Bloco 5.6 (closeout da Wave 5).
 --
 -- Policies RLS em producao:
 --   001_enable_rls.sql                         (RLS ligado nas 6 tabelas)
@@ -34,6 +43,8 @@
 --                                               pol_movimentacoes_insert +
 --                                               expande SELECT para MOTORISTA/
 --                                               CLICHERIA, resolve F03 Sessao 22)
+--   007_enable_realtime_provas.sql             (Wave 4 — provas_digitais na
+--                                               publicacao supabase_realtime)
 -- =============================================================================
 
 
@@ -209,6 +220,7 @@ CREATE INDEX idx_provas_status ON provas_digitais (status);
 CREATE INDEX idx_provas_vendedor ON provas_digitais (vendedor_id);
 CREATE INDEX idx_provas_created_at ON provas_digitais (created_at);
 CREATE INDEX idx_provas_status_created ON provas_digitais (status, created_at);
+CREATE INDEX idx_provas_vendedor_status ON provas_digitais (vendedor_id, status);  -- migration 010 (Wave 5 — breakdown por vendedor)
 
 -- movimentacoes
 CREATE INDEX idx_movimentacoes_prova ON movimentacoes (prova_id);
@@ -216,6 +228,7 @@ CREATE INDEX idx_movimentacoes_usuario ON movimentacoes (usuario_id);
 CREATE INDEX idx_movimentacoes_prova_ciclo ON movimentacoes (prova_id, ciclo);
 CREATE INDEX idx_movimentacoes_created_at ON movimentacoes (created_at);  -- migration 003
 CREATE INDEX idx_movimentacoes_prova_data ON movimentacoes (prova_id, created_at DESC);  -- migration 003
+CREATE INDEX idx_movimentacoes_status_novo_created_at ON movimentacoes (status_novo, created_at DESC);  -- migration 010 (Wave 5 — tempo medio aprovacao + taxa reprovacao)
 
 -- etiquetas
 CREATE INDEX idx_etiquetas_prova ON etiquetas (prova_id);
@@ -271,10 +284,15 @@ ALTER TABLE alembic_version ENABLE ROW LEVEL SECURITY;  -- migration 007 (ADR-02
 -- Seed original da Wave 0 (migration 002):
 --   template_etiqueta foi '"padrao"' (string JSONB)
 --
--- Pos-Wave 2 Componente 06 (migration 009 — ADR-036), evoluiu para objeto JSONB:
+-- Pos-Wave 2 Componente 06 (migration 009 — ADR-036), evoluiu para objeto JSONB.
+-- Pos-Wave 5 Bloco 5.0 (migration 011 — ADR-099), descricao da chave
+-- `tempo_atraso_horas_uteis` foi atualizada para refletir que o calculo e em
+-- horas CORRIDAS (consistencia com Wave 4 ADR-091, desvio explicito do RN-008
+-- literal). O nome da chave permanece com o sufixo "_horas_uteis" por
+-- compatibilidade com Waves 2 e 4.
 INSERT INTO configuracoes_sistema (chave, valor, descricao) VALUES
     ('tempo_atraso_horas_uteis', '48',
-     'Tempo em horas uteis sem movimentacao para classificar prova como Atrasada (RN-008). Padrao: 48h.'),
+     'Tempo em horas corridas sem movimentacao para classificar prova como Atrasada. Padrao: 48h.'),
     ('template_etiqueta',
      '{"nome":"padrao","formato":"A4","logo_enabled":true,"mostrar_data_criacao":false}'::jsonb,
      'Template de layout da etiqueta imprimivel (RN-011). Campos: nome, formato (A4|80mm_thermal), logo_enabled, mostrar_data_criacao.');

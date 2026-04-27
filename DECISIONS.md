@@ -2672,3 +2672,90 @@ A constante `ASSINATURA_BASE64_MAX_BYTES` e exportada de `lib/types/prova.ts` �
   5. **Itens aceitos sem correcao:** M-01 (5/9 contadores, ADR-093), M-02 (atalhos RF-016, Figma-driven), M-04 (Realtime sem fallback silencioso, decisao Mario), L-03 (Atrasadas sem filtro), L-05 (sem teste TTL).
 
 **Consequencias:** 424 testes passando, 0 regressoes. Linters limpos. Zero toque em Waves 0/1/2/3. Wave 4 aprovada com ressalvas documentadas (M-01, M-02 requerem sign-off formal contra RF-014/RF-016).
+
+---
+
+## ADR-095 — Recovery da migration 010 orfa + reconciliacao de drift (Wave 5 Bloco 5.0)
+**Data:** 2026-04-27 (Wave 5 Bloco 5.0)
+
+**Contexto:** A inspecao MCP da Fase 1 da Wave 5 revelou drift entre o repositorio e o banco de producao:
+  - `public.alembic_version.version_num = '010'` em producao.
+  - Repositorio (branch `main`, tip `6add246 Wave 04 concluida`) so tinha migrations 001-009 versionadas.
+  - 2 indices em producao sem registro no schema versionado: `idx_provas_vendedor_status (vendedor_id, status)` e `idx_movimentacoes_status_novo_created_at (status_novo, created_at DESC)`.
+
+`git log --all --diff-filter=A` localizou o commit `5db44bb feat(wave5): implementacao completa - Relatorios + Atalhos Rapidos` (autor `3studioagn`, 2026-04-15) na branch `wave5-wave6-backup` e tambem como commit historico do `main` antes do `git reset` documentado no stash `stash@{0}: pre-reset-wave5-revert`. Esse commit trazia exatamente `backend/migrations/versions/010_add_indexes_for_wave5_reports.py` com os mesmos 2 indices que estao em producao - confirmando que a migration foi aplicada no banco e o repo posteriormente revertido sem reverter o banco.
+
+**Decisao 1 - Recovery 1:1 da migration 010 (sem tocar producao):**
+  - Restaurar `backend/migrations/versions/010_add_indexes_for_wave5_reports.py` literalmente do commit `5db44bb`. Conteudo bit-exato:
+    - `down_revision = "009"`
+    - `CREATE INDEX IF NOT EXISTS` para os 2 indices (idempotente).
+    - `DROP INDEX IF EXISTS` no `downgrade()` (reversivel).
+  - Atualizar `docs/db/schema.sql`:
+    - Cabecalho passa para "Wave 5 Bloco 5.0, alembic_version = 011".
+    - Lista de migrations inclui 010 e 011.
+    - Secao 5 (INDICES) adiciona os 2 indices novos com comentario `-- migration 010`.
+    - Total de indices passa de 30 para 32.
+  - **Zero alteracao no banco.** A migration 010 ja esta aplicada (`IF NOT EXISTS` torna `alembic upgrade head` no-op para esta revisao).
+
+**Decisao 2 - Nao reaproveitar o resto do commit 5db44bb:**
+  - O commit anterior trazia 5 endpoints separados (`/reports/summary`, `/reports/by-seller`, `/reports/overdue`, `/reports/route-distribution`, `/reports/proofs`) + 6 hooks frontend + 6 componentes frontend + 186 testes.
+  - WAVE5_ANALYSIS.md (Secoes 4.2 e 5.3) propoe arquitetura diferente: **endpoint unico discriminado por `scope`** + **hook unico `useReport`** + cache em 4 camadas (HTTP/ETag/in-memory/SQLAlchemy) - foco em "minimizar queries" reforcado pelo Mario em 2026-04-27.
+  - O commit antigo serve como **referencia de testes e seed** (`scripts/seed_reports_fixture.py`), nao como copia.
+
+**Alternativas rejeitadas:**
+  - **Drop e re-create dos indices:** rejeitado porque os indices ja estao corretos em producao; recriar e custo desnecessario.
+  - **Comecar a Wave 5 em alembic_version=011 sem 010:** rejeitado porque criaria furo na cadeia de revisoes Alembic (`down_revision` da 011 nao apontaria para uma revision existente no repo).
+  - **Aplicar a migration 010 de novo:** desnecessario; `IF NOT EXISTS` ja torna idempotente, e o banco ja esta no estado correto.
+  - **Reverter o banco para 009:** rejeitado; os indices ja estao em producao, ja em uso. Reverter geraria churn sem ganho.
+
+**Consequencias:**
+  - Repositorio passa a refletir fielmente o estado de producao apos esta wave (`alembic_version=011` apos Bloco 5.6, ou `010` se 011 nao for aplicada ainda).
+  - Toda Wave 5 daqui em diante parte de uma base versionada e auditavel.
+  - Migrations futuras tem `down_revision` correto.
+  - Lesson: **toda migration aplicada em producao DEVE ter o arquivo correspondente commitado no `main`**. Antes de `git reset`/revert que retire arquivos de migration, validar que o banco tambem foi revertido.
+
+---
+
+## ADR-099 — RN-008: Wave 5 mantem horas corridas (consistencia com Wave 4) - desvio explicito do RN-008 literal
+**Data:** 2026-04-27 (Wave 5 Bloco 5.0)
+
+**Contexto:** O Documento de Requisitos v3.0 §RN-008 estabelece literalmente: *"prova como Atrasada se permanecer no mesmo status por mais tempo do que o configurado... Valor padrao: 48 horas uteis"*. A Wave 4 (ADR-091, decisao 4) ja havia adotado **horas corridas** com aprovacao explicita do Mario, justificando que calcular horas uteis exigiria tabela de feriados + logica de calendario - complexidade desproporcional para MVP. O briefing inicial da Wave 5 (Mario, 2026-04-27) trouxe novamente o tema, exigindo "horas uteis estritamente" no §2.6, mas marcou como blocker o drift entre Dashboard (RF-014) e Relatorios (RF-015) no §8.
+
+A inspecao da Fase 1 da Wave 5 confirmou: o codigo atual em `backend/app/api/v1/provas.py:1073` usa `limite_atraso = datetime.now(utc) - timedelta(hours=tempo_atraso_horas)` - horas corridas. A descricao da chave `tempo_atraso_horas_uteis` em `configuracoes_sistema` (Wave 0 seed migration 002) ainda dizia "horas uteis" - inconsistencia textual a ser corrigida.
+
+Mario foi consultado em 2026-04-27 com 3 opcoes (A: implementar horas uteis em Wave 5 + corrigir Wave 4; B: manter horas corridas + atualizar config descricao + ADR; C: tabela de feriados global). Mario aprovou explicitamente: **opcao B**.
+
+**Decisao 1 - Wave 5 mantem horas CORRIDAS:**
+  - O calculo no Dashboard (Wave 4) e nos Relatorios (Wave 5) usa o mesmo `coalesce(max(mov.created_at), prova.created_at) < (now() - INTERVAL h)`.
+  - Mesmo helper, mesma logica, mesmo resultado - **drift cross-wave eliminado por construcao**.
+  - Teste de integracao em §7.4 do WAVE5_ANALYSIS.md valida equivalencia numerica entre `/api/v1/provas/dashboard.atrasadas` e `/api/v1/reports?scope=geral.indicadores.qtd_atrasadas`.
+
+**Decisao 2 - Atualizar `descricao` da chave (migration 011):**
+  - Texto novo: *"Tempo em horas corridas sem movimentacao para classificar prova como Atrasada. Padrao: 48h."*
+  - Texto curto, sem citar ADRs/RN para nao poluir a UI do Componente 09 (decisao tomada com Mario em 2026-04-27 - opcao "ii").
+  - Migration 011 e idempotente (UPDATE) e reversivel (downgrade restaura texto Wave 0).
+
+**Decisao 3 - NAO renomear a chave:**
+  - Nome `tempo_atraso_horas_uteis` permanece. Motivos:
+    1. Compat com Wave 2 (`schemas/configuracao.py` whitelist da chave).
+    2. Compat com Wave 4 (handler do dashboard le pela chave).
+    3. Compat com schema.sql Section 7 (seeds).
+    4. Compat com testes existentes (`test_configuracoes_api.py`, `test_provas_api.py`).
+  - O custo de renomear (touchar 4 waves anteriores) e desproporcional ao ganho (estetica do nome).
+
+**Decisao 4 - Aplicacao da 011 fica para Bloco 5.6:**
+  - 011 e cosmetica (so muda texto). Aplicar agora seria 1 deploy isolado para mudanca de baixissimo risco.
+  - Deploy unico no fim da Wave 5 (Bloco 5.6) reduz numero de janelas de deploy.
+  - No intervalo, banco esta em 010 e repo em 011 - documentado em CHANGELOG.md e schema.sql.
+
+**Alternativas rejeitadas:**
+  - **A: implementar horas uteis em Wave 5 + corrigir Wave 4:** rejeitado pelo Mario - escopo desproporcional, exigiria tabela de feriados nacionais + estaduais + 3Studio-especificos, funcao SQL `business_hours_between` (ou Python equivalente), refactor do Dashboard (Wave 4 - regra inviolavel §2.1 da Wave 5).
+  - **C: tabela de feriados global em SQL:** rejeitado - mesma justificativa de A; reavaliar em Wave 7+ se houver demanda de auditor externo.
+  - **Renomear a chave para `tempo_atraso_horas_corridas`:** rejeitado - ver Decisao 3.
+  - **Manter texto antigo "horas uteis" no banco:** rejeitado - texto inconsistente com codigo gera confusao no admin que ler `/configuracoes`.
+
+**Consequencias:**
+  - Sistema continua nao-conforme com RN-008 literal. **Re-evaluar em Wave 7+** se auditor externo cobrar.
+  - Audit trail: ADR-091 (decisao original) + ADR-099 (reforco Wave 5) + migration 011 (atualiza descricao) - rastro completo.
+  - Wave 5 e Wave 4 calculam "atrasadas" identicamente - cross-check automatizado no §7.4 do ANALYSIS impede regressao futura.
+  - O "_horas_uteis" no nome da chave vira **divida nominal documentada** - aceitavel ate Wave 7+.

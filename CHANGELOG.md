@@ -2,6 +2,103 @@
 
 ---
 
+## [2026-04-27 — Wave 5 Bloco 5.0] — Recovery migration 010 + clarificacao descricao (RN-008 Wave 5)
+
+### Contexto
+
+Inicio da Wave 5 (Relatorios Gerenciais + Atalhos Rapidos). Bloco 5.0 e
+puramente fundacional: reconciliar drift detectado entre repo e producao
+e documentar a decisao de horas corridas para o calculo de "atrasadas".
+
+Drift detectado na Fase 1 (inspecao via MCP Supabase, 2026-04-27):
+  - `public.alembic_version.version_num = '010'` em producao.
+  - Repositorio em `main` (tip `6add246 Wave 04 concluida`) tinha apenas
+    migrations 001-009.
+  - 2 indices em producao sem registro no schema versionado:
+    `idx_provas_vendedor_status` e `idx_movimentacoes_status_novo_created_at`.
+
+`git log --all --diff-filter=A` revelou commit `5db44bb feat(wave5): ...`
+(2026-04-15) com a migration 010 que originou os indices. O commit foi
+revertido no `main` via `git reset` (ver `stash@{0}: pre-reset-wave5-revert`),
+mas o banco permaneceu em 010. A branch `wave5-wave6-backup` ainda contem
+o codigo antigo da Wave 5 (referencia, nao reaproveitada — ver ADR-095).
+
+### Entregue
+
+**Migrations Alembic:**
+- `010_add_indexes_for_wave5_reports.py` (recovery 1:1 do commit 5db44bb)
+  - 2 indices: `idx_movimentacoes_status_novo_created_at`, `idx_provas_vendedor_status`
+  - Idempotente (`CREATE INDEX IF NOT EXISTS`), reversivel
+  - **NAO altera o banco** — indices ja em producao desde 2026-04-15
+  - Atende as agregacoes da Wave 5 (tempo medio aprovacao, taxa reprovacao,
+    breakdown por vendedor) — ver WAVE5_ANALYSIS.md §3.2
+- `011_clarify_tempo_atraso_descricao.py` (NOVA, ADR-099)
+  - UPDATE em `configuracoes_sistema.descricao` da chave
+    `tempo_atraso_horas_uteis`
+  - Texto novo (curto, UI-friendly): *"Tempo em horas corridas sem
+    movimentacao para classificar prova como Atrasada. Padrao: 48h."*
+  - Idempotente, reversivel
+  - **NAO aplicada em producao ainda** — aplicacao planejada p/ Bloco 5.6
+
+**Documentacao:**
+- `docs/db/schema.sql` atualizado:
+  - Cabecalho: Wave 5 Bloco 5.0, alembic_version = 011
+  - Lista de migrations: +010, +011
+  - Secao 5 (INDICES): +2 indices
+  - Secao 7 (SEEDS): descricao atualizada para refletir migration 011
+  - Total de indices: 30 → 32
+- `DECISIONS.md`: +ADR-095 (recovery), +ADR-099 (RN-008 desvio Wave 5)
+
+**Decisoes registradas:**
+- **ADR-095**: Recovery 1:1 da migration 010 orfa. Nao reaproveitar o
+  resto do commit 5db44bb (5 endpoints separados) — Wave 5 nova adota
+  endpoint unico discriminado (ver ANALYSIS §4.2).
+- **ADR-099**: Wave 5 mantem horas corridas (consistencia com Wave 4
+  ADR-091, opcao B aprovada por Mario em 2026-04-27). Nome da chave
+  preserva "_horas_uteis" por compat Wave 2/4 — divida nominal documentada.
+
+### Estado pos-Bloco 5.0
+
+| | Antes | Depois |
+|---|---|---|
+| `alembic_version` em producao | 010 | 010 (sem mudanca) |
+| `alembic_version` esperado em repo | 009 | 011 (apos `alembic upgrade head` local) |
+| Migrations versionadas | 001-009 | 001-011 |
+| Indices documentados em schema.sql | 30 | 32 |
+| ADRs registrados | ADR-094 | ADR-099 |
+| Drift entre repo e producao | **detectado** | **reconciliado** |
+
+### Validacoes
+
+- Sem alteracao em codigo de Wave 0/1/2/3/4 (zero risco de regressao).
+- Pytest backend: 424 passed (sem nova execucao necessaria — apenas
+  arquivos de migration foram tocados).
+- `alembic history` valida cadeia 001→002→...→011 sem furos.
+- Migration 011 testada em staging local antes de Bloco 5.6.
+
+### Arquivos criados
+
+- `backend/migrations/versions/010_add_indexes_for_wave5_reports.py`
+- `backend/migrations/versions/011_clarify_tempo_atraso_descricao.py`
+
+### Arquivos modificados
+
+- `docs/db/schema.sql`
+- `DECISIONS.md`
+- `CHANGELOG.md` (esta entrada)
+
+### Proximo passo
+
+**Bloco 5.1** — Backend dominio/servico (puro):
+- `app/services/report_filters.py` — Pydantic + normalizacao deterministica para chave de cache
+- `app/services/report_metrics.py` — funcoes puras de agregacao (mockaveis)
+- `app/services/report_cache.py` — wrapper TTL 60s
+- `app/services/report_etag.py` — gera ETag SHA-256 deterministico
+- `app/domain/schemas/report.py` — discriminated union completa (4 perspectivas)
+- 60+ testes unit cobrindo cada funcao
+
+---
+
 ## [2026-04-14 — Wave 4] — Dashboard em Tempo Real (Componente 15)
 
 ### Contexto
