@@ -2,6 +2,137 @@
 
 ---
 
+## [2026-04-27 — Wave 5 Bloco 5.1] — Backend dominio/servico (puro) — relatorios
+
+### Contexto
+
+Bloco 5.1 da Wave 5. Camada de **dominio puro** dos Relatorios (Componente 16):
+schemas Pydantic v2, filtros validados, funcoes de agregacao matematicas,
+cache TTL asyncio-safe, ETag deterministico. Tudo testavel sem banco.
+
+A camada SQL (queries de agregacao) fica para o Bloco 5.2. Este bloco
+prepara a fundacao reutilizavel: cada modulo tem responsabilidade unica
+e e mockavel.
+
+Foco do bloco — reforcado por Mario em 2026-04-27: **minimizar queries**.
+A arquitetura entrega isso via 4 camadas combinadas (WAVE5_ANALYSIS §4.4):
+  1. HTTP/ETag/304 (clientside)
+  2. Cache in-memory TTL 60s (backend)
+  3. Realtime invalida cache do front (Wave 4 reuse)
+  4. SQLAlchemy compiled cache (gratuito)
+
+### Entregue
+
+**5 modulos novos:**
+
+| Arquivo | LOC | Cobertura |
+|---|---:|---:|
+| `app/domain/schemas/report.py` | 144 | **100%** |
+| `app/services/report_filters.py` | 62 | **100%** |
+| `app/services/report_metrics.py` | 50 | **100%** |
+| `app/services/report_cache.py` | 75 | **95%** |
+| `app/services/report_etag.py` | 27 | **100%** |
+| **Total** | **358** | **99%** |
+
+**Conteudo:**
+
+- `report.py` — discriminated union por `scope` (4 perspectivas: geral,
+  3studio, vendedores, clicheria) + 13 sub-schemas (PeriodoMeta,
+  IndicadoresGeral, Indicadores3Studio, IndicadoresClicheria,
+  VendedorMetrica, VendedorAtrasoAtual, DistRota, DistStatus,
+  DistLocalizacao, DistOrigemRota, PontoSerie, CancelamentoTop). Todos
+  `frozen=True` para protecao contra mutacao apos cache hit.
+
+- `report_filters.py` — `ReportFilters` Pydantic v2 com validacao de:
+  scope (Literal), from/to (default ultimos 30 dias, max 366 dias),
+  q (max 200 chars com strip), vendedor_id, rota, status. Funcao
+  `to_cache_key(filters)` produz SHA-256 deterministico do JSON canonico
+  dos filtros normalizados — base do cache compartilhado entre requests
+  com mesmos filtros.
+
+- `report_metrics.py` — funcoes puras de agregacao (sem DB, sem env vars,
+  sem logs): `horas_corridas`, `media_horas`, `mediana_horas`, `taxa`,
+  `media_diaria`, `limite_atraso` (RN-008 com horas corridas, ADR-099),
+  `calcular_total_dias`, `arredondar_horas`, `assert_utc`. Cada funcao
+  documenta seu contrato de denominador zero / lista vazia.
+
+- `report_cache.py` — `ReportCache` classe asyncio-safe com:
+  - `asyncio.Lock` em check-and-mutate.
+  - Lazy expiration no `get()`.
+  - `purge_expired()` para housekeeping opcional.
+  - TTL configuravel via env var `REPORTS_CACHE_TTL_SECONDS` (default 60).
+  - Singleton default + `reset_default_cache()` para testes.
+
+- `report_etag.py` — `compute_etag(payload)` retorna strong ETag entre
+  aspas (RFC 7232 §2.3). Aceita BaseModel ou dict. Determinismo via
+  `model_dump(mode="json") + sort_keys=True + sha256`.
+  `matches_if_none_match(header, etag)` com suporte a wildcard `*` e
+  lista comma-separated (RFC 7232 §3.2).
+
+**Testes — 168 novos (424 → 592):**
+
+| Arquivo | Testes |
+|---|---:|
+| `test_report_metrics.py` | 47 |
+| `test_report_filters.py` | 39 |
+| `test_report_cache.py` | 27 (incl. 2 testes de concorrencia) |
+| `test_report_etag.py` | 22 |
+| `test_report_schemas.py` | 33 |
+| **Total novo** | **168** |
+
+### Decisoes de design
+
+- **`PeriodoMeta`**: `populate_by_name=True` adicionado para permitir
+  construcao via `from_=` (Python) ou `"from"` (JSON). Necessario porque
+  `from` e palavra reservada em Python.
+- **Schemas frozen**: previne bug sutil em que dois cache hits da mesma
+  chave compartilhariam payload mutavel.
+- **Cache key SHA-256 (nao `hash()`)**: hash do Python e nao-deterministico
+  entre processos (PYTHONHASHSEED). SHA-256 garante mesma chave em
+  qualquer worker uvicorn.
+- **Cache lazy expiration**: `get()` limpa entradas expiradas em vez de
+  ter um background job. Justificavel para volume Wave 5 (<1000 entradas
+  por worker em pico). `purge_expired()` disponivel para housekeeping
+  futuro se necessario.
+- **2 helpers de singleton**: `get_default_cache()` (sync, FastAPI DI) +
+  `get_default_cache_async()` (async, casos com Lock real necessario).
+  `reset_default_cache(*, new_ttl=...)` apenas para testes.
+
+### Validacoes
+
+- `pytest backend/tests/`: **592 passed** (424 + 168), 0 regressao.
+- Cobertura nos modulos novos: **99% (358 stmts, 4 miss)** — 4 missed sao
+  branches secundarios em `get_default_cache_async`.
+- `ruff check app/ tests/test_report_*.py`: limpo.
+- Sem alteracao em codigo de Wave 0/1/2/3/4. Sem migration nova.
+
+### Arquivos criados
+
+- `backend/app/domain/schemas/report.py`
+- `backend/app/services/report_filters.py`
+- `backend/app/services/report_metrics.py`
+- `backend/app/services/report_cache.py`
+- `backend/app/services/report_etag.py`
+- `backend/tests/test_report_metrics.py`
+- `backend/tests/test_report_filters.py`
+- `backend/tests/test_report_cache.py`
+- `backend/tests/test_report_etag.py`
+- `backend/tests/test_report_schemas.py`
+
+### Proximo passo
+
+**Bloco 5.2** — Backend API:
+- `app/api/v1/reports.py` — handler unico `/reports?scope=...` com switch
+  por scope, query consolidada por scope, integracao com cache+ETag.
+- `/reports/export` — StreamingResponse com cursor server-side, BOM UTF-8,
+  truncamento em 100k linhas.
+- Audit logging em `audit_logs` (`acao="REPORT_VIEWED"` / `"REPORT_EXPORTED"`).
+- 30+ testes integracao com seed deterministico (recuperar
+  `scripts/seed_reports_fixture.py` do commit 5db44bb).
+- `EXPLAIN ANALYZE` em cada query nova, anexo ao commit.
+
+---
+
 ## [2026-04-27 — Wave 5 Bloco 5.0] — Recovery migration 010 + clarificacao descricao (RN-008 Wave 5)
 
 ### Contexto
