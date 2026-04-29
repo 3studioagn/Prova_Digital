@@ -19,7 +19,7 @@
  * (layout) renderize o modal de help. `?` chama `openHelp`
  * internamente; modal pode ser fechado externamente via `closeHelp`.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const LEADER_TIMEOUT_MS = 1_500;
@@ -80,8 +80,11 @@ export function useGlobalShortcuts(
   const leaderActiveRef = useRef(false);
   const leaderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const visibleShortcuts = SHORTCUT_DEFS.filter(
-    (s) => !s.adminOnly || isAdmin,
+  // Audit 2026-04-29 L-F1: useMemo estabiliza a referencia para que o
+  // useEffect de keydown nao re-attach o listener a cada render do layout.
+  const visibleShortcuts = useMemo(
+    () => SHORTCUT_DEFS.filter((s) => !s.adminOnly || isAdmin),
+    [isAdmin],
   );
 
   const openHelp = useCallback(() => setHelpOpen(true), []);
