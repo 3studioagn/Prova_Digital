@@ -2,6 +2,133 @@
 
 ---
 
+## [2026-04-29 — Wave 6 Componente 18 UX iteration] — Pacote A+B (filtros inteligentes + navegacao em volume)
+
+Apos o Gate 2 entregue, Mario pediu reforco de UX visando uso real em
+producao (~350 provas/mes x ~15 audits/prova = ~5k/mes = ~60k/ano).
+Iteracao implementada no mesmo branch `wave6/componente-18`. Sem
+breaking changes — novos query params sao opcionais.
+
+### Filtros mais inteligentes (A)
+
+  - **A1 (presets de data):** pills "Hoje · 7d · 30d · 90d ·
+    Personalizado" no topo da pagina. Default "Hoje" aplicado
+    automaticamente no primeiro acesso (sem filtros na URL) — reduz
+    drasticamente o conjunto inicial. Helpers `presetToRange` e
+    `detectPreset` em `lib/types/auditLog.ts`.
+  - **A2 (filtro semantico tipo_evento):** dropdown com 6 categorias
+    de alto nivel (Todos / Reprovacoes / Reinicios de ciclo /
+    Cancelamentos / Criacoes de prova / Mudancas administrativas).
+    Esconde do admin a complexidade do par
+    `(acao, detalhes_json.para)`. Mapeamento centralizado em
+    `audit_log_service._aplicar_tipo_evento`. Backend valida com
+    whitelist `TIPOS_EVENTO_VALIDOS`.
+  - **A3 (dropdown de ator):** populado via fetch
+    `GET /api/v1/users/?ativo=true&page_size=200`. Carregamento
+    opt-in apos confirmar `is_admin`. Substitui filtro por UUID na
+    URL.
+  - **A4 (busca expandida):** query `q` agora procura simultaneamente
+    em `audit_logs.detalhes_json::text` E em
+    `provas_digitais.nro_requerimento` (via OR). Permite admin colar
+    numero de requerimento humano-legivel sem saber UUIDs. Count
+    query agora tambem faz JOIN com `provas_digitais` para
+    consistencia.
+
+### Navegacao em volume (B)
+
+  - **B1 (paginacao numerada):** janela inteligente
+    `[1, ..., current-1, current, current+1, ..., total]` em vez do
+    Anterior/Proxima isolado. Form "Ir para pagina" aparece quando
+    `total > 5`. Helper `buildPageWindow` na `page.tsx`.
+  - **B2 (page size):** dropdown 25/50/100/200 (default 50). URL
+    omite param quando default — URL enxuta.
+  - **B3 (sticky header):** `position: sticky; top: 0; z-index: 5` +
+    container `.tableScroll` com `max-height: 70vh; overflow-y: auto`.
+    Cabecalho permanece visivel durante scroll de listas longas.
+  - **B4 (ordenacao clicavel):** colunas Data/Acao/Ator clicaveis com
+    seta unicode (↑/↓) e `aria-sort`. Toggle direcao na mesma coluna;
+    troca para sort=desc default em coluna nova. Backend recebe novo
+    param `order_by` com whitelist defensiva
+    `ORDER_BY_VALIDOS = {created_at, acao, usuario_nome}`. Helper
+    `_resolver_order_by_column` mapeia string -> coluna SQLAlchemy
+    sem `getattr` reflexivo (defesa anti-SQL-injection em duas
+    camadas).
+
+### Mudancas de contrato (sem breaking)
+
+`GET /api/v1/audit-log` ganha 2 query params opcionais:
+
+  - `tipo_evento` (whitelist: todos|reprovacao|reinicio|cancelamento|
+    criacao|admin)
+  - `order_by` (whitelist: created_at|acao|usuario_nome)
+
+Defaults preservam comportamento anterior. Clientes da Wave 6 inicial
+continuam funcionando.
+
+### Testes
+
+20 testes novos em `tests/test_audit_log_api.py`:
+  - 7 cobrindo `tipo_evento` (schema validation, normalizacao
+    case-insensitive, mapeamento por valor)
+  - 7 cobrindo `order_by` (whitelist, default, defesa
+    anti-SQL-injection, helper)
+  - 1 cobrindo expansao de `q` para `nro_requerimento`
+  - 5 cobrindo edge cases adicionais
+
+Suite: **722 passando** (era 689 antes da iteracao). Coverage novo
+codigo: 92%.
+
+### Frontend
+
+  - `lib/types/auditLog.ts`: TipoEvento, OrderBy, PAGE_SIZE_OPTIONS,
+    DatePresetKey, DATE_PRESET_LABELS, TIPO_EVENTO_LABELS,
+    presetToRange, detectPreset, filtersToQueryString agora omite
+    defaults.
+  - `app/(dashboard)/auditoria/page.tsx`: presetsBar com pills,
+    grid de filtros expandido (busca + tipo evento + ator + ordem +
+    de + ate + page size + limpar), tabela com SortableTh nos 3
+    cabecalhos clicaveis, paginacao numerada com pageWindow + form
+    page jump.
+  - `app/(dashboard)/auditoria/auditoria.module.css`: presetsBar +
+    presetPill/Active, sortableHeader/Active, sticky header
+    (position: sticky), tableScroll com max-height 70vh,
+    paginacao numerada (pageBtn/Active, pageEllipsis), pageJump
+    form (input + Ir).
+
+### Validacao
+
+  - `npx tsc --noEmit`: OK
+  - `npx next build`: `/auditoria` 5.68 kB -> 7.27 kB (+1.59 kB),
+    First Load 164 kB -> 166 kB. Sem novos warnings da Wave 6.
+  - Suite backend completa: 722 passando, 0 regressao.
+
+### Decisoes (ADR-113)
+
+  - **ADR-113**: Filtros semanticos no backend em vez de frontend
+    traduzir — razao: paginacao precisa do filtro consistente
+    server-side (50 itens da pagina filtrados, nao 50 itens crus
+    com 5 reprovacoes).
+
+### Arquivos novos/alterados
+
+  - `backend/app/domain/schemas/audit_log.py`: tipo_evento +
+    order_by + 2 model_validators + constantes
+    TIPOS_EVENTO_VALIDOS, ORDER_BY_VALIDOS
+  - `backend/app/services/audit_log_service.py`:
+    _aplicar_tipo_evento, _resolver_order_by_column,
+    _aplicar_filtros expandida, listar_audit_logs com order_by
+    dinamico + count com JOIN
+  - `backend/app/api/v1/audit_log.py`: 2 query params novos +
+    log INFO atualizado
+  - `backend/tests/test_audit_log_api.py`: +20 testes
+  - `frontend/src/lib/types/auditLog.ts`: ~150 linhas adicionadas
+  - `frontend/src/app/(dashboard)/auditoria/page.tsx`: refator
+    completo (~680 linhas, 62 removidas)
+  - `frontend/src/app/(dashboard)/auditoria/auditoria.module.css`:
+    +180 linhas (presets, sortable, sticky, paginacao numerada)
+
+---
+
 ## [2026-04-29 — Wave 6 Componente 18] — Interface de Log de Auditoria
 
 ### Contexto

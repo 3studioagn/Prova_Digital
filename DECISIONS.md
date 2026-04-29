@@ -3877,3 +3877,97 @@ via `has_table_privilege`.
     SELECT has_table_privilege('authenticated','public.audit_logs','UPDATE');
     -- esperado: false
     ```
+
+---
+
+## ADR-113 — Filtros semanticos do audit-log resolvidos no backend, nao no frontend
+**Data:** 2026-04-29 (Wave 6, UX iteration apos Componente 18)
+
+**Contexto:** Apos o Gate 2 da Wave 6 entregue, Mario pediu reforco de
+UX visando uso real em producao (~60k audits/ano). O caso de uso
+primario do admin e "encontrar o que aconteceu rapido em volume
+crescente". A UI inicial expoe o `acao` cru (`transitar_status`,
+`reiniciar_ciclo`, etc.) — mas o admin pensa em categorias semanticas
+("apenas reprovacoes", "apenas cancelamentos") que sao DERIVADAS de
+combinacoes de `acao` + `detalhes_json.para`:
+
+  - reprovacao    = acao=transitar_status AND detalhes_json.para=REPROVADA_PELO_VENDEDOR
+  - cancelamento  = acao=transitar_status AND detalhes_json.para=CANCELADA
+  - reinicio      = acao=reiniciar_ciclo
+  - criacao       = acao=criar_prova
+  - admin         = acao IN ('atualizar_configuracao', 'REPORT_EXPORTED')
+
+Surgiram duas opcoes para implementar o filtro semantico:
+
+**Opcao (i) — Resolver no frontend:** UI traduz a categoria em
+parametros existentes (`acao` + filtro adicional via `q` em
+detalhes_json). Backend nao muda.
+
+**Opcao (ii) — Adicionar `tipo_evento` no backend:** novo query param
+com whitelist; service mapeia para WHERE clause server-side.
+
+**Decisao:** **Opcao (ii)** — `tipo_evento` no backend.
+
+**Razao em 4 pontos:**
+
+  1. **Paginacao consistente.** No (i), o frontend recebe 50 audits
+     crus e filtra para "apenas reprovacoes" — pode acabar com 5
+     visiveis na pagina e o admin precisa avancar para encontrar
+     mais. Confunde a paginacao numerada (UX B1) que diz
+     "Mostrando 1-50 de 5234" mesmo quando so 5 sao reprovacoes.
+     Server-side filtra antes da paginacao.
+
+  2. **Performance.** Em volume alto (>10k linhas), o (i) baixa
+     tudo no `q` filter em `detalhes_json::text` (LIKE custoso).
+     O (ii) usa `astext == 'REPROVADA_PELO_VENDEDOR'` que e
+     comparacao exata — pode ser indexada com GIN no futuro
+     se necessario.
+
+  3. **API mais limpa.** Cliente externo (curl, integracao futura)
+     consome `?tipo_evento=reprovacao` em vez de
+     `?acao=transitar_status&q=REPROVADA_PELO_VENDEDOR` (que e
+     fragil e expoe implementacao interna). Padrao consistente com
+     o Wave 5 reports onde `?scope=geral` esconde a complexidade
+     de qual agregador rodar.
+
+  4. **Defesa central.** A whitelist `TIPOS_EVENTO_VALIDOS` no
+     schema rejeita valores arbitrarios em UM lugar. Se o frontend
+     traduzisse, qualquer caller direto (incluindo PR review futuro
+     de novo cliente) precisaria duplicar a logica.
+
+**Alternativas rejeitadas:**
+
+  - **Opcao (i) — frontend traduz:** rejeitada pelos 4 motivos acima.
+    A simplicidade de "nao mudar backend" nao compensa quebrar
+    paginacao + performance + API contract.
+
+  - **Schema com Enum tipado em vez de string + whitelist:**
+    consideravel — mais idiomatic Pydantic v2. Mas Enum exige
+    importacao em todo lugar que toca o param e cria um ponto a
+    mais para manter sincronizado com o frontend. String + whitelist
+    centralizada (frozenset constante exportada no schema) e
+    suficiente, e o teste `test_schema_aceita_valores_validos`
+    (parametrizado) cobre todos os valores.
+
+**Consequencias:**
+
+  - 1 query param novo no `GET /api/v1/audit-log` (`tipo_evento`).
+  - 1 helper privado novo (`_aplicar_tipo_evento`).
+  - 1 constante nova exportada (`TIPOS_EVENTO_VALIDOS`).
+  - Frontend (`auditLog.ts`) tem `TIPO_EVENTO_LABELS` para a UI mas
+    NAO traduz — apenas envia a string.
+  - 7 testes parametrizados cobrindo cada valor + edge cases
+    (case-insensitive, "todos" -> None, valor invalido -> 422).
+  - Padrao a seguir em adicoes futuras: novo tipo_evento adiciona
+    1 entrada no frozenset + 1 ramo no `_aplicar_tipo_evento`.
+    Frontend ganha 1 entrada no dict de labels. Sem mudanca de
+    contrato em outros pontos.
+
+**Decisao similar (UX B4 — order_by):** mesma logica aplicada para
+ordenacao clicavel. `ORDER_BY_VALIDOS = {created_at, acao,
+usuario_nome}` no schema; helper `_resolver_order_by_column` mapeia
+string -> coluna SQLAlchemy via `if/elif` explicito (defesa
+anti-SQL-injection em duas camadas: schema rejeita arbitrario antes
+de chegar; service nunca usa `getattr` reflexivo). Teste
+`test_schema_rejeita_coluna_arbitraria` cobre `"id; DROP TABLE"` e
+`"ip_address"` (nao na whitelist).

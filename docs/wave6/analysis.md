@@ -715,3 +715,61 @@ Total Wave 6: **5 commits, ~3470 linhas adicionadas, 0 regressão** (689 testes 
 - 12 RLS policies inalteradas + REVOKE explícito em `audit_logs`.
 - 32 índices inalterados.
 - Advisors pós-Wave 6: idêntico ao pré-Wave 6 (1 INFO `rls_enabled_no_policy` em `alembic_version`, 1 WARN `auth_leaked_password_protection`, 14 INFO `unused_index` — esperado-cair conforme Wave 6 entrar em uso).
+
+---
+
+## UX iteration — pacote A+B (anexado pós-conversa em 2026-04-29)
+
+Após o Gate 2 entregue, Mario pediu reforço de UX visando uso real em produção (~350 provas/mês × ~15 audits/prova = ~5k audits/mês = ~60k/ano). O caso de uso primário do admin é "encontrar o que aconteceu rapidamente em volume crescente". Pacote A (filtros mais inteligentes) + B (navegação em volume) implementado neste mesmo branch.
+
+### Itens entregues
+
+| Item | Descrição | Arquivos |
+|------|-----------|----------|
+| **A1** | Presets de data (Hoje · 7d · 30d · 90d · Personalizado) com default automático "Hoje" no primeiro acesso | [auditLog.ts](../../frontend/src/lib/types/auditLog.ts) (`presetToRange`, `detectPreset`), [page.tsx](../../frontend/src/app/(dashboard)/auditoria/page.tsx) |
+| **A2** | Dropdown semântico de tipo de evento (6 categorias) que esconde do admin a complexidade do par `(acao, detalhes_json.para)` | [audit_log.py schema](../../backend/app/domain/schemas/audit_log.py) (`tipo_evento` + `TIPOS_EVENTO_VALIDOS`), [audit_log_service.py](../../backend/app/services/audit_log_service.py) (`_aplicar_tipo_evento`) |
+| **A3** | Dropdown de Ator populado via `GET /api/v1/users` (todos ativos, max 200) | [page.tsx](../../frontend/src/app/(dashboard)/auditoria/page.tsx) (`useEffect fetchUsuarios`) |
+| **A4** | Busca `q` agora procura simultaneamente em `audit_logs.detalhes_json::text` E em `provas_digitais.nro_requerimento` (admin pode colar nº de requerimento humano) | [audit_log_service.py:_aplicar_filtros](../../backend/app/services/audit_log_service.py) (OR clause + count com JOIN) |
+| **B1** | Paginação numerada com janela inteligente + form "Ir para página" quando total > 5 | [page.tsx:buildPageWindow](../../frontend/src/app/(dashboard)/auditoria/page.tsx), [auditoria.module.css](../../frontend/src/app/(dashboard)/auditoria/auditoria.module.css) |
+| **B2** | Dropdown "Linhas por página" com 25/50/100/200 | [page.tsx](../../frontend/src/app/(dashboard)/auditoria/page.tsx) |
+| **B3** | Sticky header (`position: sticky; top: 0; z-index: 5`) + container com `max-height: 70vh; overflow-y: auto` | [auditoria.module.css](../../frontend/src/app/(dashboard)/auditoria/auditoria.module.css) |
+| **B4** | Cabeçalhos clicáveis nas colunas Data/Ação/Ator. `order_by` no backend com whitelist defensiva (created_at, acao, usuario_nome). Tiebreaker por id mantido | [audit_log.py schema](../../backend/app/domain/schemas/audit_log.py) (`order_by` + `ORDER_BY_VALIDOS`), [audit_log_service.py](../../backend/app/services/audit_log_service.py) (`_resolver_order_by_column`) |
+
+### Mudanças de contrato
+
+Sem breaking changes. Novos query params no `GET /api/v1/audit-log`:
+- `tipo_evento` (string opcional, whitelist 6 valores)
+- `order_by` (string opcional, whitelist 3 valores, default `created_at`)
+
+Comportamento default preservado: clientes existentes sem esses params continuam recebendo a mesma resposta de antes.
+
+### Testes
+
+20 testes novos em `tests/test_audit_log_api.py`:
+- 7 cobrindo `tipo_evento` (schema validation, normalização case-insensitive, mapeamento por valor)
+- 7 cobrindo `order_by` (whitelist, default, defesa anti-SQL-injection, helper de resolução)
+- 1 cobrindo expansão de `q` para `nro_requerimento` (inspeção do SQL compilado)
+- 5 cobrindo edge cases adicionais
+
+Suite total: **722 passando** (era 689 antes desta iteração). Cobertura novo código: 92% (router 86%, service 88%, schemas 99%).
+
+### Validação
+
+- `npx tsc --noEmit`: OK
+- `npx next build`: `/auditoria` cresceu de 5.68 kB → 7.27 kB (+1.59 kB), First Load 164 kB → 166 kB. Build limpo (warning é pré-existente em `provas.module.css`).
+- Suite backend completa: 722 passando, 0 regressão.
+
+### Defesa contra SQL injection no `order_by`
+
+Embora `order_by` seja string que poderia ser injetado num `ORDER BY <col>`, a defesa é em duas camadas:
+
+1. **Schema Pydantic** (`validate_order_by`) valida contra `ORDER_BY_VALIDOS = frozenset({"created_at", "acao", "usuario_nome"})`. Qualquer outro valor produz 422.
+2. **Service** (`_resolver_order_by_column`) usa `if/elif` explícito em vez de `getattr` reflexivo — mesmo se o schema for contornado, apenas as 3 colunas conhecidas chegam ao SQL.
+
+Teste explícito: `test_schema_rejeita_coluna_arbitraria` cobre `"id; DROP TABLE"` e `"ip_address"` (não na whitelist).
+
+### Pendências e follow-ups
+
+- Verificação visual com login real ainda dependente do Mario (sem credenciais durante a sessão).
+- E2E Playwright continua como follow-up Wave 7.
+- C (live mode) e D (conveniência) não foram implementados — pacotes que podem entrar em iteração futura conforme uso real evidenciar necessidade.
