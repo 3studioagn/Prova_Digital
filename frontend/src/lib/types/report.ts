@@ -187,6 +187,12 @@ export interface ReportResponse3Studio {
   periodo: PeriodoMeta;
   indicadores: Indicadores3Studio;
   cancelamentos_top: CancelamentoTop[];
+  /**
+   * Provas criadas por dia (00:00 UTC do bucket). Mesma serie que o
+   * scope=geral (provas_criadas neste scope agrega o mesmo conjunto
+   * de registros). Usado pelo sparkline do card "PROVAS CRIADAS".
+   */
+  serie_temporal: PontoSerie[];
   atualizado_em: string;
 }
 

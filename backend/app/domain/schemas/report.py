@@ -305,6 +305,12 @@ class ReportResponse3Studio(BaseModel):
     cancelamentos_top: list[CancelamentoTop]
     """Top motivos de cancelamento no periodo (max 10, ordenado DESC)."""
 
+    serie_temporal: list[PontoSerie]
+    """Provas criadas por dia (00:00 UTC do bucket). Mesma fonte do
+    scope=geral — `provas_criadas` deste scope agrega exatamente os
+    mesmos registros, entao a serie diaria coincide. Usado pelo
+    sparkline do card 'PROVAS CRIADAS' no frontend (Wave 5)."""
+
     atualizado_em: datetime
 
 

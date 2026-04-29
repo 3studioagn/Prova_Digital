@@ -3031,3 +3031,556 @@ e aprovada no ciclo 2. Como contar essa prova no calculo de "taxa de reprovacao"
     e `VendedorMetrica.taxa_reprovacao` + comentario na query de
     `_query_ranking_vendedores`.
   - Reavaliar em Wave 7+ se auditor externo cobrar interpretacao alternativa.
+
+---
+
+## ADR-102 — Refresh visual da Wave 5: alinhamento das 4 perspectivas ao design Mario
+**Data:** 2026-04-29 (Wave 5 Visual Refresh — sessao iterativa pos-closeout)
+
+**Contexto:** A Wave 5 entregou funcionalmente os relatorios em 2026-04-23/27
+(Blocos 5.0-5.6). Apos o closeout, o Mario completou o design final no Figma
+das 4 perspectivas (Geral, 3Studio, Vendedores, Clicheria) com proposicao
+visual significativamente diferente do MVP entregue: layouts assimetricos
+(card preto largo + cards brancos compactos), tipografia maior, cores
+semanticas (warning/success/accent/zero), avatares com iniciais, mini-stats,
+sparklines, deltas. Foi necessario um refresh visual completo — sem alterar
+contratos de API, sem regredir testes, sem tocar em outras Waves.
+
+**Opcoes consideradas:**
+  - **(A) Refatorar todos os componentes existentes** (KpiCard, BarChart,
+    TimeSeriesChart) para suportar as variantes do novo design — mais
+    risco de quebrar perspectivas que ainda usariam os componentes legados.
+  - **(B) Criar novos componentes shared (Sparkline, DeltaBadge) + classes
+    CSS especificas por perspectiva, mantendo os componentes legados
+    intactos** — sem retrocompat issues, mais classes CSS porem isoladas
+    no `relatorios.module.css`.
+  - **(C) Usar uma biblioteca de UI** (Radix, Mantine, Ant Design) — viola
+    ADR-005 (CSS Modules sem framework externo) e adiciona dependencia.
+
+**Decisao: opcao B — criar novos componentes + classes especificas.**
+
+**Justificativas:**
+  1. **Zero retrocompat issues:** componentes legados (KpiCard, BarChart,
+     TimeSeriesChart) continuam disponiveis para futuras perspectivas
+     internas (Wave 6+) ou eventuais experimentos. As classes CSS legadas
+     (`.tableCard`, `.dataTable`, `.atrasadasList`, `.kpiGrid`,
+     `.chartsGrid`) tambem foram preservadas.
+  2. **Isolamento:** todo o codigo novo vive em `relatorios.module.css` +
+     `perspectivas/*.tsx` + `shared/{Sparkline,DeltaBadge}.tsx`. Nada
+     alem do escopo da Wave 5 e tocado.
+  3. **Cores semanticas centralizadas:** classes como `.metricValueDanger`,
+     `.metricValueSuccess`, `.metricValueWarning`, `.metricValueAccent`,
+     `.metricValueZero` formam um sistema reutilizavel pelas 4 perspectivas
+     sem hard-code de cores nos componentes JSX.
+  4. **Reaproveitamento maximo:** classes-chave (`.metricCard`,
+     `.metricEyebrow`, `.metricValueLg`, `.rankingCard`, `.vendorRowItem`,
+     `.metricCardMotivosHeader`) sao usadas por multiplas perspectivas
+     (ex: o pattern de "Top motivos" do 3Studio e a mesma estrutura visual
+     do "Distribuicao por rota de origem" da Clicheria).
+
+**Implementacao:**
+  - 2 componentes shared novos: `Sparkline.tsx` (com dot final em HTML
+    element posicionado para nao virar oval com `preserveAspectRatio="none"`)
+    e `DeltaBadge.tsx` (com `tone` e `onDarkSurface` props).
+  - 6 componentes shared/filtros refatorados: `PeriodoBadge`, `DonutChart`,
+    `ScopeSelector` (CSS), `DateRangeFilter`, `SearchInput`, `ExportButton`.
+  - 4 perspectivas reescritas com layouts especificos do design.
+  - ~40 classes CSS novas em `relatorios.module.css` (todas as classes
+    legadas preservadas — ~600 linhas adicionadas).
+
+**Alternativas rejeitadas:**
+  - **Opcao A:** descartada por risco de regressao em codigo ja em
+    producao + acoplamento a refator KpiCard que precisaria suportar
+    variantes black/white/with-stats/with-sparkline (~4-6 props novas).
+  - **Opcao C:** descartada por violar ADR-005 (consistencia da stack).
+
+**Consequencias:**
+  - Bundle JS aumenta minimamente (`Sparkline.tsx` ~3KB, `DeltaBadge.tsx`
+    ~1KB). CSS aumenta ~600 linhas (gzip ~3KB).
+  - Componentes legados (`KpiCard`, `BarChart`, `TimeSeriesChart`) ainda
+    sao usados por testes / future use — nao sao dead code agora.
+  - Tests backend continuam passando: 633/633.
+
+---
+
+## ADR-103 — `.srOnly` sem `position: absolute` (uso de `clip-path: inset(50%)`)
+**Data:** 2026-04-29 (Wave 5 Visual Refresh)
+
+**Contexto:** Durante o refresh visual da Wave 5, foram adicionadas tabelas
+semanticas com `<caption className={srOnly}>` para acessibilidade (em
+`Metricas por Vendedor`, `Provas Atrasadas` e `Detalhamento`). A classe
+`.srOnly` original usava o padrao classico A11Y:
+```css
+.srOnly {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+```
+
+O bug: quando o ancestral `<table>` nao tem `position: relative` (default
+static), o `position: absolute` ancora no proximo elemento posicionado
+acima — neste caso, o viewport. Os captions ficavam posicionados em
+`top: 1235px`, e o navegador incluia esse offset no `html.scrollHeight`,
+gerando 156px de overflow logico que ativava o scrollbar do browser.
+Mesmo com `clip: rect(0,0,0,0)` clipando visualmente, a posicao logica
+no flow (`absolute`) afetava a altura do documento.
+
+Diagnostico via DOM inspection com mock data injetado no preview:
+- `html.scrollHeight: 1236, html.clientHeight: 1080` → 156px overflow
+- Caption encontrado a `bottom: 1236, top: 1235, height: 1, width: 1` com
+  `position: absolute`
+- Apos remover `position: absolute` da `.srOnly`: `html.scrollHeight: 1080`
+  (residual de 4px sem impacto visual).
+
+**Opcoes consideradas:**
+  - **(A) Adicionar `position: relative` em todas as tables** — fragil
+    (qualquer nova table precisa lembrar; perspectivas legadas ainda usam
+    `.dataTable` e nao tem `position: relative`).
+  - **(B) Reescrever `.srOnly` sem `position: absolute`** usando
+    `clip-path: inset(50%)` mantendo `width: 1px; height: 1px;
+    overflow: hidden;` — elemento permanece no flow normal mas
+    visualmente clipado (1×1).
+  - **(C) Usar `aria-label` no `<table>` ao inves de `<caption>`** — perde
+    semantic markup HTML5 e fidelidade WAI-ARIA.
+  - **(D) Detectar dinamicamente e ajustar** — complexidade desnecessaria.
+
+**Decisao: opcao B.**
+
+**Justificativas:**
+  1. **Robustez:** funciona independentemente do contexto do elemento
+     (table, tbody, tr, td, qualquer outro). Nao depende de ancestral
+     posicionado.
+  2. **Compatibilidade:** `clip-path: inset(50%)` tem suporte universal
+     em Chrome/Firefox/Safari/Edge desde 2017 (CSS Masking Level 1).
+  3. **Acessibilidade preservada:** leitores de tela continuam lendo o
+     conteudo do elemento (visualmente clipado nao afeta arvore A11Y).
+  4. **Simplicidade:** mudanca de uma unica classe global resolve para
+     todos os usos atuais e futuros.
+
+**Implementacao:**
+```css
+.srOnly {
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);    /* fallback para browsers muito antigos */
+  clip-path: inset(50%);     /* mecanismo principal */
+  white-space: nowrap;
+}
+```
+
+`clip` foi mantido como fallback antigo (deprecated mas inerte; nao
+afeta browsers modernos que usam `clip-path`).
+
+**Alternativas rejeitadas:**
+  - **Opcao A:** rejeitada pela fragilidade — solucao nao escala.
+  - **Opcao C:** rejeitada por violar a semantica HTML5
+    (`<caption>` e o elemento canonico para descrever uma `<table>`).
+  - **Opcao D:** rejeitada por overengineering.
+
+**Consequencias:**
+  - Bug de scroll do browser eliminado em `/relatorios` (e em qualquer
+    outro lugar do app que use `.srOnly`, embora atualmente seja apenas
+    a Wave 5).
+  - Captions adicionam 1px de altura ao layout do table (clipado visualmente
+    com `inset(50%)`) — irrelevante na pratica.
+  - Documentado em comentario CSS na propria classe + neste ADR.
+
+---
+
+## ADR-104 — Containment vertical: `html, body { overflow: hidden }` em desktop
+**Data:** 2026-04-29 (Wave 5 Visual Refresh)
+
+**Contexto:** Mesmo apos o ADR-103 eliminar a fonte principal de overflow,
+ainda existia residual de 15px no `html.scrollHeight` em condicoes
+especificas. Investigacao DOM revelou um loop infinito conhecido em CSS:
+
+  1. `wrapper.min-height: 100vh = 1080px` (sempre, regardless of scrollbar
+     reservation).
+  2. `body.height: 100% = 1065px` quando ha scrollbar reservada
+     (`html.clientHeight` exclui a barra de 15px).
+  3. Wrapper > body por 15px → sintoma de overflow no `html`.
+  4. Browser reserva scrollbar → goto 2 (loop).
+
+A arquitetura do app ja contem todo conteudo scrollavel dentro do
+`.cardInner` (`overflow-y: auto`, `height: 100%` do `.card` que tem
+`height: calc(100vh - 2rem)`). O browser nunca deveria scrollar — qualquer
+overflow no `html` e bug.
+
+**Opcoes consideradas:**
+  - **(A) Mudar `wrapper.min-height` de `100vh` para `100%`** — quebraria
+    o layout no flexbox em alguns contextos (descoberto durante esta
+    sessao quando tentado).
+  - **(B) Usar `100dvh` em todos os lugares** — suporte ainda inconsistente
+    em browsers antigos (Safari < 15.4); requer fallback.
+  - **(C) `scrollbar-gutter: stable`** — reserva espaco para scrollbar mas
+    nao resolve o loop (ainda triggera scrollbar quando 100vh > 100%).
+  - **(D) `html, body { overflow: hidden }` em desktop, `auto` em mobile** —
+    desabilita explicitamente o scroll do browser, contendo qualquer
+    overflow no `.cardInner`.
+
+**Decisao: opcao D.**
+
+**Justificativas:**
+  1. **Explicito > implicito:** documenta a intencao arquitetural (scroll
+     interno ao card). Bug-class de "algum descendente acidentalmente
+     ativa scroll do browser" fica eliminado.
+  2. **Escopo cirurgico:** uma media query, duas regras CSS. Sem mudanca
+     em layout.module.css, sem refatoracao de wrapper/main/card.
+  3. **Mobile preservado:** `<= 768px` reverte para `overflow: auto`
+     porque o layout mobile usa `min-height: 100vh; overflow: visible`
+     no `.main` (intencional — sidebar vira drawer e o card flui livre).
+  4. **Compatibilidade total:** `overflow: hidden` em html/body e
+     suportado desde sempre.
+
+**Implementacao em `globals.css`:**
+```css
+html, body {
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  html, body {
+    overflow: auto;
+  }
+}
+```
+
+**Alternativas rejeitadas:**
+  - **Opcao A:** rejeitada — testada e quebrou layout (main/card colapsaram
+    para height: auto = altura do conteudo, nao 100vh).
+  - **Opcao B:** rejeitada — `100dvh` resolve em moderno mas nao em legacy
+    sem fallback.
+  - **Opcao C:** rejeitada — `scrollbar-gutter` so reserva visualmente; o
+    loop logico de overflow continua.
+
+**Consequencias:**
+  - Browser scroll fica 100% confiavelmente desabilitado em desktop.
+  - Qualquer overflow gerado por bug futuro fica contido pelo
+    `.cardInner` (visualmente verificavel via scrollbar do `.cardInner`,
+    nao do browser).
+  - Mobile (≤768px) mantem comportamento natural com scroll do browser.
+  - Esta regra global serve como "guard rail" arquitetural — qualquer
+    nova tela do dashboard automaticamente herda o containment.
+
+---
+
+## ADR-105 — `serie_temporal` exposto no scope=3studio (sparkline real do PROVAS CRIADAS)
+**Data:** 2026-04-29 (Wave 5 Visual Refresh)
+
+**Contexto:** O design Figma da perspectiva 3Studio inclui um sparkline no
+card "PROVAS CRIADAS" identico (mesma forma) ao do card "TOTAL GERAL" do
+scope=geral. A `serie_temporal` (provas criadas por dia) ja existia no
+`ReportResponseGeral` desde Wave 5.0, mas nao no `ReportResponse3Studio` —
+apesar de ambos os scopes agregarem o mesmo conjunto de registros (provas
+criadas no periodo, com mesmos filtros aplicados). O `provas_criadas` no
+3Studio e numericamente igual ao `total_provas` no Geral.
+
+Implementacao inicial (round 6 desta sessao): sparkline sintetico
+deterministico no frontend baseado em `provas_criadas` total + `total_dias`,
+com padrao senoidal + jitter pseudo-aleatorio. Mario corretamente apontou
+no round 7 que o grafico nao fazia sentido — era ilustrativo, nao real.
+Ele explicitamente requisitou que fosse "dinamico e fizesse sentido".
+
+**Opcoes consideradas:**
+  - **(A) Sparkline sintetico no frontend** (implementacao inicial) —
+    visualmente plausivel mas dado fake. Rejeitado pelo Mario.
+  - **(B) Reaproveitar Geral cache no frontend via dual-fetch** — quando
+    user esta em /relatorios?scope=3studio, fazer side-fetch para
+    /relatorios?scope=geral para extrair `serie_temporal`. Adiciona uma
+    requisicao extra, complexidade no `useReport` hook (cache key cross-
+    scope), e race conditions se filtros mudarem.
+  - **(C) Adicionar `serie_temporal` ao `ReportResponse3Studio`** —
+    expansao mínima do schema (~20 linhas de codigo backend), mesma query
+    Q2 ja usada pelo Geral.
+
+**Decisao: opcao C.**
+
+**Justificativas:**
+  1. **Dado real:** o sparkline reflete a realidade — provas criadas por
+     dia. Mario validou via comparacao byte-a-byte: paths SVG identicos
+     entre TOTAL GERAL e PROVAS CRIADAS quando ambos sao alimentados com
+     mesmos filtros.
+  2. **Custo minimo:** uma query a mais no aggregator do 3Studio (~20
+     linhas), reusando exatamente o padrao Q2 do `_aggregate_geral`. ETag
+     SHA-256 cobre o response inteiro automaticamente. Cache local +
+     server-side TTL 60s ja protegem contra carga adicional (a query
+     usa indices ja existentes).
+  3. **Coerencia entre scopes:** elimina divergencia visual entre
+     perspectivas que mostram a mesma metrica subjacente. Ja era o caso
+     da `provas_criadas` (3Studio) ≡ `total_provas` (Geral) — agora o
+     sparkline tambem coincide.
+  4. **Front-end only nao escalava:** opcao A foi rejeitada pelo proprio
+     Mario; opcao B adicionaria mais codigo frontend e teria pior UX
+     (loading state duplicado).
+
+**Implementacao:**
+
+  Schema (`backend/app/domain/schemas/report.py`):
+  ```python
+  class ReportResponse3Studio(BaseModel):
+      ...
+      serie_temporal: list[PontoSerie]
+      """Provas criadas por dia (00:00 UTC do bucket). Mesma fonte do
+      scope=geral — provas_criadas deste scope agrega exatamente os
+      mesmos registros, entao a serie diaria coincide."""
+  ```
+
+  Aggregator (`backend/app/api/v1/reports.py:_aggregate_3studio`),
+  novo Q6:
+  ```python
+  bucket_3s = func.date_trunc("day", ProvaDigital.created_at).label("bucket")
+  stmt_serie_3s = (
+      select(bucket_3s, func.count().label("qtd"))
+      .select_from(ProvaDigital)
+      .where(_periodo_filter(filters))
+      .group_by(bucket_3s)
+      .order_by(bucket_3s)
+  )
+  stmt_serie_3s = _aplicar_filtros_provas(stmt_serie_3s, filters)
+  serie_rows_3s = (await db.execute(stmt_serie_3s)).all()
+
+  serie_temporal_3s = [
+      PontoSerie(data=r.bucket, quantidade=int(r.qtd)) for r in serie_rows_3s
+  ]
+  ```
+
+  Frontend type (`frontend/src/lib/types/report.ts`):
+  ```ts
+  export interface ReportResponse3Studio {
+    ...
+    serie_temporal: PontoSerie[];
+  }
+  ```
+
+  Componente (`Report3Studio.tsx`): substitui funcao
+  `generateSyntheticSeries` por `data.serie_temporal.map(p => p.quantidade)`.
+
+**Tests atualizados:**
+  - `backend/tests/test_reports_api.py:_payload_3studio` adiciona
+    `serie_temporal=[]`.
+  - `backend/tests/test_report_schemas.py:test_3studio_scope_default`
+    adiciona `serie_temporal=[]`.
+  - `backend/tests/test_report_schemas.py:test_resolve_3studio` (TypeAdapter
+    dict-based) adiciona `"serie_temporal": []` no input dict.
+  - 633 testes ainda passam, 0 regressao.
+
+**Alternativas rejeitadas:**
+  - **Opcao A:** rejeitada pelo Mario por nao refletir dado real.
+  - **Opcao B:** rejeitada por adicionar requisicao extra + complexidade
+    no hook + race conditions de filtros.
+
+**Consequencias:**
+  - Tamanho do response 3Studio cresce em ~30 floats por mes (1 PontoSerie
+    por dia). Desprezivel com gzip (`Content-Encoding`) + ETag SHA-256.
+  - Aggregator 3Studio agora roda 6 queries (era 5) — todas otimizadas
+    com indices ja existentes (`idx_provas_created_at`,
+    `idx_provas_vendedor_status`, etc).
+  - Sparklines do TOTAL GERAL (Geral), VENDEDOR COM MAIS ARTES (Geral) e
+    PROVAS CRIADAS (3Studio) renderizam paths SVG identicos quando
+    alimentados com mesmos filtros — coerencia visual confirmada via DOM
+    inspection.
+  - Set de campos potencialmente expansiveis no futuro: o mesmo argumento
+    se aplica para `delta_*` (comparacao com periodo anterior). Aguarda
+    autorizacao explicita do Mario para extensao.
+
+---
+
+## ADR-106 — UI completa de filtros para RF-013 na pagina /relatorios
+**Data:** 2026-04-29 (Auditoria senior pos-Visual Refresh)
+
+**Contexto:** A auditoria senior (achado H-01) identificou que a Wave 5
+declarava RF-013 ✅ no `WAVE5_CLOSEOUT.md` baseado no fato de que o
+backend e o hook `useReportFilters` suportavam os 5 filtros exigidos
+(`período, status, vendedor, cliente E rota (padrao/direta)`). Porem a
+pagina `/relatorios` so renderizava UI para 2 deles: `DateRangeFilter`
+(periodo) e `SearchInput` (busca textual `q` que cobre cliente/nome/nro
+requerimento). Filtros de `rota`, `vendedor` e `status` so funcionavam
+via manipulacao manual de URL — usuario nao tinha affordance visivel.
+Status era setado indiretamente clicando num segmento do donut da
+perspectiva Geral.
+
+**Decisao:** 3 componentes shared novos com UI dedicada:
+
+  1. **`RotaFilter.tsx`** — segmented pill com 3 botoes
+     (Todas | Padrao | Direta). Reutiliza as classes
+     `presetButton`/`presetButtonActive` do DateRangeFilter para
+     consistencia visual da filtersBar.
+  2. **`StatusFilter.tsx`** — `<select>` nativo com 10 opcoes
+     (todos os `StatusProva`) + "Todos". Wrapper `.selectFilterPill`
+     com chevron SVG customizado. Reutiliza `STATUS_LABELS` da
+     Wave 2 (sem duplicar).
+  3. **`VendedorFilter.tsx`** — `<select>` nativo populado via fetch
+     leve `GET /api/v1/users?setor=VENDEDOR&ativo=true&page_size=100`.
+     Hook de fetch local ao componente (uso unico — principio "extract
+     only when reused"). Loading/erro tratados com `disabled` + texto
+     no placeholder.
+
+Renderizados em `page.tsx` na `<section className={filtersBar}>` apos
+`SearchInput`. Reusam `setFilter(key, value)` do `useReportFilters`
+(backend ja aceitava os parametros).
+
+**Alternativas rejeitadas:**
+  - **Apenas StatusFilter (deixar rota/vendedor para Wave 6):** rejeitado
+    porque RF-013 exige os 5 filtros explicitamente; auditoria marcou H-01.
+  - **Autocomplete em vez de select para Vendedor:** considerado mas
+    descartado — volume operacional 3Studio (~10-30 vendedores ativos)
+    cabe num select; autocomplete adicionaria complexidade sem ganho
+    proporcional. Promover se passar de ~50 vendedores.
+  - **Combinar filtros num unico componente "FiltersBar":** rejeitado —
+    cada filtro tem ciclo de vida e estado proprio (especialmente
+    `VendedorFilter` que tem fetch async); separar respeita SRP.
+
+**Consequencias:**
+  - 3 arquivos novos (~50-80 LOC cada).
+  - 1 grupo novo de classes CSS em `relatorios.module.css`
+    (`.selectFilterPill` + variantes).
+  - RF-013 ✅ por construcao — todos os 5 filtros tem affordance
+    visivel.
+  - Ainda existem 2 caminhos para filtrar status: dropdown explicito
+    (StatusFilter) e clique em segmento do DonutChart na perspectiva
+    Geral (toggle, ver ADR-108). Ambos sincronizam via mesma URL param.
+
+---
+
+## ADR-107 — Bypass de cache backend via `?_force=1` para invalidacao por Realtime
+**Data:** 2026-04-29 (Auditoria senior — bug 3 pos-teste manual)
+
+**Contexto:** Mario reportou em teste manual que os sparklines dos cards
+TOTAL GERAL, VENDEDOR COM MAIS ARTES (perspectiva Geral) e PROVAS CRIADAS
+(perspectiva 3Studio) nao atualizavam apos criar/transitar provas, mesmo
+com Supabase Realtime conectado. Diagnostico:
+
+  1. Cliente cria prova em outra aba → INSERT em `provas_digitais`.
+  2. Realtime do Supabase dispara em /relatorios apos ~2s (debounce).
+  3. `useReport.invalidate()` limpa cache local e refetcha.
+  4. Backend recebe request, faz cache hit no `ReportCache` (TTL 60s) e
+     serve o payload **stale** com o mesmo ETag.
+  5. Frontend recebe dados velhos (sem a prova nova) — sparkline nao
+     atualiza ate o TTL expirar (~60s).
+
+ADR-097 documentou explicitamente "Backend nao invalida sua propria
+cache via Realtime — deixa TTL expirar naturalmente". Era aceitavel em
+teoria, mas a janela de 60s e perceptivel para o usuario que esta
+criando provas e esperando feedback visual imediato.
+
+**Decisao:** novo query param `?_force=1` (alias FastAPI: `force_refresh`)
+no `GET /api/v1/reports`. Quando `true`:
+  - Backend pula `_get_or_compute` (que faria cache lookup) e chama
+    diretamente `_dispatch_aggregator` para recomputar.
+  - Resultado e armazenado no `ReportCache` (sobrescreve a entry stale)
+    para que polling subsequente reuse.
+  - Cliente respeita: `useReport.invalidate()` (chamado por Realtime)
+    adiciona `_force=1` na URL e omite o header `If-None-Match` para
+    nao receber 304 indevido.
+  - `useReport.refresh()` (polling 30s, botao retry) **mantem** o
+    caminho cache + `If-None-Match` → 304 (preserva ADR-097 para o
+    caso geral).
+
+**Alternativas rejeitadas:**
+  - **Reduzir TTL para 5s globalmente:** rejeitado — multiplica queries
+    por ~12x mesmo quando nada muda (perde ADR-097 para o caso comum
+    de 30 usuarios polling).
+  - **Backend escuta Realtime e auto-invalida cache:** complexo —
+    requer service role do Supabase no backend, gerencia de subscricao,
+    e sincronizacao entre workers uvicorn (cada worker tem cache
+    proprio). Custo desproporcional para a Wave 5.
+  - **Endpoint POST `/reports/invalidate-cache`:** novo endpoint so
+    para isso; menos elegante que parametro de query.
+  - **Header `Cache-Control: no-cache` no request:** semanticamente
+    correto (RFC 9111) mas confunde com cache HTTP cliente; query param
+    explicito e mais legivel.
+
+**Consequencias:**
+  - 1 query extra ao backend por evento de Realtime (~1-2s apos cada
+    INSERT/UPDATE em `provas_digitais` que afeta filtros ativos).
+  - Cache backend e atualizado pelo bypass — proximas requisicoes (de
+    outros usuarios, polling, etc) reusam.
+  - Comportamento de polling NAO muda — economia de queries do ADR-097
+    preservada (~720 queries/hora vs 14400 sem cache).
+  - **Atualiza parcialmente ADR-097:** a 3a camada da estrategia (cache
+    backend) agora pode ser bypassed por Realtime invalidation. ADR-097
+    permanece valido para polling regular.
+  - Sparkline atualiza em ~3-5s apos mudanca (Realtime debounce 2s +
+    recomputo backend ~1-2s).
+
+---
+
+## ADR-108 — DonutChart: tratamento de arco SVG completo + toggle behavior
+**Data:** 2026-04-29 (Auditoria senior — bug 4 pos-teste manual)
+
+**Contexto:** Dois bugs identificados no `DonutChart` apos teste manual
+do Mario:
+
+**Bug A (visual):** Quando o donut tem apenas 1 segmento ocupando 100%
+(caso tipico apos clicar num status para filtrar a vista da perspectiva
+Geral — backend retorna `distribuicao_status` com 1 item), os angulos
+`startAngle=0` e `endAngle=2π` produzem coordenadas identicas em
+`startOuter` e `endOuter` (ambos no topo, 12h):
+
+  ```
+  polarToCartesian(100, 100, 90, 0)  → (100, 10)
+  polarToCartesian(100, 100, 90, 2π) → (100, 10)  ← mesmo ponto
+  ```
+
+  SVG nao renderiza um arco circular completo num unico `<path>` quando
+  os pontos coincidem — path fica vazio, donut some visualmente.
+
+**Bug B (UX):** Apos clicar num segmento e o filtro ser aplicado, nao
+havia jeito de "voltar" sem mexer na URL ou recarregar a pagina. O
+StatusFilter (ADR-106) permite trocar para "Todos", mas o usuario que
+clicou no donut esperava que clicar de novo desfizesse o filtro
+(toggle behavior natural).
+
+**Decisao:**
+
+**Fix A — epsilon no arco completo:**
+  - `buildArcPath` detecta arco de 360° (`endAngle - startAngle >= 2π
+    - 1e-6`) e subtrai `1e-3 rad` (~0.057°) do `endAngle`.
+  - Diferenca visual: ~0.09px num viewport 200×200 — imperceptivel.
+  - `largeArc` flag passa a usar `adjustedEnd` para manter o
+    comportamento correto.
+
+**Fix B — toggle no donut:**
+  - `ReportGeral` recebe nova prop `statusFilter: StatusProva | null`
+    (passada pelo `page.tsx` a partir de `filters.status ?? null`).
+  - `onSegmentClick` no DonutChart compara `key clicado` com
+    `statusFilter`: se igual, dispara `onStatusClick(null)` (remove
+    filtro); senao, dispara `onStatusClick(novo_status)`.
+  - Tipo de `onStatusClick` mudou para
+    `(status: StatusProva | null) => void`.
+  - `setFilter("status", null)` remove o param da URL → backend retorna
+    todos os status → donut volta ao estado multi-segmento.
+
+**Alternativas rejeitadas:**
+  - **Renderizar arco completo como `<circle>` + stroke:** funciona mas
+    quebra a uniformidade dos paths SVG (que sao animados via Framer
+    Motion). Epsilon e cirurgico e preserva a estrutura.
+  - **Dividir arco completo em 2 arcos de 180°:** funciona mas adiciona
+    complexidade no `segments.useMemo` (precisaria retornar 2 paths
+    para um item) e quebra animacoes existentes.
+  - **Botao "Limpar filtros" explicito:** consideravel para Wave 6 mas
+    desnecessario agora — o StatusFilter (ADR-106) ja oferece
+    "Todos", e o toggle no donut e mais natural para quem clicou no
+    segmento.
+  - **Status como toggle apenas no clique do segmento, mantendo o
+    StatusFilter:** mantido — coexistem dois caminhos sincronizados via
+    URL param. UX preferivel a forcar um unico caminho.
+
+**Consequencias:**
+  - DonutChart renderiza corretamente em qualquer condicao (1 segmento
+    ou N).
+  - Clique em segmento ativo desfaz o filtro sem precisar tocar URL
+    nem recarregar.
+  - `ReportGeral` precisa de `filters.status` para o toggle — propagado
+    via `PerspectivaRenderer`.
+  - StatusFilter (ADR-106) e clique-no-donut sao redundantes mas
+    sincronizados (mesma URL param) — usuario pode usar qualquer caminho.

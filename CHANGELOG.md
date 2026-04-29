@@ -2,6 +2,356 @@
 
 ---
 
+## [2026-04-29 — Wave 5 Auditoria Senior + Hardening] — Auditoria read-only + 4 bugs corrigidos em teste manual
+
+### Contexto
+
+Sessao iterativa de auditoria senior read-only da Wave 5 (Componentes 16
+Relatorios e 17 Atalhos), conduzida apos o Visual Refresh. Resultado da
+auditoria estatica: 0 CRITICAL, 2 HIGH, 5 MEDIUM, 6 LOW. Todos os HIGH
+e os MEDIUM autorizados foram corrigidos. Em seguida, **4 bugs
+adicionais foram identificados pelo Mario durante teste manual** e
+corrigidos no mesmo ciclo. Nenhum arquivo de Wave 0/1/2/3/4 foi alterado.
+
+### Correcoes da auditoria estatica
+
+**Backend (`backend/app/api/v1/reports.py`):**
+- **H-02**: `_resolve_filters` em ambos os endpoints agora captura apenas
+  `(ValidationError, ValueError)` em vez de `Exception` generico. Bugs
+  internos passam para o handler global como 500 em vez de 422.
+- **M-02**: `_aplicar_filtros_provas` ganha parametro `apply_status: bool`.
+  Q3 (tempo_medio_ciclo no scope=geral) e Q4 (tempo_medio_criacao_ate
+  _primeira_mov no scope=3studio) agora passam `apply_status=False` para
+  evitar interseccao impossivel entre `filters.status` e o filtro fixo de
+  `Movimentacao.status_novo`. +3 testes em `test_reports_api.py`
+  (`TestAplicarFiltrosProvasApplyStatus`).
+
+**Frontend (`relatorios/`):**
+- **H-01 (RF-013 completo)**: 3 filtros novos com UI dedicada —
+  `RotaFilter` (segmented pill Padrao/Direta/Todas), `StatusFilter` e
+  `VendedorFilter` (selects nativos com chevron). Reusam o padrao visual
+  pill do `DateRangeFilter`. CSS novo em `relatorios.module.css`
+  (`.selectFilterPill` + variantes). Renderizados em `page.tsx` na
+  `filtersBar`. Backend ja aceitava os 3 via query params; faltava
+  affordance visual.
+- **M-01**: `<DeltaBadge>` do card TOTAL GERAL calcula `tone`
+  dinamicamente (`tone={delta >= 0 ? "positive" : "negative"}`) — antes
+  era hardcoded `positive` mesmo com volume caindo.
+- **M-03**: `DateRangeFilter` calcula offset BRT dinamicamente via
+  `Intl.DateTimeFormat("America/Sao_Paulo")` em vez de constante `-3`.
+  Resiliente a eventual retorno de DST. Hoje (2026) o comportamento
+  numerico e identico (Brasil aboliu DST em 2019).
+- **M-04**: `<DeltaBadge>` retorna `null` se `value === 0` ou `-0` —
+  evita "↗ 0.0%" semanticamente confuso.
+- **L-04**: Listener Esc duplicado removido de `KeyboardShortcutsHelp` —
+  `useGlobalShortcuts` ja trata Esc com unica fonte.
+- **L-05**: `Sparkline` retorna placeholder com altura fixa em vez de
+  `null` quando `points.length < 2` — evita colapso vertical do card.
+
+### Correcoes pos-teste manual (Mario)
+
+**Bug 1 — Date picker invadia a pagina inteira:**
+`.dateInputPill` (label container do `<input type="date">`) nao tinha
+`position: relative`, e o pseudo-elemento `::-webkit-calendar-picker
+-indicator` (com `position: absolute; inset: 0`) escapava para o body,
+virando uma area clicavel gigante. Fix: `position: relative` em
+`.dateInputPill`. Confina o indicator ao proprio label.
+
+**Bug 2 — Filtros "De"/"Ate" e presets nao persistiam ambos os campos:**
+`setFilter("from", x); setFilter("to", y)` chamados em sequencia faziam
+2 `router.replace` consecutivos onde a 2a sobrescrevia a 1a (cada
+`setFilter` lia o `searchParams` capturado no closure, ainda nao
+atualizado). Fix: novo metodo `setFilters` (plural) em `useReportFilters`
+que aceita `Partial<...>` e atualiza multiplos campos em uma unica
+escrita de URL. `page.tsx` agora usa `setFilters({ from, to })` no
+DateRangeFilter.
+
+**Bug 3 — Sparklines (TOTAL GERAL, VENDEDOR COM MAIS ARTES, PROVAS
+CRIADAS) nao atualizavam apos criar provas:**
+ADR-097 documenta cache backend TTL 60s sem invalidacao por Realtime —
+frontend recebia evento Realtime, invalidava cache local, mas backend
+servia cache stale com mesmo ETag. Fix: novo query param `?_force=1` em
+`GET /api/v1/reports` que pula o cache backend e recomputa, atualizando
+o cache para hits subsequentes. `useReport.invalidate()` (chamado por
+Realtime) usa esse bypass; `useReport.refresh()` (polling 30s) **mantem**
+o caminho cache + If-None-Match → 304 (preserva ~720 queries/hora do
+ADR-097). Resultado: sparkline atualiza em ~3-5s apos criar/transitar
+prova.
+
+**Bug 4 — DonutChart "sumia" ao filtrar por status (1 segmento 100%):**
+Caso degenerado de SVG: arco com `startAngle=0` e `endAngle=2π` produz
+`startOuter === endOuter` (ambos no topo, 12h), gerando path vazio. Fix
+1: `buildArcPath` detecta arco completo (`>= 2π - 1e-6`) e subtrai
+epsilon de `1e-3 rad` (~0.057° ≈ 0.09px num viewport 200×200,
+imperceptivel). Fix 2 (toggle UX): `ReportGeral` recebe nova prop
+`statusFilter` e implementa toggle no donut — clicar no segmento que ja
+e o filtro ativo remove o filtro (volta ao estado multi-segmento) sem
+precisar mexer na URL ou recarregar. Tipo de `onStatusClick` mudou para
+`(status: StatusProva | null) => void`.
+
+### Arquivos modificados
+
+**Backend:**
+- `backend/app/api/v1/reports.py`
+- `backend/tests/test_reports_api.py`
+
+**Frontend (criados):**
+- `frontend/src/app/(dashboard)/relatorios/RotaFilter.tsx`
+- `frontend/src/app/(dashboard)/relatorios/StatusFilter.tsx`
+- `frontend/src/app/(dashboard)/relatorios/VendedorFilter.tsx`
+
+**Frontend (refatorados):**
+- `frontend/src/app/(dashboard)/relatorios/page.tsx`
+- `frontend/src/app/(dashboard)/relatorios/DateRangeFilter.tsx`
+- `frontend/src/app/(dashboard)/relatorios/relatorios.module.css`
+- `frontend/src/app/(dashboard)/relatorios/perspectivas/ReportGeral.tsx`
+- `frontend/src/app/(dashboard)/relatorios/shared/DeltaBadge.tsx`
+- `frontend/src/app/(dashboard)/relatorios/shared/Sparkline.tsx`
+- `frontend/src/app/(dashboard)/relatorios/shared/DonutChart.tsx`
+- `frontend/src/components/KeyboardShortcutsHelp.tsx`
+- `frontend/src/hooks/useReport.ts`
+- `frontend/src/hooks/useReportFilters.ts`
+
+### ADRs novas registradas
+
+- **ADR-106** — UI completa de filtros para RF-013 (RotaFilter +
+  StatusFilter + VendedorFilter visiveis na filtersBar de /relatorios).
+- **ADR-107** — Bypass de cache backend via `?_force=1` para invalidacao
+  por Realtime (preserva ADR-097 para polling regular).
+- **ADR-108** — Tratamento de arco SVG completo (epsilon) + toggle no
+  DonutChart.
+
+### Validacoes finais
+
+- `pytest backend/tests/`: **636 passed** (era 633, +3 M-02), 0 regressao.
+- `ruff check`: limpo.
+- `tsc --noEmit`: limpo.
+- `next lint`: 0 warnings/errors.
+- Preview server: `/relatorios` compila e responde 200 em todos os scopes.
+- Teste manual Mario (4 cenarios): date picker funciona, filtros
+  De/Ate/presets persistem, sparklines atualizam apos criar prova,
+  donut renderiza com 1 segmento e toggle funciona.
+
+### Itens aceitos sem correcao
+
+- **M-05** (`html, body { overflow: hidden }` em desktop com media query
+  768px): design intencional documentado em ADR-104. Conteudo permanece
+  scrollavel via `.cardInner` interno em qualquer viewport.
+- **L-01** (logs INFO incluem `user_id`): aceitavel em projeto interno.
+- **L-02** (sem rate limit em /reports): planejado para Wave 6
+  (Hardening).
+- **L-03** (race teorica Realtime+polling): comportamento OK na pratica.
+- **L-06** (DonutChart tooltip sem boundary check): cosmetico,
+  baixissimo impacto.
+
+### Observacao sobre sparkline do "VENDEDOR COM MAIS ARTES"
+
+Reusa a `serie_temporal` geral (provas criadas/dia globais), nao a serie
+especifica do top vendedor. Decisao visual da Wave 5 (mantem coerencia
+com card TOTAL GERAL). Caso futura iteracao queira serie por vendedor,
+adicionar `serie_temporal_top_vendedor` ao schema do scope=geral
+(estimado ~30 LOC backend + 5 frontend).
+
+---
+
+## [2026-04-29 — Wave 5 Visual Refresh] — Alinhamento das 4 perspectivas ao design Mario + bug fixes de scroll
+
+### Contexto
+
+Sessao iterativa de refresh visual completo da Wave 5 (`/relatorios`) com o
+Mario, alinhando as 4 perspectivas (Geral, 3Studio, Vendedores, Clicheria) ao
+novo design Figma. Trabalho focado em frontend dentro do escopo da Wave 5,
+com 1 extensao mínima de backend (serie_temporal no scope=3studio para
+sparkline real). Sem alteracao de contratos de API, sem regressao em testes,
+sem tocar em outras Waves.
+
+### Entregue
+
+**Componentes shared novos:**
+
+- **Sparkline.tsx** — Mini-chart linha+area amarelo com gradiente sob a
+  linha e dot final em HTML element posicionado (fora do SVG) para
+  permanecer redondo independente de aspect ratio do container. Usado nos
+  cards pretos TOTAL GERAL (Geral), VENDEDOR COM MAIS ARTES (Geral) e
+  PROVAS CRIADAS (3Studio).
+- **DeltaBadge.tsx** — Pill compacta com seta `↗`/`↘` + percentual
+  formatado, com variantes `tone` (positive/negative/neutral) e
+  `onDarkSurface` (variante de cores para cards pretos). Suporta `suffix`
+  para complemento textual ("vs. periodo anterior", "melhor que ...").
+
+**Componentes shared atualizados:**
+
+- **PeriodoBadge.tsx** — Reescrito com ponto amarelo + icone de
+  calendario + range com texto "DIAS" em maiusculo (estilo do design).
+- **DonutChart.tsx** — Legenda agora exibe `[•] Label    Valor` (antes so
+  mostrava `[•] Label`). Sem mudanca na API publica.
+- **ScopeSelector.tsx** (CSS) — Pill bar full-width com active=preto/branco
+  ao inves do active=cinza claro anterior.
+- **DateRangeFilter.tsx** — Refatorado para visual pill: prefixo "De"/"Ate"
+  inline + input de data transparente + icone calendario alinhado a
+  direita. Preset ativo agora highlighted preto/branco.
+- **SearchInput.tsx** — Wrapper com icone de lupa + input transparente.
+- **ExportButton.tsx** — Adicionado icone de download antes do texto.
+
+**Layouts (4 perspectivas):**
+
+| Scope | Layout |
+|-------|--------|
+| **Geral** | 4 KPI cards (1 black + 3 white com proporcao 1.5/1/1/0.65) + 3 cards de chart (Donut + Tempo medio vendor + Vendedor mais artes black) + tabela "Metricas por Vendedor" + lista "Provas Atrasadas" — ambas com header de subtitle/counter, avatar com iniciais (top amarelo), barra de volume proporcional, pills de localizacao/status, cores semanticas (azul Aprov, vermelho Reprov, vermelho Atraso) |
+| **3Studio** | 4 KPI cards (PROVAS CRIADAS preto com sparkline real + caption media diaria, REINICIOS / DEVOLVIDAS / CANCEL. brancos com cor warning quando >0) + 3 cards (REPROV.AGUARDANDO + TEMPO ATE 1ª MOV. + "Top motivos de cancelamento" largo com lista de barras top vermelha / demais rosa) |
+| **Vendedores** | 2 cards (VENDEDORES FILIAL preto com numero amarelo accent + caption "operando rota direta" + mini-stats grid MATRIZ/ATIVOS/ATRASADAS no rodape; Ranking por volume largo com lista rank+nome+barra+valor) + Detalhamento full-width com tabela (avatar+nome / pill / Aprov% verde / Reprov% vermelho / Tempo / Atras.) |
+| **Clicheria** | 4 KPI cards (TEMPO MEDIO AGUARDANDO preto com caption "envio → recebimento" + RECEBIDAS NO PERIODO branca com numero verde quando >0 + EM TRANSITO + ORIGENS) + 2 cards (Provas recebidas por rota de origem com lista de barras AZUL + Fluxo de ciclo com lista de bullets sólido/outline conforme valor >0/0) |
+
+**~40 classes CSS novas em `relatorios.module.css`** (todas as classes
+legadas preservadas para retrocompat):
+
+- `.metricCard` + variantes: `metricCardLight`, `metricCardDark`,
+  `metricCardCompact`, `metricCardRota`, `metricCardDonut`,
+  `metricCardVendorRow`, `metricCardVendorHighlight`, `metricCardWithStats`,
+  `metricCardMotivos`, `metricCardFluxo`
+- Tipografia: `metricEyebrow`, `metricCardCaption`, `metricCardTitleBlock`,
+  `metricCardTitle`, `metricCardSubtitle`, `metricValueLg`,
+  `metricValueWithUnit`, `metricValueUnit`, `metricValueDanger`,
+  `metricValueUnitDanger`, `metricValueWarning`, `metricValueAccent`,
+  `metricValueSuccess`, `metricValueZero`, `metricSparkline`
+- ROTA legend: `rotaLegend`, `rotaLegendItem`, `rotaDot`, `rotaDotPadrao`,
+  `rotaDotDireta`, `rotaLegendLabel`, `rotaLegendValue`
+- Vendor row: `vendorRowList`, `vendorRowItem`, `vendorRowRank`,
+  `vendorRowName`, `vendorRowValue`, `vendorRowBarTrack`, `vendorRowBarFill`
+- Mini stats: `metricMiniStats`, `metricMiniStat`, `metricMiniStatLabel`,
+  `metricMiniStatValue`
+- Delta badge: `deltaWrapper`, `deltaBadge`, `deltaArrow`,
+  `deltaBadgePositive`, `deltaBadgeNegative`, `deltaBadgeNeutral`,
+  `deltaBadgeOnDark`, `deltaSuffix`
+- Ranking card: `rankingCard`, `rankingHeader`, `rankingHeaderTitleBlock`,
+  `rankingTitle`, `rankingSubtitle`, `rankingCounter`, `rankingTableWrapper`,
+  `rankingTable`, `rankingTh`, `rankingThNumeric`, `rankingTd`,
+  `rankingNumericCell`, `rankingRankCell`, `rankingRankDot`, `rankingVendor`,
+  `rankingAvatar`, `rankingAvatarTop`, `rankingVendorName`, `rankingLocalPill`,
+  `rankingVolumeCell`, `rankingVolumeTrack`, `rankingVolumeFill`,
+  `rankingVolumeNum`, `rankingAprovActive`, `rankingAprovPctActive`,
+  `rankingReprovHigh`, `rankingReprovLow`, `rankingTempoCell`,
+  `rankingZeroValue`, `rankingProva`, `rankingProvaNome`, `rankingProvaMeta`,
+  `rankingStatusPill`, `rankingAtraso`, `rankingFooterCell`
+- Top motivos: `cancelMotivosList`, `cancelMotivoItem`, `cancelMotivoLabel`,
+  `cancelMotivoBarTrack`, `cancelMotivoBarFill`, `cancelMotivoBarFillTop`,
+  `cancelMotivoValue`
+- Distribuicao por rota: `distRotaList`, `distRotaItem`, `distRotaLabel`,
+  `distRotaBarTrack`, `distRotaBarFill`, `distRotaValue`
+- Fluxo de ciclo: `fluxoCicloList`, `fluxoCicloItemActive`,
+  `fluxoCicloItemMuted`, `fluxoCicloDot`, `fluxoCicloLabel`, `fluxoCicloValue`
+- Grids: `kpiRowGeral`, `chartsRowGeral`, `kpiRow3Studio`, `chartsRow3Studio`,
+  `kpiRowVendedores`, `kpiRowClicheria`, `chartsRowClicheria`
+- Animacoes: `vendorBarGrow`, `rankingBarGrow`, `cancelBarGrow`
+
+**Bug fixes criticos (ver ADR-103, ADR-104):**
+
+- **`.srOnly` agora usa `clip-path: inset(50%)`** sem `position: absolute`.
+  Captions de tabela ancoravam no viewport (sem ancestral `position:
+  relative`), gerando 156px de overflow no `html.scrollHeight` e ativando
+  scrollbar do browser. Investigado via DOM inspection com mock data
+  injetado no preview (htmlScroll=true → scrollH=1236). Fix verificado
+  byte-a-byte: scrollH=1080 apos mudanca.
+- **`globals.css` agora tem `html, body { overflow: hidden }`** em desktop
+  com `auto` em mobile (≤768px). Resolve o residual de 15px do loop "100vh
+  vs 100% diante de scrollbar reservada" (wrapper.min-height: 100vh = 1080
+  vs body.height: 100% = 1065 quando scrollbar reservada → infinite loop).
+
+**Extensao backend (Wave 5 scope, ADR-105):**
+
+- `ReportResponse3Studio.serie_temporal: list[PontoSerie]` adicionado ao
+  schema Pydantic.
+- Aggregator `_aggregate_3studio` em `backend/app/api/v1/reports.py` agora
+  roda Q6 (mesma query do Geral: `date_trunc('day', ProvaDigital.created_at)
+  + count + _aplicar_filtros_provas`). Como ambos scopes agregam o mesmo
+  conjunto de registros, a serie diaria coincide.
+- Tests atualizados em 3 lugares: `_payload_3studio` (test_reports_api.py),
+  `test_3studio_scope_default` e `test_resolve_3studio` (test_report_schemas.py)
+  — todos com `serie_temporal=[]`.
+- Frontend `ReportResponse3Studio` (TS) atualizado com mesmo campo.
+- `Report3Studio.tsx` substitui sparkline sintetico (que era ilustrativo)
+  pelo `data.serie_temporal.map(p => p.quantidade)` real.
+
+**Limitacoes honestas (deltas vs periodo anterior):**
+
+Onde o design exibe badge `↗ X.X%` ou `↘ X.X%`, o backend ainda nao retorna
+campo `delta_*` (comparacao com janela anterior). Estado atual:
+
+| Card | Badge no design | Estado atual |
+|------|----------------|--------------|
+| Geral / TOTAL GERAL | `↗ 12.5% vs. periodo anterior` (verde) | ✅ Renderizado — proxy computado das metades de `serie_temporal` |
+| Geral / TEMPO MEDIO APROV | `↘ 3.2%` (rosa) | ⏳ Oculto — sem dado |
+| Geral / TAXA REPROVACAO | `↗ 4.0%` (rosa) | ⏳ Oculto — sem dado |
+| 3Studio / TEMPO ATE 1ª MOV | `↘ 5.2%` (rosa) | ⏳ Oculto — sem dado |
+| Clicheria / TEMPO MEDIO AGUARDANDO | `↘ 12.0%` rosa + "melhor que o periodo anterior" | ⏳ Oculto — sem dado |
+| Clicheria / RECEBIDAS NO PERIODO | `↗ 50.0%` (verde) | ⏳ Oculto — sem dado |
+
+Estrutura JSX pronta com comentario localizando onde inserir o
+`<DeltaBadge>` quando o backend expor `delta_*`.
+
+### Arquivos modificados
+
+**Frontend (criados):**
+- `frontend/src/app/(dashboard)/relatorios/shared/Sparkline.tsx`
+- `frontend/src/app/(dashboard)/relatorios/shared/DeltaBadge.tsx`
+
+**Frontend (refatorados):**
+- `frontend/src/app/(dashboard)/relatorios/shared/PeriodoBadge.tsx`
+- `frontend/src/app/(dashboard)/relatorios/shared/DonutChart.tsx`
+- `frontend/src/app/(dashboard)/relatorios/ScopeSelector.tsx` (CSS only)
+- `frontend/src/app/(dashboard)/relatorios/DateRangeFilter.tsx`
+- `frontend/src/app/(dashboard)/relatorios/SearchInput.tsx`
+- `frontend/src/app/(dashboard)/relatorios/ExportButton.tsx`
+- `frontend/src/app/(dashboard)/relatorios/perspectivas/ReportGeral.tsx`
+- `frontend/src/app/(dashboard)/relatorios/perspectivas/Report3Studio.tsx`
+- `frontend/src/app/(dashboard)/relatorios/perspectivas/ReportVendedores.tsx`
+- `frontend/src/app/(dashboard)/relatorios/perspectivas/ReportClicheria.tsx`
+- `frontend/src/app/(dashboard)/relatorios/relatorios.module.css` (~600 linhas
+  novas, todas as classes legadas preservadas)
+- `frontend/src/lib/types/report.ts` (`ReportResponse3Studio.serie_temporal`)
+- `frontend/src/app/globals.css` (`html, body { overflow: hidden }` desktop)
+
+**Backend (refatorados — Wave 5 scope):**
+- `backend/app/domain/schemas/report.py` (campo
+  `ReportResponse3Studio.serie_temporal`)
+- `backend/app/api/v1/reports.py` (Q6 no `_aggregate_3studio`)
+- `backend/tests/test_reports_api.py` (`_payload_3studio`)
+- `backend/tests/test_report_schemas.py` (2 testes)
+
+### ADRs novas registradas
+
+- **ADR-102** — Refresh visual da Wave 5: alinhamento das 4 perspectivas
+  ao design Mario.
+- **ADR-103** — `.srOnly` sem `position: absolute` (uso de `clip-path:
+  inset(50%)`) para evitar overflow do `html`.
+- **ADR-104** — Containment vertical: `html, body { overflow: hidden }`
+  em desktop, `auto` em mobile.
+- **ADR-105** — `serie_temporal` exposto no scope=3studio (sparkline real
+  do PROVAS CRIADAS).
+
+### Validacoes finais
+
+- `tsc --noEmit`: limpo (frontend).
+- `next lint`: 0 warnings/errors.
+- `pytest backend/tests/`: **633 passed**, 0 regressao.
+- DOM inspection no preview (mock data injetado): `htmlScroll: false`
+  visualmente (overflow hidden esconde 4px residuais), `cardInner.scrollH
+  > clientH` quando conteudo excede — scroll INTERNO funcionando.
+- Verificacao byte-a-byte: paths SVG identicos para sparklines do TOTAL
+  GERAL (Geral), VENDEDOR COM MAIS ARTES (Geral) e PROVAS CRIADAS (3Studio)
+  com a mesma `serie_temporal` — confirma que ADR-105 elimina divergencia
+  visual entre scopes.
+
+### Pendencias autorizadas (NAO feitas nesta sessao)
+
+- Backend nao retorna `delta_*` para nenhum indicador. Adicao seria
+  contida em Wave 5 (~30-50 linhas no aggregator + 2-3 campos opcionais
+  por scope no schema). Aguarda autorizacao.
+- Migration / advisor / RLS: nada tocado.
+- CHANGELOG / DECISIONS.md: este registro.
+
+---
+
 ## [2026-04-27 — Wave 5 Bloco 5.6] — Closeout: ADRs finais + WAVE5_CLOSEOUT.md + atualizacao CLAUDE.md
 
 ### Contexto

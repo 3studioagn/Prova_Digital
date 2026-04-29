@@ -101,6 +101,7 @@ def _payload_3studio() -> ReportResponse3Studio:
             tempo_medio_criacao_ate_primeira_mov_horas=3.0,
         ),
         cancelamentos_top=[],
+        serie_temporal=[],
         atualizado_em=datetime.now(UTC),
     )
 
@@ -828,3 +829,91 @@ class TestReportsCacheNoDbCall:
         # Segunda request foi cache hit — sem novo call ao agregador
         assert first_call_count == 1
         assert second_call_count == 1
+
+
+# ─── _aplicar_filtros_provas: apply_status=False (auditoria M-02) ─────────
+
+
+class TestAplicarFiltrosProvasApplyStatus:
+    """Auditoria sênior 2026-04-29 — M-02.
+
+    Queries que ja filtram por `Movimentacao.status_novo` especifico
+    (Q3 tempo_medio_ciclo, Q4 3studio tempo_medio_criacao_ate_primeira_mov)
+    nao devem aplicar `WHERE provas.status == filters.status` em cima —
+    isso produziria resultado vazio quando o filtro de status nao bate
+    com o status final esperado da prova.
+    """
+
+    def test_apply_status_default_aplica_filtro(self):
+        """Default `apply_status=True` aplica o filtro de status."""
+        from sqlalchemy import select
+
+        from app.api.v1.reports import _aplicar_filtros_provas
+        from app.db.models import ProvaDigital, StatusProvaEnum
+        from app.services.report_filters import ReportFilters
+
+        filters = ReportFilters(
+            scope="geral",
+            status=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        )
+        stmt = select(ProvaDigital.id)
+        stmt_with_status = _aplicar_filtros_provas(stmt, filters)
+        sql_str = str(
+            stmt_with_status.compile(compile_kwargs={"literal_binds": True})
+        )
+        # Default => filtro de status presente na SQL
+        assert "provas_digitais.status" in sql_str
+
+    def test_apply_status_false_nao_aplica_filtro_status(self):
+        """`apply_status=False` ignora `filters.status`."""
+        from sqlalchemy import select
+
+        from app.api.v1.reports import _aplicar_filtros_provas
+        from app.db.models import ProvaDigital, StatusProvaEnum
+        from app.services.report_filters import ReportFilters
+
+        filters = ReportFilters(
+            scope="geral",
+            status=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        )
+        stmt = select(ProvaDigital.id)
+        stmt_no_status = _aplicar_filtros_provas(
+            stmt, filters, apply_status=False
+        )
+        sql_str = str(
+            stmt_no_status.compile(compile_kwargs={"literal_binds": True})
+        )
+        # Sem WHERE provas.status quando apply_status=False
+        assert "provas_digitais.status" not in sql_str
+
+    def test_apply_status_false_aplica_outros_filtros(self):
+        """`apply_status=False` so suprime status; vendedor_id/rota/q continuam."""
+        import uuid
+
+        from sqlalchemy import select
+
+        from app.api.v1.reports import _aplicar_filtros_provas
+        from app.db.models import ProvaDigital, RotaEnum, StatusProvaEnum
+        from app.services.report_filters import ReportFilters
+
+        vid = uuid.uuid4()
+        filters = ReportFilters(
+            scope="geral",
+            status=StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+            vendedor_id=vid,
+            rota=RotaEnum.PADRAO,
+            q="ACME",
+        )
+        stmt = select(ProvaDigital.id)
+        stmt_no_status = _aplicar_filtros_provas(
+            stmt, filters, apply_status=False
+        )
+        sql_str = str(
+            stmt_no_status.compile(compile_kwargs={"literal_binds": True})
+        )
+        # vendedor_id, rota e q continuam aplicados
+        assert "vendedor_id" in sql_str
+        assert "rota" in sql_str
+        assert "ACME" in sql_str
+        # Status NAO aplicado
+        assert "provas_digitais.status" not in sql_str

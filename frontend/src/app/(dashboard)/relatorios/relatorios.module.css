@@ -13,23 +13,30 @@
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
-  padding: 1rem 0;
+  padding: 0.5rem 0;
+  /* min-width: 0 evita que filhos com conteudo nao-quebravel (tabelas
+     longas, etc) forçem o pai a estourar a largura do container e
+     causarem scroll horizontal/vertical no .cardInner. */
+  min-width: 0;
+  width: 100%;
 }
 
 .title {
-  font-size: 1.75rem;
+  font-size: clamp(1.75rem, 2.6vw, 2.4rem);
   font-weight: 700;
   margin: 0;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
+  color: #000;
 }
 
 .subtitle {
-  margin: 0.25rem 0 0;
-  font-size: 0.95rem;
-  color: rgba(0, 0, 0, 0.55);
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .refreshingBadge {
@@ -102,42 +109,51 @@
 /* ─── ScopeSelector (tabs) ───────────────────────────────────────────── */
 
 .scopeSelector {
-  display: inline-flex;
-  background: #f4f4f5;
-  border-radius: 14px;
-  padding: 4px;
+  display: flex;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 999px;
+  padding: 6px;
   gap: 4px;
-  align-self: flex-start;
+  width: 100%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .scopeTab,
 .scopeTabActive {
-  padding: 0.55rem 1.25rem;
+  flex: 0 0 auto;
+  padding: 0.55rem 1.5rem;
   border: 0;
-  border-radius: 10px;
-  font-size: 0.95rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
-  color: rgba(0, 0, 0, 0.6);
+  color: rgba(0, 0, 0, 0.55);
   background: transparent;
+  font-family: inherit;
 }
 
 .scopeTab:hover {
   background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.85);
 }
 
 .scopeTabActive {
-  background: #fff;
-  color: #000;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  background: #000;
+  color: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.scopeTabActive:hover {
+  background: #1a1a1a;
 }
 
 /* ─── Filtros (datas + busca) ────────────────────────────────────────── */
 
 .filtersBar {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -149,72 +165,218 @@
   flex-wrap: wrap;
 }
 
-.dateField {
+/* Pill input para datas: prefixo "De"/"Ate" + input transparente + icone calendario.
+   `position: relative` e CRITICO: o picker indicator nativo
+   (`::-webkit-calendar-picker-indicator`) tem `position: absolute; inset: 0`
+   no CSS abaixo. Sem `position: relative` aqui, o indicator escapa para o
+   nearest positioned ancestor (body/viewport) e cria uma area clicavel
+   gigante que abre o picker em qualquer click da pagina (audit 2026-04-29).*/
+.dateInputPill {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.9rem;
+  height: 42px;
+  padding: 0 0.85rem 0 1rem;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.7);
+  cursor: text;
+  position: relative;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.dateLabel {
+.dateInputPill:focus-within {
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow: 0 0 0 3px rgba(255, 203, 92, 0.18);
+}
+
+.dateInputPrefix {
+  color: rgba(0, 0, 0, 0.45);
   font-weight: 500;
+  user-select: none;
+}
+
+/* Input de data: aproveita o picker nativo, removendo a borda */
+.dateInput {
+  border: 0;
+  background: transparent;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color: inherit;
+  padding: 0;
+  outline: none;
+  min-width: 105px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Esconde o calendar picker indicator nativo (estamos rendering nosso) */
+.dateInput::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.dateInputIcon {
+  color: rgba(0, 0, 0, 0.45);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.dateInputPill:hover .dateInputIcon {
   color: rgba(0, 0, 0, 0.7);
 }
 
-.dateInput {
-  padding: 0.45rem 0.75rem;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 10px;
-  font-size: 0.9rem;
-  background: #fff;
-  font-family: inherit;
-  color: inherit;
-}
-
-.dateInput:focus {
-  outline: 2px solid var(--color-accent, #ffd400);
-  outline-offset: -1px;
-}
-
+/* Grupo de presets: pill bar com active black */
 .presetGroup {
   display: inline-flex;
-  gap: 0.25rem;
-  background: #f4f4f5;
-  padding: 3px;
-  border-radius: 10px;
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 4px;
+  border-radius: 999px;
+  height: 42px;
+  align-items: center;
 }
 
-.presetButton {
-  padding: 0.35rem 0.75rem;
+.presetButton,
+.presetButtonActive {
+  padding: 0 1rem;
+  height: 32px;
   border: 0;
   background: transparent;
-  border-radius: 7px;
+  border-radius: 999px;
   font-size: 0.85rem;
   cursor: pointer;
-  color: rgba(0, 0, 0, 0.6);
+  color: rgba(0, 0, 0, 0.55);
   font-weight: 500;
-  transition: background 0.15s ease;
+  font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .presetButton:hover {
-  background: #fff;
+  background: rgba(0, 0, 0, 0.04);
   color: #000;
+}
+
+.presetButtonActive {
+  background: #000;
+  color: #fff;
+}
+
+.presetButtonActive:hover {
+  background: #1a1a1a;
+}
+
+/* Search input em pill com icone */
+.searchInputWrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 220px;
+  height: 42px;
+  padding: 0 1rem;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  font-size: 0.9rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.searchInputWrapper:focus-within {
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow: 0 0 0 3px rgba(255, 203, 92, 0.18);
+}
+
+.searchInputIcon {
+  color: rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
 }
 
 .searchInput {
   flex: 1;
-  min-width: 200px;
-  padding: 0.55rem 1rem;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 10px;
-  font-size: 0.95rem;
-  background: #fff;
+  border: 0;
+  background: transparent;
+  font-size: 0.9rem;
   font-family: inherit;
+  color: inherit;
+  outline: none;
+  padding: 0;
+}
+
+.searchInput::placeholder {
+  color: rgba(0, 0, 0, 0.4);
 }
 
 .searchInput:focus {
-  outline: 2px solid var(--color-accent, #ffd400);
-  outline-offset: -1px;
+  outline: none;
+}
+
+.searchInput::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Filtros tipo select (Status, Vendedor) — Wave 5 auditoria H-01 / RF-013.
+   Visual identico ao .dateInputPill mas com chevron customizado. */
+.selectFilterPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 42px;
+  padding: 0 0.85rem 0 1rem;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: rgba(0, 0, 0, 0.7);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+}
+
+.selectFilterPill:focus-within {
+  border-color: rgba(0, 0, 0, 0.18);
+  box-shadow: 0 0 0 3px rgba(255, 203, 92, 0.18);
+}
+
+.selectFilterPrefix {
+  color: rgba(0, 0, 0, 0.45);
+  font-weight: 500;
+  user-select: none;
+}
+
+.selectFilterInput {
+  border: 0;
+  background: transparent;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color: inherit;
+  padding: 0;
+  outline: none;
+  min-width: 110px;
+  cursor: pointer;
+  /* appearance: none ja em globals.css */
+}
+
+.selectFilterInput:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.selectFilterChevron {
+  color: rgba(0, 0, 0, 0.45);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.selectFilterPill:hover .selectFilterChevron {
+  color: rgba(0, 0, 0, 0.7);
 }
 
 /* ─── ExportButton ────────────────────────────────────────────────────── */
@@ -224,18 +386,24 @@
 }
 
 .exportButton {
-  padding: 0.6rem 1.25rem;
+  padding: 0 1.25rem;
+  height: 42px;
   background: #000;
   color: #fff;
   border: 0;
-  border-radius: 12px;
-  font-size: 0.95rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  transition: opacity 0.15s ease;
+  gap: 0.55rem;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  font-family: inherit;
+}
+
+.exportButton:hover:not(:disabled) {
+  background: #1a1a1a;
 }
 
 .exportButton:hover:not(:disabled) {
@@ -428,13 +596,40 @@
 /* ─── PeriodoBadge ───────────────────────────────────────────────────── */
 
 .periodoBadge {
-  display: inline-block;
-  padding: 0.2rem 0.6rem;
-  background: rgba(0, 0, 0, 0.06);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.85rem;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 999px;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   color: rgba(0, 0, 0, 0.7);
   font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.periodoDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent, #ffcb5c);
+  flex-shrink: 0;
+}
+
+.periodoRange {
+  font-variant-numeric: tabular-nums;
+}
+
+.periodoDivider {
+  color: rgba(0, 0, 0, 0.35);
+  margin: 0 0.1rem;
+}
+
+.periodoDias {
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.05em;
 }
 
 /* ─── EmptyState (dentro de cards) ───────────────────────────────────── */
@@ -690,33 +885,426 @@
 }
 
 /* ─── srOnly (acessibilidade) ────────────────────────────────────────── */
-
+/*
+ * Esconde texto visualmente mantendo no AOM/screen reader.
+ *
+ * IMPORTANTE: NAO usamos `position: absolute` pois quando o ancestral mais
+ * proximo nao for posicionado (ex: <caption> dentro de <table> static),
+ * o absolute se ancora no viewport e estoura `html.scrollHeight` —
+ * causando scroll do browser fora do .cardInner. Bug investigado e
+ * confirmado em 2026-04-29 pela perspectiva Geral (.srOnly caption
+ * empurrava html para 1236px alem da viewport).
+ *
+ * A combinacao width/height 1px + clip-path inset(50%) + overflow hidden
+ * mantem 100% da acessibilidade SEM tirar do flow nem afetar layout do
+ * pai. Adiciona 1px de altura na celula onde reside, irrelevante visual.
+ */
 .srOnly {
-  position: absolute;
   width: 1px;
   height: 1px;
-  padding: 0;
   margin: -1px;
+  padding: 0;
+  border: 0;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
   white-space: nowrap;
-  border: 0;
 }
 
 /* ─── Layout match imagem do Mario (Wave 5 ajustes) ───────────────────── */
 
-/* Linha 1 do Geral: 4 KPIs lado a lado */
+/* Linha 1 do Geral: 4 KPIs com proporcoes desiguais (design Mario).
+   Total Geral bem largo, Tempo/Taxa iguais (medianos), Rota bem estreita. */
 .kpiRowGeral {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: 1.5fr 1fr 1fr 0.65fr;
   gap: 1rem;
 }
 
-/* Linha 2 do Geral: 3 charts lado a lado */
+/* Linha 2 do Geral: 3 cards com Tempo Medio mais largo, Vendedor com Mais
+   Artes um pouco mais estreito que Provas Ativas (design Mario). */
 .chartsRowGeral {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1.3fr 0.9fr;
   gap: 1rem;
+}
+
+/* ─── Metric cards (Wave 5 design Mario) ────────────────────────────── */
+
+.metricCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  border-radius: 24px;
+  min-height: 260px;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.metricCardLight {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  color: #000;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.metricCardDark {
+  background: #0a0a0a;
+  border: 1px solid #0a0a0a;
+  color: #fff;
+}
+
+/* Eyebrow: texto pequeno uppercase no topo dos cards */
+.metricEyebrow {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.metricCardDark .metricEyebrow {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.metricHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.metricCardTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.metricCardTitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #000;
+  line-height: 1.3;
+}
+
+.metricCardSubtitle {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+/* Numero grande dos cards */
+.metricValueLg {
+  font-size: clamp(2.5rem, 4vw, 3.5rem);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: inherit;
+}
+
+.metricValueWithUnit {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  margin-top: auto;
+}
+
+.metricValueUnit {
+  font-size: 1rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.55);
+  margin-left: 0.05rem;
+}
+
+.metricCardDark .metricValueUnit {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.metricValueDanger {
+  color: #ff3b3b;
+}
+
+.metricValueUnitDanger {
+  color: #ff3b3b;
+  opacity: 0.85;
+}
+
+/* Em cards "compactos" o valor desce ate o fim para casar com o design
+   (eyebrow no topo, numero embaixo). Suporta tanto metricValueLg como
+   filho direto (REINICIOS, DEVOLVIDAS, CANCEL., REPROV. AGUARDANDO)
+   quanto envelopado em metricValueWithUnit (TEMPO MEDIO APROV., TAXA
+   REPROVACAO, TEMPO ATE 1ª MOV.). Filho direto via `>` para evitar
+   atingir o metricValueLg interno do wrapper. */
+.metricCardCompact > .metricValueWithUnit,
+.metricCardCompact > .metricValueLg {
+  margin-top: auto;
+}
+
+/* Sparkline embutida no fim do card preto */
+.metricSparkline {
+  margin: 0 -0.25rem -0.5rem;
+  margin-top: auto;
+  width: calc(100% + 0.5rem);
+  pointer-events: none;
+  align-self: stretch;
+}
+
+/* Card "Rota": eyebrow no topo + legenda alinhada a direita */
+.metricCardRota {
+  justify-content: space-between;
+}
+
+.rotaLegend {
+  list-style: none;
+  padding: 0;
+  margin: auto 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: flex-end;
+  min-width: 120px;
+}
+
+.rotaLegendItem {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.rotaDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rotaDotPadrao {
+  background: #000000;
+}
+
+.rotaDotDireta {
+  background: var(--color-accent, #ffcb5c);
+}
+
+.rotaLegendLabel {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.rotaLegendValue {
+  color: #000;
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 1.5em;
+}
+
+/* Card Donut: ajusta padding interno para acomodar grafico */
+.metricCardDonut {
+  gap: 0.5rem;
+}
+
+/* No card Provas Ativas, a tabela acessivel embaixo do donut polui o
+   visual — mantemos no DOM (acessibilidade), mas oculta visualmente. */
+.metricCardDonut .chartDetails {
+  display: none;
+}
+
+.metricCardDonut .donutContainer {
+  flex: 1;
+}
+
+.metricCardDonut .donutSvg {
+  width: 140px;
+  height: 140px;
+}
+
+.metricCardDonut .donutLegend {
+  font-size: 0.85rem;
+  gap: 0.35rem;
+}
+
+/* Card Vendor Row: lista de N vendedores, cada um com rank + nome +
+   valor + progressbar abaixo cobrindo nome ate valor. */
+.metricCardVendorRow {
+  gap: 0.75rem;
+}
+
+.vendorRowList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Cada item do ranking: 2 rows x 3 cols.
+   Row 1: rank | nome | valor
+   Row 2: -    | progressbar (span col 2 e col 3) */
+.vendorRowItem {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  column-gap: 0.85rem;
+  row-gap: 0.45rem;
+  align-items: center;
+}
+
+.vendorRowRank {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.4);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+.vendorRowName {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vendorRowValue {
+  grid-column: 3;
+  grid-row: 1;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #000;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Barra ocupa col 2 ate col 3, abaixo de nome+valor (row 2) */
+.vendorRowBarTrack {
+  grid-column: 2 / 4;
+  grid-row: 2;
+  position: relative;
+  width: 100%;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.vendorRowBarFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: #000000;
+  border-radius: 999px;
+  transform-origin: left center;
+  animation: vendorBarGrow 0.5s ease-out;
+}
+
+@keyframes vendorBarGrow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Card Vendor Highlight (preto) com nome em destaque */
+.metricCardVendorHighlight {
+  gap: 0.4rem;
+}
+
+.metricVendorName {
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: #fff;
+  margin-top: 0.5rem;
+}
+
+.metricVendorNameMuted {
+  font-size: 0.95rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: auto;
+  font-style: italic;
+}
+
+/* ─── DeltaBadge ─────────────────────────────────────────────────────── */
+
+.deltaWrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.deltaBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.deltaArrow {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.deltaBadgePositive {
+  background: rgba(46, 204, 113, 0.16);
+  color: #15803d;
+}
+
+.deltaBadgeNegative {
+  background: rgba(255, 89, 89, 0.14);
+  color: #c2410c;
+}
+
+.deltaBadgeNeutral {
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.7);
+}
+
+/* Variante para usar dentro de cards pretos: brilho aumentado, melhor contraste */
+.deltaBadgeOnDark.deltaBadgePositive {
+  background: rgba(74, 222, 128, 0.2);
+  color: #4ade80;
+}
+
+.deltaBadgeOnDark.deltaBadgeNegative {
+  background: rgba(255, 89, 89, 0.22);
+  color: #ff8a8a;
+}
+
+.deltaBadgeOnDark.deltaBadgeNeutral {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.deltaSuffix {
+  font-size: 0.72rem;
+  color: rgba(0, 0, 0, 0.5);
+  font-weight: 400;
+}
+
+.metricCardDark .deltaSuffix {
+  color: rgba(255, 255, 255, 0.5);
 }
 
 /* ─── DonutChart ──────────────────────────────────────────────────────── */
@@ -802,6 +1390,15 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.donutLegendValue {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+  font-variant-numeric: tabular-nums;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
 }
 
 /* ─── Tooltip flutuante (compartilhado por BarChart e DonutChart) ────── */
@@ -912,20 +1509,701 @@
   font-style: italic;
 }
 
+/* ─── Ranking Card (Metricas por Vendedor + Provas Atrasadas) ──────── */
+/*
+ * Card branco com cantos arredondados, header com titulo + subtitulo +
+ * contador a direita, seguido de uma tabela compacta no estilo do
+ * design Mario. Usado pela perspectiva Geral em duas tabelas:
+ *
+ *   1. Metricas por Vendedor — colunas # | Vendedor | Local | Volume |
+ *      Aprov. | Reprov. | Tempo. Avatar com iniciais (top = amarelo,
+ *      demais = cinza). Volume tem barra horizontal proporcional ao top.
+ *   2. Provas Atrasadas — colunas # | Prova | Vendedor | Status | Atraso.
+ */
+
+.rankingCard {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  border-radius: 24px;
+  padding: 1.5rem 1.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  min-width: 0;
+}
+
+.rankingHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0 0 0.75rem;
+}
+
+.rankingHeaderTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.rankingTitle {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #000;
+  letter-spacing: -0.01em;
+}
+
+.rankingSubtitle {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.rankingCounter {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.rankingTableWrapper {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.rankingTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.rankingTh {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.4);
+  text-align: left;
+  padding: 0.5rem 0.75rem 0.6rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.rankingTh:first-child {
+  padding-left: 0.25rem;
+}
+
+.rankingThNumeric {
+  text-align: right;
+}
+
+.rankingTd {
+  padding: 0.85rem 0.75rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  vertical-align: middle;
+  color: rgba(0, 0, 0, 0.85);
+  font-size: 0.875rem;
+}
+
+.rankingTd:first-child {
+  padding-left: 0.25rem;
+}
+
+.rankingTable tbody tr:last-child .rankingTd {
+  border-bottom: 0;
+}
+
+.rankingTable tbody tr:hover .rankingTd {
+  background: rgba(0, 0, 0, 0.015);
+}
+
+.rankingNumericCell {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ─── Coluna # (rank) ─────────────────────────────────────────────── */
+
+.rankingRankCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  color: rgba(0, 0, 0, 0.5);
+  letter-spacing: 0.02em;
+}
+
+.rankingRankDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent, #ffcb5c);
+  flex-shrink: 0;
+}
+
+/* ─── Coluna VENDEDOR (avatar + nome) ─────────────────────────────── */
+
+.rankingVendor {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.rankingAvatar,
+.rankingAvatarTop {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.rankingAvatar {
+  background: #d4d4d4;
+  color: #595959;
+}
+
+.rankingAvatarTop {
+  background: var(--color-accent, #ffcb5c);
+  color: #000;
+}
+
+.rankingVendorName {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Coluna LOCAL (pill) ─────────────────────────────────────────── */
+
+.rankingLocalPill {
+  display: inline-block;
+  padding: 0.25rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* ─── Coluna VOLUME (barra + numero) ──────────────────────────────── */
+
+.rankingVolumeCell {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 100px;
+}
+
+.rankingVolumeTrack {
+  flex: 1;
+  position: relative;
+  height: 5px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.rankingVolumeFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: #000;
+  border-radius: 999px;
+  transform-origin: left center;
+  animation: rankingBarGrow 0.5s ease-out;
+}
+
+@keyframes rankingBarGrow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.rankingVolumeNum {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #000;
+  min-width: 1.8em;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ─── Coluna APROV / REPROV / TEMPO (cores semanticas) ────────────── */
+
+.rankingAprovActive {
+  color: #2563eb; /* azul */
+  font-weight: 500;
+}
+
+.rankingReprovHigh {
+  color: #dc2626; /* vermelho intenso */
+  font-weight: 500;
+}
+
+.rankingReprovLow {
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.rankingTempoCell {
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.rankingZeroValue {
+  color: rgba(0, 0, 0, 0.3);
+}
+
+/* ─── Coluna PROVA (Atrasadas: nome + meta em duas linhas) ────────── */
+
+.rankingProva {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.rankingProvaNome {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rankingProvaMeta {
+  font-size: 0.75rem;
+  color: rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Coluna STATUS (pill) ────────────────────────────────────────── */
+
+.rankingStatusPill {
+  display: inline-block;
+  padding: 0.25rem 0.85rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.75);
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+/* ─── Coluna ATRASO (vermelho) ────────────────────────────────────── */
+
+.rankingAtraso {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: #dc2626;
+}
+
+/* ─── Footer (linha final "+ N adicionais") ──────────────────────── */
+
+.rankingFooterCell {
+  text-align: center;
+  font-size: 0.8rem;
+  color: rgba(0, 0, 0, 0.5);
+  font-style: italic;
+  padding: 1rem 0.75rem;
+  border-bottom: 0;
+}
+
+/* ─── Perspectiva 3Studio (Wave 5) ─────────────────────────────────── */
+/*
+ * Layout match design Mario:
+ *   Linha 1: 4 cards iguais ao Geral em proporcao (PROVAS CRIADAS preto
+ *            largo + 3 brancos compactos, com CANCEL. mais estreito).
+ *   Linha 2: 2 cards compactos (REPROV.AGUARDANDO + TEMPO ATE 1ª MOV.) +
+ *            1 card largo (Top motivos de cancelamento — 2.4fr).
+ */
+
+.kpiRow3Studio {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 0.65fr;
+  gap: 1rem;
+}
+
+.chartsRow3Studio {
+  display: grid;
+  grid-template-columns: 1fr 1fr 2.4fr;
+  gap: 1rem;
+}
+
+/* Caption pequeno embaixo do numero (ex: "0.47 media diaria · 30 dias")
+   no card preto PROVAS CRIADAS. Cor branca translucida para contraste. */
+.metricCardCaption {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.metricCardLight .metricCardCaption {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+/* Cor warning (laranja-vermelho) para valores numericos que indicam
+   problema operacional: REINICIOS, CANCEL., REPROV. AGUARDANDO. */
+.metricValueWarning {
+  color: #dc2626;
+}
+
+/* ─── Card "Top motivos de cancelamento" ────────────────────────────── */
+
+.metricCardMotivos {
+  gap: 1rem;
+}
+
+.metricCardMotivosHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0;
+}
+
+/* Lista de motivos: label | barra horizontal | valor */
+.cancelMotivosList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  flex: 1;
+}
+
+.cancelMotivoItem {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) 1fr auto;
+  align-items: center;
+  gap: 1rem;
+}
+
+.cancelMotivoLabel {
+  font-size: 0.875rem;
+  color: rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cancelMotivoBarTrack {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+/* Default: rosa claro (motivos secundarios) */
+.cancelMotivoBarFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: #fecaca;
+  border-radius: 999px;
+  transform-origin: left center;
+  animation: cancelBarGrow 0.5s ease-out;
+}
+
+/* Override para o motivo mais frequente: vermelho intenso */
+.cancelMotivoBarFillTop {
+  background: #dc2626;
+}
+
+@keyframes cancelBarGrow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.cancelMotivoValue {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5em;
+  text-align: right;
+}
+
+/* ─── Perspectiva Vendedores (Wave 5) ──────────────────────────────── */
+/*
+ * Linha 1: card preto compacto (VENDEDORES FILIAL com mini-stats no
+ * rodape) + card branco largo (Ranking por volume com lista). Linha 2
+ * usa o .rankingCard padrao (mesmo do "Metricas por Vendedor" do Geral).
+ */
+
+.kpiRowVendedores {
+  display: grid;
+  grid-template-columns: 1fr 2.2fr;
+  gap: 1rem;
+}
+
+/* Card com bloco de mini-stats no rodape (VENDEDORES FILIAL) */
+.metricCardWithStats {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Numero grande em amarelo accent (no card preto, ao inves de branco) */
+.metricValueAccent {
+  color: var(--color-accent, #ffcb5c);
+}
+
+/* Bloco de mini-stats no rodape do card preto: grid 3 colunas iguais
+   com label uppercase pequeno e valor medio destacado. Empurrado para
+   o final do card via margin-top: auto. */
+.metricMiniStats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 1rem;
+}
+
+.metricMiniStat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.metricMiniStatLabel {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.metricMiniStatValue {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Cor verde para taxa de APROVACAO ativa na tabela Detalhamento.
+   Diferente da `rankingAprovActive` (azul, contagem de aprovacoes
+   no Geral) — aqui o numero e percentual e a semantica e "positivo". */
+.rankingAprovPctActive {
+  color: #16a34a; /* green-600 */
+  font-weight: 500;
+}
+
+/* ─── Perspectiva Clicheria (Wave 5) ───────────────────────────────── */
+/*
+ * Linha 1: card preto largo TEMPO MEDIO AGUARDANDO + 3 cards brancos
+ * (RECEBIDAS / EM TRANSITO / ORIGENS).
+ * Linha 2: 2 cards (Provas recebidas por rota de origem largo + Fluxo
+ * de ciclo compacto). Reusa header pattern .metricCardMotivosHeader
+ * do 3Studio para titulo+subtitulo+counter.
+ */
+
+.kpiRowClicheria {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  gap: 1rem;
+}
+
+.chartsRowClicheria {
+  display: grid;
+  grid-template-columns: 1.8fr 1fr;
+  gap: 1rem;
+}
+
+/* Verde de sucesso para metricas positivas (RECEBIDAS NO PERIODO) */
+.metricValueSuccess {
+  color: #16a34a; /* green-600 */
+}
+
+/* Cinza opaco para valores zero — usado quando o numero "0" nao deve
+   ter destaque positivo (ex: nao-recebimento). */
+.metricValueZero {
+  color: rgba(0, 0, 0, 0.3);
+}
+
+/* ─── Distribuicao por rota de origem ──────────────────────────────── */
+
+.distRotaList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  flex: 1;
+}
+
+.distRotaItem {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) 1fr auto;
+  align-items: center;
+  gap: 1rem;
+}
+
+.distRotaLabel {
+  font-size: 0.875rem;
+  color: rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.distRotaBarTrack {
+  position: relative;
+  width: 100%;
+  height: 10px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.distRotaBarFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: #2563eb; /* blue-600 */
+  border-radius: 999px;
+  transform-origin: left center;
+  animation: rankingBarGrow 0.5s ease-out;
+}
+
+.distRotaValue {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #000;
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5em;
+  text-align: right;
+}
+
+/* ─── Fluxo de ciclo (lista de bullets) ────────────────────────────── */
+
+.metricCardFluxo {
+  gap: 1rem;
+}
+
+.fluxoCicloList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  flex: 1;
+}
+
+/* Linha do fluxo: bullet | label | valor.
+   `Active` = valor > 0 (texto preto + bullet preto solido).
+   `Muted`  = valor === 0 (texto cinza claro + bullet outline).        */
+.fluxoCicloItemActive,
+.fluxoCicloItemMuted {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.85rem;
+  font-size: 0.95rem;
+}
+
+.fluxoCicloItemActive {
+  color: #000;
+}
+
+.fluxoCicloItemMuted {
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.fluxoCicloDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.fluxoCicloItemActive .fluxoCicloDot {
+  background: #000;
+  border: 0;
+}
+
+.fluxoCicloItemMuted .fluxoCicloDot {
+  background: transparent;
+  border: 1.5px solid rgba(0, 0, 0, 0.25);
+}
+
+.fluxoCicloLabel {
+  font-weight: 400;
+}
+
+.fluxoCicloValue {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ─── Responsivo: < 1100px reduz para 2 col, < 768px 1 col ───────────── */
 
 @media (max-width: 1100px) {
-  .kpiRowGeral {
+  .kpiRowGeral,
+  .kpiRow3Studio,
+  .kpiRowClicheria {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .chartsRowGeral {
+  .kpiRowVendedores {
+    grid-template-columns: 1fr;
+  }
+
+  .chartsRowGeral,
+  .chartsRow3Studio,
+  .chartsRowClicheria {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 600px) {
-  .kpiRowGeral {
+  .kpiRowGeral,
+  .kpiRow3Studio,
+  .kpiRowVendedores,
+  .kpiRowClicheria {
     grid-template-columns: 1fr;
   }
 
@@ -945,6 +2223,19 @@
 
   .atrasadasProvaInfo {
     grid-column: 1 / 3;
+  }
+
+  .cancelMotivoItem,
+  .distRotaItem {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    row-gap: 0.4rem;
+  }
+
+  .cancelMotivoBarTrack,
+  .distRotaBarTrack {
+    grid-column: 1 / 3;
+    grid-row: 2;
   }
 }
 

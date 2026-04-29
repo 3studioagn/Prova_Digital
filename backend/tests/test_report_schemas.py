@@ -392,6 +392,7 @@ class TestOutrasResposta:
                 tempo_medio_criacao_ate_primeira_mov_horas=3.0,
             ),
             cancelamentos_top=[],
+            serie_temporal=[],
             atualizado_em=datetime.now(UTC),
         )
         assert r.scope == "3studio"
@@ -473,6 +474,7 @@ class TestDiscriminatedUnion:
                 "tempo_medio_criacao_ate_primeira_mov_horas": None,
             },
             "cancelamentos_top": [],
+            "serie_temporal": [],
             "atualizado_em": "2026-04-27T10:00:00+00:00",
         }
         r = adapter.validate_python(data)

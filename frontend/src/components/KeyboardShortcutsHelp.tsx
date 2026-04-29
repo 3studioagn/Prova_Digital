@@ -9,7 +9,8 @@
  * Acessibilidade:
  *   - role="dialog" + aria-modal="true" + aria-labelledby
  *   - Focus trap (reusa `useFocusTrap` da Wave 3)
- *   - Esc fecha (alem do click fora e do botao close)
+ *   - Esc fecha — handled by useGlobalShortcuts (handler unico,
+ *     auditoria 2026-04-29 / L-04 — eliminacao de listener duplicado)
  */
 import { useEffect } from "react";
 
@@ -26,20 +27,6 @@ interface Props {
 
 export function KeyboardShortcutsHelp({ open, onClose, shortcuts }: Props) {
   const trapRef = useFocusTrap<HTMLDivElement>(open);
-
-  // Esc fecha (camada extra alem do useGlobalShortcuts — funciona mesmo se
-  // o foco estiver dentro de input do modal)
-  useEffect(() => {
-    if (!open) return;
-    function handleEsc(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    }
-    document.addEventListener("keydown", handleEsc);
-    return () => document.removeEventListener("keydown", handleEsc);
-  }, [open, onClose]);
 
   // Lock scroll do body quando modal aberto
   useEffect(() => {

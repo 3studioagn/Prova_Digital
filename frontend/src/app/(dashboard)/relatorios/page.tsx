@@ -26,8 +26,11 @@ import { useReportFilters } from "@/hooks/useReportFilters";
 
 import { DateRangeFilter } from "./DateRangeFilter";
 import { ExportButton } from "./ExportButton";
+import { RotaFilter } from "./RotaFilter";
 import { ScopeSelector } from "./ScopeSelector";
 import { SearchInput } from "./SearchInput";
+import { StatusFilter } from "./StatusFilter";
+import { VendedorFilter } from "./VendedorFilter";
 import { Report3Studio } from "./perspectivas/Report3Studio";
 import { ReportClicheria } from "./perspectivas/ReportClicheria";
 import { ReportGeral } from "./perspectivas/ReportGeral";
@@ -56,7 +59,7 @@ const POLLING_INTERVAL_MS = 30_000;
 // ─── Pagina principal ──────────────────────────────────────────────────
 
 function RelatoriosContent() {
-  const { filters, setFilter, toQueryString } = useReportFilters();
+  const { filters, setFilter, setFilters, toQueryString } = useReportFilters();
   const queryString = toQueryString();
   const { loading, refreshing, error, data, refresh, invalidate } = useReport(
     filters,
@@ -182,13 +185,27 @@ function RelatoriosContent() {
           fromISO={filters.from ?? null}
           toISO={filters.to ?? null}
           onChange={({ from, to }) => {
-            setFilter("from", from);
-            setFilter("to", to);
+            // Atualiza atomicamente — `setFilter` sequencial perderia o
+            // primeiro update (race do searchParams no closure).
+            setFilters({ from, to });
           }}
         />
         <SearchInput
           value={filters.q ?? null}
           onChange={(q) => setFilter("q", q)}
+        />
+        <StatusFilter
+          value={filters.status ?? null}
+          onChange={(status) => setFilter("status", status)}
+        />
+        <VendedorFilter
+          value={filters.vendedor_id ?? null}
+          onChange={(vid) => setFilter("vendedor_id", vid)}
+          getToken={getToken}
+        />
+        <RotaFilter
+          value={filters.rota ?? null}
+          onChange={(rota) => setFilter("rota", rota)}
         />
       </section>
 
@@ -208,6 +225,7 @@ function RelatoriosContent() {
       {data ? (
         <PerspectivaRenderer
           data={data}
+          statusFilter={filters.status ?? null}
           onStatusClick={(status) => setFilter("status", status)}
         />
       ) : (
@@ -223,14 +241,22 @@ function RelatoriosContent() {
  */
 function PerspectivaRenderer({
   data,
+  statusFilter,
   onStatusClick,
 }: {
   data: ReportResponse;
-  onStatusClick: (status: StatusProva) => void;
+  statusFilter: StatusProva | null;
+  onStatusClick: (status: StatusProva | null) => void;
 }) {
   switch (data.scope) {
     case "geral":
-      return <ReportGeral data={data} onStatusClick={onStatusClick} />;
+      return (
+        <ReportGeral
+          data={data}
+          statusFilter={statusFilter}
+          onStatusClick={onStatusClick}
+        />
+      );
     case "3studio":
       return <Report3Studio data={data} />;
     case "vendedores":

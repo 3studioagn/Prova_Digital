@@ -88,18 +88,31 @@ function polarToCartesian(
  * Constroi o `d` de um arco SVG entre dois angulos (radianos).
  * arco do raio externo (clockwise), linha radial inner, arco interno (counter-clockwise),
  * fechamento.
+ *
+ * Caso especial 100% (arco completo, 2π):
+ *   startOuter e endOuter coincidem (mesmo ponto no topo); SVG nao renderiza
+ *   um arco circular completo num unico <path> — fica visualmente vazio. Para
+ *   evitar o donut "sumir" quando ha apenas 1 segmento (ex: apos clicar num
+ *   status do donut e filtrar a vista), aplicamos um epsilon minusculo no
+ *   endAngle. Diferenca visual: ~0.09px num viewport de 200x200, imperceptivel.
+ *   Audit 2026-04-29.
  */
+const FULL_CIRCLE_EPSILON = 1e-3;
+
 function buildArcPath(
   startAngle: number,
   endAngle: number,
   outerRadius: number,
   innerRadius: number,
 ): string {
+  const isFullCircle = endAngle - startAngle >= Math.PI * 2 - 1e-6;
+  const adjustedEnd = isFullCircle ? endAngle - FULL_CIRCLE_EPSILON : endAngle;
+
   const startOuter = polarToCartesian(CENTER, CENTER, outerRadius, startAngle);
-  const endOuter = polarToCartesian(CENTER, CENTER, outerRadius, endAngle);
-  const startInner = polarToCartesian(CENTER, CENTER, innerRadius, endAngle);
+  const endOuter = polarToCartesian(CENTER, CENTER, outerRadius, adjustedEnd);
+  const startInner = polarToCartesian(CENTER, CENTER, innerRadius, adjustedEnd);
   const endInner = polarToCartesian(CENTER, CENTER, innerRadius, startAngle);
-  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
+  const largeArc = adjustedEnd - startAngle > Math.PI ? 1 : 0;
 
   return [
     `M ${startOuter.x} ${startOuter.y}`,
@@ -262,7 +275,7 @@ export function DonutChart({
         )}
       </svg>
 
-      {/* Legenda lateral */}
+      {/* Legenda lateral — dot + label + valor numerico (match design Mario) */}
       <ul className={styles.donutLegend}>
         {segments.map((seg) => {
           const isHovered = seg.item.key === hoveredKey;
@@ -287,6 +300,9 @@ export function DonutChart({
                   aria-hidden="true"
                 />
                 <span className={styles.donutLegendLabel}>{seg.item.label}</span>
+                <span className={styles.donutLegendValue}>
+                  {formatValue(seg.item.value)}
+                </span>
               </button>
             </li>
           );

@@ -92,6 +92,12 @@ export function useReportFilters() {
    * Passar `null` ou string vazia remove o parametro da URL.
    * Mudar `scope` preserva os outros filtros (decisao UX: trocar de
    * perspectiva nao deve resetar o periodo).
+   *
+   * IMPORTANTE: chamadas SEQUENCIAS de `setFilter` no mesmo render
+   * (ex: `setFilter("from", x); setFilter("to", y);`) sobrescrevem-se
+   * mutuamente porque cada uma le o `searchParams` do closure (que so
+   * atualiza no proximo render). Para atualizar multiplos campos
+   * atomicamente, use `setFilters` (plural) abaixo.
    */
   const setFilter = useCallback(
     <K extends keyof ReportFilters>(
@@ -107,6 +113,37 @@ export function useReportFilters() {
         params.delete(key);
       } else {
         params.set(key, stringValue);
+      }
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
+
+  /**
+   * Atualiza MULTIPLOS campos dos filtros em uma unica reescrita de URL.
+   *
+   * Use quando precisar atualizar 2+ filtros juntos (ex: from+to do
+   * DateRangeFilter, presets de periodo). Chamar `setFilter` em sequencia
+   * causa race onde a 2a chamada sobrescreve a 1a (audit 2026-04-29).
+   *
+   * Passar `null`/`undefined`/string vazia em qualquer campo remove o
+   * parametro da URL. Campos ausentes do objeto sao mantidos.
+   */
+  const setFilters = useCallback(
+    (updates: Partial<Record<keyof ReportFilters, ReportFilters[keyof ReportFilters] | null>>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      for (const [key, value] of Object.entries(updates) as Array<
+        [keyof ReportFilters, ReportFilters[keyof ReportFilters] | null]
+      >) {
+        const stringValue =
+          value === null || value === undefined || value === ""
+            ? null
+            : String(value);
+        if (stringValue === null) {
+          params.delete(key);
+        } else {
+          params.set(key, stringValue);
+        }
       }
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
     },
@@ -136,5 +173,5 @@ export function useReportFilters() {
     return params.toString();
   }, [filters]);
 
-  return { filters, setFilter, resetFilters, toQueryString };
+  return { filters, setFilter, setFilters, resetFilters, toQueryString };
 }

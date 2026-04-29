@@ -84,11 +84,17 @@ export function useReport(
   const mountedRef = useRef(true);
 
   /**
-   * Fetcher central. `force=true` ignora cache mas ainda envia ETag para
-   * permitir 304 (revalidacao).
+   * Fetcher central. `force=true` ignora cache local mas ainda envia ETag
+   * para permitir 304 (revalidacao). `bypassBackendCache=true` adiciona
+   * `?_force=1` na URL para forcar o backend a recomputar (uso: invalidacao
+   * via Realtime quando ha dado novo no banco que o cache backend ainda
+   * nao refletiu — TTL 60s vs frescor desejado).
    */
   const fetchReport = useCallback(
-    async (force: boolean): Promise<void> => {
+    async (
+      force: boolean,
+      bypassBackendCache: boolean = false,
+    ): Promise<void> => {
       const cacheKey = buildCacheKey(filters, queryString);
       const cached = cacheRef.current.get(cacheKey);
 
@@ -143,18 +149,22 @@ export function useReport(
       const headers: Record<string, string> = {
         Authorization: `Bearer ${token}`,
       };
-      if (cached) {
+      // ETag para revalidacao 304. Em bypass do backend cache, pular —
+      // backend ignoraria o cache de qualquer forma e recomputaria sempre.
+      if (cached && !bypassBackendCache) {
         headers["If-None-Match"] = cached.etag;
       }
 
+      // Compoe URL com `?_force=1` quando pedimos refresh sem cache.
+      const url = bypassBackendCache
+        ? `${API_URL}/api/v1/reports?${queryString}&_force=1`
+        : `${API_URL}/api/v1/reports?${queryString}`;
+
       try {
-        const res = await fetch(
-          `${API_URL}/api/v1/reports?${queryString}`,
-          {
-            headers,
-            signal: controller.signal,
-          },
-        );
+        const res = await fetch(url, {
+          headers,
+          signal: controller.signal,
+        });
 
         if (reqId !== latestReqRef.current) return;
 
@@ -219,15 +229,21 @@ export function useReport(
     [filters, queryString, getToken],
   );
 
-  /** Refresh sob demanda (botao Retry). */
+  /** Refresh sob demanda. Sem bypass do backend cache — polling regular
+   * envia If-None-Match e tira proveito de 304. Botao "Tentar novamente"
+   * tambem cai aqui (e geralmente quer-se cache hit se houver). */
   const refresh = useCallback(async () => {
     await fetchReport(true);
   }, [fetchReport]);
 
-  /** Invalidacao via Realtime: limpa cache e refaz request. */
+  /** Invalidacao via Realtime: limpa cache local + bypass cache backend.
+   * Audit 2026-04-29: bypass garante que mudancas em provas (criadas/
+   * transitadas/canceladas) reflitam imediatamente nos sparklines do
+   * card TOTAL GERAL, VENDEDOR COM MAIS ARTES e PROVAS CRIADAS. Sem o
+   * bypass, backend serviria o cache TTL 60s anterior com ETag stale. */
   const invalidate = useCallback(async () => {
     cacheRef.current.clear();
-    await fetchReport(true);
+    await fetchReport(true, true);
   }, [fetchReport]);
 
   // Refetch a cada mudanca de filtros/queryString.

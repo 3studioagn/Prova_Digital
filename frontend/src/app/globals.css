@@ -86,6 +86,25 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Containment do scroll: a arquitetura do app coloca todo o conteudo
+   rolavel dentro de `.cardInner` (overflow-y: auto). O browser nao deve
+   ter scroll proprio — qualquer overflow no html/body indica bug.
+   Preveine o loop de "100vh vs 100% diante de scrollbar reservada"
+   confirmado em Wave 5 (sessao 2026-04-29).
+   Em mobile (<= 768px) o layout usa scroll do browser intencionalmente,
+   por isso revertemos para `auto` na media query abaixo. */
+html,
+body {
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  html,
+  body {
+    overflow: auto;
+  }
+}
+
 a {
   color: var(--color-text-link);
   text-decoration: none;

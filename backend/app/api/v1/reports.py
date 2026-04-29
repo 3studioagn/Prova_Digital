@@ -42,6 +42,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy import (
     Float,
     and_,
@@ -220,13 +221,25 @@ def _movimentacao_periodo_filter(filters: ReportFilters):
     )
 
 
-def _aplicar_filtros_provas(stmt, filters: ReportFilters):
-    """Aplica filtros opcionais (q, vendedor_id, rota, status) sobre provas_digitais."""
+def _aplicar_filtros_provas(stmt, filters: ReportFilters, *, apply_status: bool = True):
+    """Aplica filtros opcionais (q, vendedor_id, rota, status) sobre provas_digitais.
+
+    Args:
+        stmt: SQLAlchemy SELECT statement a estender.
+        filters: Filtros validados.
+        apply_status: Se False, ignora `filters.status`. Usado em queries
+          que ja filtram por `Movimentacao.status_novo` especifico
+          (ex: tempo_medio_ciclo filtra mov RECEBIDA_PELA_CLICHERIA;
+          aplicar `ProvaDigital.status == filters.status` em cima
+          produziria resultado vazio quando o filtro nao bate com o
+          status final esperado). Default True preserva comportamento
+          historico das queries que filtram apenas provas.
+    """
     if filters.vendedor_id is not None:
         stmt = stmt.where(ProvaDigital.vendedor_id == filters.vendedor_id)
     if filters.rota is not None:
         stmt = stmt.where(ProvaDigital.rota == filters.rota)
-    if filters.status is not None:
+    if apply_status and filters.status is not None:
         stmt = stmt.where(ProvaDigital.status == filters.status)
     if filters.q:
         # Busca textual em nome/cliente/nro_requerimento (ILIKE).
@@ -526,7 +539,11 @@ async def _aggregate_geral(
 
     # Q3: tempo medio + mediano de ciclo
     # Provas concluidas no periodo => par (created_at_prova, mov_recebida.created_at)
-    # FILTROS de provas (q, vendedor_id, etc) tambem aplicam aqui via JOIN.
+    # FILTROS de provas (q, vendedor_id, rota) tambem aplicam aqui via JOIN.
+    # `apply_status=False` porque a query ja filtra por mov RECEBIDA_PELA_CLICHERIA;
+    # aplicar filters.status sobre ProvaDigital.status produziria resultado
+    # vazio quando o filtro nao bate com o status final esperado (ex: filtro
+    # status=APROVADA_PELO_VENDEDOR + mov RECEBIDA_PELA_CLICHERIA = impossivel).
     delta_ciclo = func.extract(
         "epoch", Movimentacao.created_at - ProvaDigital.created_at
     )
@@ -545,7 +562,7 @@ async def _aggregate_geral(
             Movimentacao.created_at < filters.to,
         )
     )
-    stmt_ciclo = _aplicar_filtros_provas(stmt_ciclo, filters)
+    stmt_ciclo = _aplicar_filtros_provas(stmt_ciclo, filters, apply_status=False)
     ciclo_row = (await db.execute(stmt_ciclo)).one_or_none()
     media_ciclo_seg = ciclo_row.media_seg if ciclo_row else None
     mediana_ciclo_seg = ciclo_row.mediana_seg if ciclo_row else None
@@ -720,6 +737,9 @@ async def _aggregate_3studio(
     reprovadas_aguardando = int((await db.execute(stmt_repr)).scalar_one() or 0)
 
     # Q4: tempo medio criacao -> primeira mov, sobre provas criadas no periodo
+    # `apply_status=False` para nao filtrar por status atual da prova;
+    # o indicador mede responsividade do vendedor independentemente do
+    # destino final da prova (aprovada, reprovada, cancelada, em transito).
     primeira_mov_subq = (
         select(
             Movimentacao.prova_id,
@@ -737,7 +757,7 @@ async def _aggregate_3studio(
         .join(primeira_mov_subq, primeira_mov_subq.c.prova_id == ProvaDigital.id)
         .where(_periodo_filter(filters))
     )
-    stmt_resp = _aplicar_filtros_provas(stmt_resp, filters)
+    stmt_resp = _aplicar_filtros_provas(stmt_resp, filters, apply_status=False)
     resp_row = (await db.execute(stmt_resp)).one_or_none()
     media_resp_seg = resp_row.media_seg if resp_row else None
 
@@ -759,6 +779,21 @@ async def _aggregate_3studio(
     )
     top_rows = (await db.execute(stmt_top)).all()
 
+    # Q6: serie temporal por dia (UTC) — mesma logica do scope=geral.
+    # `provas_criadas` agrega exatamente este conjunto, entao a serie
+    # diaria coincide. Usada pelo sparkline do card "PROVAS CRIADAS"
+    # no frontend (Wave 5, Componente 16).
+    bucket_3s = func.date_trunc("day", ProvaDigital.created_at).label("bucket")
+    stmt_serie_3s = (
+        select(bucket_3s, func.count().label("qtd"))
+        .select_from(ProvaDigital)
+        .where(_periodo_filter(filters))
+        .group_by(bucket_3s)
+        .order_by(bucket_3s)
+    )
+    stmt_serie_3s = _aplicar_filtros_provas(stmt_serie_3s, filters)
+    serie_rows_3s = (await db.execute(stmt_serie_3s)).all()
+
     indicadores = Indicadores3Studio(
         provas_criadas=provas_criadas,
         media_diaria_criacao=media_diaria(provas_criadas, total_dias),
@@ -775,12 +810,17 @@ async def _aggregate_3studio(
         CancelamentoTop(motivo=r.motivo, quantidade=int(r.qtd)) for r in top_rows
     ]
 
+    serie_temporal_3s = [
+        PontoSerie(data=r.bucket, quantidade=int(r.qtd)) for r in serie_rows_3s
+    ]
+
     return ReportResponse3Studio(
         periodo=PeriodoMeta(
             from_=filters.from_, to=filters.to, total_dias=total_dias
         ),
         indicadores=indicadores,
         cancelamentos_top=cancelamentos_top,
+        serie_temporal=serie_temporal_3s,
         atualizado_em=now_utc,
     )
 
@@ -1002,6 +1042,16 @@ async def get_report(
     vendedor_id: uuid.UUID | None = Query(None),
     rota: RotaEnum | None = Query(None),
     status_filter: StatusProvaEnum | None = Query(None, alias="status"),
+    force_refresh: bool = Query(
+        False,
+        alias="_force",
+        description=(
+            "Quando true, pula o cache server-side e recomputa o relatorio. "
+            "Frontend usa em invalidacao por Realtime para refletir mudancas "
+            "imediatas (provas criadas/transitadas/canceladas). Polling normal "
+            "deve manter false para preservar a economia de queries (ADR-097)."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_admin_user),
 ):
@@ -1012,6 +1062,8 @@ async def get_report(
     Cache layers (WAVE5_ANALYSIS §4.4):
       1. ETag/304: cliente envia `If-None-Match` => 304 sem body se hit.
       2. Cache backend TTL 60s por hash dos filtros.
+         - `?_force=1` (audit 2026-04-29): pula este cache para casos onde
+           o cliente sabe que ha dado novo (Realtime invalidation).
       3. SQLAlchemy compiled cache (gratuito).
 
     Headers de resposta:
@@ -1028,8 +1080,9 @@ async def get_report(
             rota=rota,
             status_filter=status_filter,
         )
-    except Exception as exc:
-        # Pydantic validation errors -> 422
+    except (ValidationError, ValueError) as exc:
+        # Pydantic validation errors / invariant ValueError -> 422.
+        # Demais excecoes propagam para o handler global retornar 500 limpo.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
@@ -1038,7 +1091,15 @@ async def get_report(
     cache = get_default_cache()
 
     try:
-        payload, etag, _from_cache = await _get_or_compute(filters, db, cache)
+        if force_refresh:
+            # Audit 2026-04-29: bypass cache backend e recomputa.
+            # Resultado e armazenado no cache (sobrescreve entry stale) para
+            # que polling subsequente reutilize.
+            payload = await _dispatch_aggregator(filters.scope, filters, db)
+            etag = compute_etag(payload)
+            await cache.set(to_cache_key(filters), payload, etag)
+        else:
+            payload, etag, _from_cache = await _get_or_compute(filters, db, cache)
     except Exception:
         logger.exception("Erro ao calcular relatorio scope=%s", scope)
         raise HTTPException(
@@ -1101,7 +1162,7 @@ async def export_report(
             rota=rota,
             status_filter=status_filter,
         )
-    except Exception as exc:
+    except (ValidationError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         )
