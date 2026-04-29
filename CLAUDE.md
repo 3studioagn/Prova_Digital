@@ -16,19 +16,20 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **3 — Scanner + Transicoes** | ✅ **COMPLETA** + Review C11 + Auditoria Senior | Camera HTML5, scanner QR, assinatura digital, maquina de estados, reprovacao, roteamento, timeline visual (C12), cancelamento admin (C13), reinicio de ciclo admin (C14). Review C11: bugs stale error, canvas responsivo, modal fluido, entrada manual de codigo QR. Auditoria: 0 CRITICAL, 3 HIGH corrigidos (scan filter admin, getToken try/catch, focus trap modais) | 23+ |
 | **4 — Dashboard + Atrasos** | ✅ **COMPLETA** + Auditoria Senior | Dashboard tempo real (RF-014, US-013) com layout Figma: 5 contadores (criadas hoje, com vendedor, aprovadas, na clicheria, atrasadas c/ breakdown por vendedor) + 2 atalhos rapidos. Query consolidada + cache TTL 5s (ADR-092). Calculo de atraso horas corridas (RN-008). Supabase Realtime (postgres_changes) + fallback polling 10s. Auditoria: 0 CRITICAL, 1 HIGH corrigido (click Na clicheria), 2 MEDIUM corrigidos (breakpoint mobile, GROUP BY), 2 LOW corrigidos (ValueError guard, CHANGELOG). ADR-094 | — |
 | **5 — Relatorios + Atalhos** | ✅ **COMPLETA** + Visual Refresh + 2 rounds de Auditoria Senior | Componente 16 (Relatorios) + Componente 17 (Atalhos). Endpoint UNICO discriminado por scope (geral/3studio/vendedores/clicheria) com cache TTL 60s + ETag SHA-256 + Realtime invalidation (4 camadas, ~20x reducao queries) + bypass `?_force=1` (ADR-107). Frontend `/relatorios` com 4 perspectivas alinhadas ao design Mario, graficos SVG inline interativos (DonutChart com toggle ADR-108 + BarChart + TimeSeriesChart + Sparkline + DeltaBadge). 5 filtros UI completos por construcao (RotaFilter + StatusFilter + VendedorFilter + DateRangeFilter + SearchInput — RF-013, ADR-106). CSV streaming UTF-8 BOM com 4 datasets enriquecidos (taxas + tempo medio por vendedor — L-A1 Round 2) + audit `REPORT_EXPORTED`. Atalhos globais por teclado (g+s, g+p, g+r admin, ?) + 3º card "Acessar Relatorios" no dashboard. **Round 2 de auditoria senior** (2026-04-29) corrigiu H-A1 (Q4 do `_aggregate_geral` agora aplica filtros via JOIN + `_aplicar_filtros_provas`), M-A1 (Q5 do `_aggregate_3studio` cancelamentos_top tambem), M-F1 (a11y modal sem `aria-hidden` no overlay), L-A1 (CSV summary expoe taxas) e L-F1 (`useMemo` em visibleShortcuts) — ADR-109. ADRs 095-109 (095-101 closeout + 102-105 visual refresh + 106-108 audit Round 1 + 109 audit Round 2). Migration 010 (recovery) + 011 (clarify descricao). **639 testes** (era 424); 0 regressao. | 5.0-5.6 + Visual Refresh + Audit R1 + Audit R2 |
-| **6 — Auditoria + Polish** | ⏳ | Tela de audit_log, cleanup de orfaos R2, rotacao de secrets, hardening final | — |
+| **6 — Seguranca e Auditoria** | ✅ **COMPLETA** + UX iteration + Auditoria Senior | Componente 18 (Interface de Log de Auditoria) — RNF-005. 3 endpoints `/api/v1/audit-log` (listagem paginada com filtros, detalhe com `MovimentacaoSnapshot`, by-prova). Frontend `/auditoria` admin-only com filtros (busca, tipo_evento semantico, ator, periodo), drawer lateral com focus trap, atalho `g a`, badges coloridos por categoria (reprovacao/reinicio/cancelamento/criacao). RLS 008 (REVOKE INSERT/UPDATE/DELETE em `audit_logs` para `anon`/`authenticated` — defesa em profundidade RNF-005, terceira camada apos trigger e RLS deny-by-default). UX iteration pos-Gate 2: presets de data (Hoje/7d/30d/90d), tipo_evento (6 categorias semanticas), paginacao numerada com janela inteligente, sticky header, ordenacao clicavel, page size selector (whitelist + tiebreaker por id). Auditoria Senior (2026-04-29): 0 CRITICAL, 2 HIGH (focus trap + F401 unused), 4 MEDIUM (ruff I001 + Pydantic 422 + Pragma legacy + OUTERJOIN condicional), 4 LOW (shadowing id + magic number + label botao + catch silencioso) — todos corrigidos. ADRs 110-114. **724 testes** (era 633); 0 regressao. | — |
 
 **Estado atual do banco de producao:**
-- `alembic_version = 011` (migration 011 aplicada no closeout da Wave 5, 2026-04-27 — ADR-099 cosmetica)
+- `alembic_version = 011` (migration 011 aplicada no closeout da Wave 5, 2026-04-27 — ADR-099 cosmetica). Wave 6 nao criou Alembic.
 - **6 tabelas de dominio** + `alembic_version` (todas com RLS habilitada)
-- **12 policies RLS** otimizadas com `(SELECT auth.uid())` (ADR-029 + ADR-082: +1 `pol_movimentacoes_insert` + `pol_movimentacoes_select` expandida para MOTORISTA/CLICHERIA)
-- **32 indexes** cobrindo filtros dos Componentes 07 + relatorios da Wave 5 (migration 010: +`idx_provas_vendedor_status` +`idx_movimentacoes_status_novo_created_at` — ADR-095)
+- **12 policies RLS** otimizadas com `(SELECT auth.uid())` (ADR-029 + ADR-082: +1 `pol_movimentacoes_insert` + `pol_movimentacoes_select` expandida para MOTORISTA/CLICHERIA). Wave 6 nao criou policy nova.
+- **`audit_logs` com 3 camadas de defesa** (RNF-005): trigger `trg_audit_logs_imutavel` (Wave 0) + RLS deny-by-default `pol_audit_select` admin-only (Wave 0/1/2) + REVOKE GRANT-level INSERT/UPDATE/DELETE para `anon`/`authenticated` (Wave 6, RLS 008 — ADR-112). `service_role` mantem GRANT.
+- **32 indexes** cobrindo filtros dos Componentes 07 + relatorios da Wave 5 (migration 010: +`idx_provas_vendedor_status` +`idx_movimentacoes_status_novo_created_at` — ADR-095). Wave 6 nao criou indice (4 indices em `audit_logs` ja cobrem; advisor `unused_index` deve cair conforme uso real).
 - **3 usuarios ativos**: 2 admins (`admin@3studio.com.br` + `ops@3studio.com.br`) + 1 vendedor FILIAL (`mariosouza@teste.com.br`)
 - **Advisor Supabase limpo** exceto: 1 INFO `rls_enabled_no_policy` em `alembic_version` (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection` (WONTFIX plano pago, ADR-027)
 
 - **1 tabela na publicacao `supabase_realtime`**: `provas_digitais` (INSERT/UPDATE para dashboard tempo real)
 
-**Endpoints publicos em producao (31 rotas):**
+**Endpoints publicos em producao (34 rotas):**
 
 | Prefix | Endpoints | Wave |
 |---|---|---|
@@ -37,10 +38,11 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | `/api/v1/provas` | `POST /scan`, `POST /{id}/transicoes`, `POST /{id}/cancelar`, `POST /{id}/reiniciar-ciclo` | 3 |
 | `/api/v1/provas` | `GET /dashboard` | 4 |
 | `/api/v1/reports` | `GET /` (scope discriminado), `GET /export` (CSV streaming) | 5 |
+| `/api/v1/audit-log` | `GET /` (paginada + filtros), `GET /{id}` (detalhe + MovimentacaoSnapshot), `GET /by-prova/{id}` (historico cronologico) | 6 |
 | `/api/v1/configuracoes` | `GET /`, `GET /{chave}`, `PATCH /{chave}` | 2 |
 | `/health*` | `/health`, `/health/db`, `/health/r2` | 0 |
 
-**Rotas frontend em producao (10 paginas):**
+**Rotas frontend em producao (11 paginas):**
 - `/login` — Wave 1
 - `/dashboard` — Wave 4 C15 + Wave 5 C17 (3º card Acessar Relatorios)
 - `/usuarios` — Wave 1 (CRUD + modais)
@@ -50,9 +52,12 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 - `/configuracoes` — Wave 2 C09 (tempo atraso + template etiqueta)
 - `/escanear` — Wave 3 C10+C11 (scanner QR + assinatura digital + transicao de status + entrada manual de codigo QR)
 - `/relatorios` — Wave 5 C16 (4 perspectivas com gráficos SVG inline interativos: Geral, 3Studio, Vendedores, Clicheria + CSV export streaming + atalhos teclado globais)
+- `/auditoria` — Wave 6 C18 (listagem do log imutavel admin-only com filtros semanticos, presets de data, paginacao numerada + sticky header + ordenacao clicavel + drawer lateral com focus trap e MovimentacaoSnapshot)
+
+**Atalhos globais por teclado** (Wave 5 C17 + Wave 6): `g s` → /escanear, `g p` → /provas, `g r` → /relatorios (admin-only), `g a` → /auditoria (admin-only), `?` → painel de ajuda.
 
 **Itens do menu ainda inativos (placeholders para Waves futuras):**
-- "Informacoes" — possivel Wave 6
+- "Informacoes" — sem wave atribuida
 
 ---
 
@@ -311,7 +316,7 @@ Consultar tambem: [DECISIONS.md](DECISIONS.md) | [CHANGELOG.md](CHANGELOG.md) | 
 
 ---
 
-## Atalhos de teclado globais (Wave 5 Componente 17 — RF-016)
+## Atalhos de teclado globais (Wave 5 Componente 17 — RF-016, expandido na Wave 6)
 
 Disponiveis em qualquer pagina autenticada, registrados via
 `useGlobalShortcuts` em `(dashboard)/layout.tsx`. Padrao 2-keystroke
@@ -323,6 +328,7 @@ segunda tecla dispara a acao.
 | `g` `s` | Ir para `/escanear` |
 | `g` `p` | Ir para `/provas` |
 | `g` `r` | Ir para `/relatorios` (apenas admin — vendedor/motorista/clicheria nao veem) |
+| `g` `a` | Ir para `/auditoria` (apenas admin — Wave 6 C18, RNF-005) |
 | `?` | Abrir/fechar painel de ajuda dos atalhos (`<KeyboardShortcutsHelp />`) |
 | `Esc` | Fechar painel de ajuda ou cancelar leader |
 
@@ -332,10 +338,10 @@ segunda tecla dispara a acao.
   formularios e buscas.
 - Modificadores (Ctrl/Cmd/Alt/Meta) sao ignorados — atalhos so disparam
   com a tecla pura. Evita conflito com shortcuts do navegador.
-- `g r` aparece no painel de ajuda **apenas para `is_admin = true`**;
-  vendedores/motoristas/clicheria nao veem o atalho na lista nem podem
-  ativar via teclado. Defesa adicional: backend do `/api/v1/reports`
-  retorna 403 se acesso direto.
+- `g r` e `g a` aparecem no painel de ajuda **apenas para `is_admin = true`**;
+  vendedores/motoristas/clicheria nao veem os atalhos na lista nem podem
+  ativar via teclado. Defesa adicional: backend dos `/api/v1/reports` e
+  `/api/v1/audit-log` retornam 403 se acesso direto.
 
 **Implementacao:**
 - Hook: `frontend/src/hooks/useGlobalShortcuts.ts`
