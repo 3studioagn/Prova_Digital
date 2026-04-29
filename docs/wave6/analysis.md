@@ -651,3 +651,67 @@ Lista exaustiva dos arquivos lidos e linhas de referência principais:
 ---
 
 **Fim da análise — Gate 1.** Aguardando autorização explícita `AUTORIZADO GATE 2 — WAVE 6` para iniciar a execução.
+
+---
+
+## Execução (anexado pós-Gate 2 — 2026-04-29)
+
+Autorização recebida em 2026-04-29 ("Autorizado", interpretado como liberação para Gate 2 com defaults da §3.9). 11 tarefas executadas em sequência, todos os commits no branch `wave6/componente-18` (a partir de `wave6/analysis`):
+
+| # | Commit | Descrição | Linhas |
+|---|--------|-----------|--------|
+| 1 | `be63f22` | RLS 008: REVOKE INSERT/UPDATE/DELETE em audit_logs | +47 |
+| 2 | `a556a4a` | Backend — schemas + service + router | +899 |
+| 3 | `e6bb772` | Backend tests (63 testes, 95% cov) | +943 |
+| 4 | `8372da6` | (Housekeeping) commitar L-F1 do useGlobalShortcuts (Wave 5 R2 ADR-109) | +6 -3 |
+| 5 | `eb771b3` | Frontend — página /auditoria + tipos + hook + ícone + atalho `g a` + menu admin-only | +1581 -1 |
+
+Total Wave 6: **5 commits, ~3470 linhas adicionadas, 0 regressão** (689 testes passando, era 639 antes).
+
+### Diff Gate 1 → execução real
+
+| Item proposto no Gate 1 | Implementado | Justificativa de divergência |
+|------------------------|--------------|------------------------------|
+| 3 endpoints sob `/api/v1/audit-log` | ✅ idêntico | — |
+| RBAC via `Depends(get_admin_user)` reusado | ✅ idêntico | — |
+| RLS já existente + REVOKE 008 | ✅ aplicado em produção | D1 default = sim |
+| `movimentacao_relacionada` matching com 3 chaves + janela ±5s | ✅ implementado | D2 endurecida — usa `prova_id + status_novo (de detalhes_json.para) + ciclo (de detalhes_json.ciclo)` para desambiguar matches dentro da janela. **Não tocou** código da Wave 3. |
+| Item de menu "Auditoria" entre `usuarios` e `configuracoes` | ✅ idêntico | D3 default = MAIN_NAV |
+| Atalho `g a` admin-only | ✅ idêntico | Adicionado ao SHORTCUT_DEFS |
+| Cache `no-store` (sem TTL/ETag) | ✅ idêntico | ADR-111 |
+| Reuso de DateRangeFilter/SearchInput shared | ❌ não reusado, criado inline | Descoberto durante implementação que esses componentes vivem em `(dashboard)/relatorios/`, não em `components/filters/`. Estão acoplados ao módulo `relatorios.module.css` e seria refator maior do que a Wave 6 acomoda. **Inline simples** com `<input type="search">` e `<input type="date">` consistente com o padrão de `/provas` (Wave 2 C07). Registrado como follow-up para refator pós-Wave 6 se ficar evidente que múltiplas páginas precisam dos mesmos filtros. |
+| Migration Alembic 012 com índices preemptivos | ❌ não criada | EXPLAIN ANALYZE não foi necessário em smoke — 74 linhas instantâneas. Os 4 índices existentes em `audit_logs` cobrem os filtros isolados. Decisão: criar só se gargalo aparecer em produção. |
+| E2E Playwright (`auditoria.spec.ts`) | ⚠️ não implementado | Playwright não está configurado para Wave 4+. Smoke manual via curl + build estático Next.js (passou) substitui o critério no curto prazo. **Marcado como follow-up para Wave 7** — registrar em DECISIONS se necessário. |
+
+### Validação manual executada
+
+- `pytest` suite completa: **689 passou, 0 falhou, 2 warnings** (Pydantic deprecation + JWT key length, ambos pré-existentes).
+- `coverage`: novo código a 95% (router 86%, service 99%, schemas 99%).
+- `npx next build`: rota `/auditoria` compila como **5.68 kB / 164 kB First Load**, 13 rotas estáticas.
+- `npx tsc --noEmit`: TypeScript strict OK.
+- `curl` smoke contra backend local (porta 8001):
+  - `GET /api/v1/audit-log` sem auth → **401** ✅
+  - `GET /api/v1/audit-log/abc` (UUID malformado) → **404** ✅
+  - `GET /api/v1/audit-log/by-prova/abc` → **404** ✅
+  - `POST /api/v1/audit-log` → **405** ✅ (imutabilidade)
+  - `DELETE /api/v1/audit-log/abc` → **405** ✅
+  - `GET /api/v1/audit-log` com bad token → **401** ✅
+- Validação Supabase via MCP `has_table_privilege` pós-RLS 008:
+  - `authenticated`: SELECT=true, INSERT/UPDATE/DELETE=**false** ✅
+  - `anon`: SELECT=true, INSERT/UPDATE/DELETE=**false** ✅
+  - `service_role`: INSERT=true, SELECT=true ✅ (backend continua escrevendo)
+
+### Pendências e follow-ups
+
+- **E2E Playwright:** scenário de admin autorizado + vendedor bloqueado + anônimo bloqueado. Pode ser feito via Playwright em Wave 7 (Polish) ou via teste manual com browser real apenas no momento de PR review.
+- **Reuso de filtros shared:** extrair `DateRangeFilter`/`SearchInput`/`StatusFilter`/`VendedorFilter` para `frontend/src/components/filters/` em refator dedicado, reusando em `/relatorios` + `/auditoria` + `/provas`. Não é trivial — depende de extrair também o CSS shared. Wave 7 candidata.
+- **Migration Alembic 012:** acompanhar advisor Supabase pós-Wave 6 — quando os 4 índices `unused_index` deixarem a lista (sinal de uso real), avaliar se filtros compostos justificam novos índices.
+- **REVOKE em movimentacoes/etiquetas:** consistência conceitual com RLS 008. Wave 7 candidata (registrado em ADR-112 alternativas rejeitadas).
+
+### Estado final do banco em produção (`rwxlpwmnkekzuurgthkr`)
+
+- `alembic_version = 011` (inalterado — Wave 6 não criou Alembic).
+- 7 migrations RLS aplicadas (007 → 008 nova).
+- 12 RLS policies inalteradas + REVOKE explícito em `audit_logs`.
+- 32 índices inalterados.
+- Advisors pós-Wave 6: idêntico ao pré-Wave 6 (1 INFO `rls_enabled_no_policy` em `alembic_version`, 1 WARN `auth_leaked_password_protection`, 14 INFO `unused_index` — esperado-cair conforme Wave 6 entrar em uso).

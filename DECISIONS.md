@@ -3684,3 +3684,196 @@ do vendedor X mas `taxa_reprovacao` da empresa inteira. Confunde a UI
   - Tests `TestAuditoriaSenior20260429Round2.test_h_a1_*` e
     `.test_m_a1_*` previnem regressao via inspecao do source.
 
+---
+
+## ADR-110 — Endpoint dedicado `/api/v1/audit-log` em vez de extender `/provas/{id}/movimentacoes`
+**Data:** 2026-04-29 (Wave 6, Componente 18)
+
+**Contexto:** A Wave 6 entrega uma interface de leitura sobre o log
+imutavel ja populado desde a Wave 3. Existe ja um endpoint
+`GET /api/v1/provas/{id}/movimentacoes` (Wave 2 C08) que lista
+movimentacoes de uma prova com scoping mais permissivo (admin +
+vendedor da prova + motorista/clicheria por status atual). Surgiu a
+opcao de extender esse endpoint para cobrir os requisitos do
+Componente 18 em vez de criar `/api/v1/audit-log` separado.
+
+**Decisao:** **endpoint novo dedicado** `/api/v1/audit-log` com 3
+sub-rotas (listagem paginada, detalhe, by-prova).
+
+**Razao em 4 pontos:**
+
+  1. **Tabela diferente.** `audit_logs` cobre `criar_prova`,
+     `escanear_prova`, `transitar_status`, `reiniciar_ciclo`,
+     `atualizar_configuracao`, `REPORT_EXPORTED`. `movimentacoes`
+     so cobre transicoes (subset de transitar_status +
+     reiniciar_ciclo). RNF-005 exige log "completo" — o endpoint
+     da Wave 6 precisa ler `audit_logs`, nao `movimentacoes`.
+  2. **Scoping diferente.** `pol_audit_select` e admin-only;
+     `pol_movimentacoes_select` cobre 5 atores (admin + vendedor +
+     autor + motorista por status + clicheria por status). Misturar
+     os dois scoping no mesmo endpoint complicaria o backend e
+     tornaria o front guard mais fragil.
+  3. **Convivencia.** O endpoint da Wave 2 e consumido pelo
+     Componente 12 (Timeline da prova individual no /provas/[id]).
+     Mudar contrato dele afetaria a Wave 2/3 — viola isolamento de
+     wave (regra critica do prompt da Wave 6).
+  4. **Visao transversal.** Listagem `/audit-log` (sem filtro de
+     prova) e o caso de uso primario do admin para investigar
+     incidentes — algo que `/provas/{id}/movimentacoes` nao oferece
+     por construcao.
+
+**Alternativas rejeitadas:**
+
+  - **Extender `/provas/{id}/movimentacoes`** com flag `?include_audit=1`:
+    rejeitado — viola isolamento de wave, mistura scopings, e o flag
+    discriminado seria proxy de "voce e admin?" o que duplicaria a
+    propria checagem de RBAC.
+  - **Combinar audit_logs + movimentacoes em response unico:** rejeitado
+    — UI fica confusa (eventos duplicados — cada transicao tem 1 audit
+    + 1 movimentacao). Wave 6 oferece `movimentacao_relacionada` no
+    detalhe quando relevante (D2 do analysis.md), preservando ambos os
+    contratos sem duplicar listagens.
+  - **`/api/v1/auditoria` em portugues:** considerado mas rejeitado —
+    "auditoria" tem conotacao de "processo de auditoria" (review por
+    auditor); "audit-log" e mais especifico ao registro tecnico que
+    estamos consultando. Convencao consistente com `/api/v1/users` e
+    `/api/v1/provas` (substantivos da entidade, nao processos).
+
+**Consequencias:**
+
+  - 3 endpoints novos sob prefixo `/api/v1/audit-log` (registrados em
+    `app/main.py`).
+  - Endpoint da Wave 2 fica intacto — Componente 12 continua usando.
+  - 1 router/service/schema novo no backend; 1 hook + 1 pagina nova
+    no frontend; sem alteracao em codigo das Waves 0-5.
+  - Convivencia documentada na §3.3.3 do `docs/wave6/analysis.md`.
+
+---
+
+## ADR-111 — Sem cache em `/api/v1/audit-log` (`Cache-Control: no-store`)
+**Data:** 2026-04-29 (Wave 6, Componente 18)
+
+**Contexto:** A Wave 5 (`/api/v1/reports`) adotou cache TTL 60s +
+ETag SHA-256 + Realtime invalidation (ADR-097, ADR-107). O caso de
+uso de relatorios e idempotente: 30 admins polling sobre a mesma
+janela temporal recebem o mesmo agregado, e 60s de "data velha" e
+aceitavel para uma decisao gerencial. A pergunta natural era se a
+Wave 6 deveria reusar o mesmo `ReportCache` do report_cache.py.
+
+**Decisao:** **Sem cache** no `/api/v1/audit-log`.
+Header `Cache-Control: no-store, Pragma: no-cache` em toda resposta.
+
+**Razao:**
+
+  1. **Caso de uso e tempo real.** Audit-log e ferramenta de
+     investigacao em tempo real — admin abre a tela durante um
+     incidente para confirmar quem fez o que e quando. 60s de delay
+     poderia mascarar um evento que acabou de acontecer (e que e
+     justamente o motivo da investigacao).
+  2. **Volume baixo.** A tabela cresce devagar (~4-8 entradas/dia hoje,
+     pode chegar a ~100-200/dia em uso pleno). Sem cache, cada
+     request faz 2 queries (items + count) com indices cobrindo
+     bem — custo desprezivel.
+  3. **Granularidade de filtros.** Diferente de relatorios (4 scopes
+     fixos), audit-log aceita combinacoes arbitrarias de 9 filtros.
+     Cache hit rate seria proximo de zero ate em uso intenso.
+  4. **No-store evita confusao com browser cache.** Cliente HTTP
+     respeita `no-store` e nao guarda copia no disco; em conjunto
+     com a logica do `useAuditLog` (sem cache local), garante que
+     refresh manual sempre retorna estado atual.
+
+**Alternativas rejeitadas:**
+
+  - **Reusar `ReportCache` com TTL pequeno (5-10s):** rejeitado —
+    multiplica complexidade sem ganho perceptivel; admin investigando
+    incidente nao sente diferenca de 60s de cache, mas em pior caso
+    pode ser confundido por dados ainda nao visiveis.
+  - **ETag SHA-256 sem TTL:** rejeitado — `If-None-Match => 304`
+    economizaria bytes mas nao resolve o cenario "mostre-me o que
+    aconteceu nos ultimos 30s". E o computo do hash teria custo no
+    pior caso (admin paginando uma tabela de 100k linhas).
+  - **Cache so em `/by-prova/{id}`:** rejeitado — caso de uso ainda
+    e investigacao; consistencia entre os 3 endpoints e mais valiosa
+    que micro-otimizacao.
+
+**Consequencias:**
+
+  - Cada request executa 2 queries (items + count); audit-log nao
+    contribui para a metrica de "queries economizadas" do Wave 5.
+  - Frontend nao precisa gerenciar invalidation, ETag, ou Realtime
+    invalidation. `useAuditLog` apenas refetcha quando filters mudam.
+  - Logger INFO em cada acesso (`logger.info("audit_log.list user=...")`)
+    cria meta-rastro de quem leu o que — util para investigacao
+    posterior. Esse log NAO grava em `audit_logs` (evita
+    auto-referencia + spam).
+
+---
+
+## ADR-112 — Imutabilidade do log em 3 camadas (RLS 008 REVOKE)
+**Data:** 2026-04-29 (Wave 6, Componente 18)
+
+**Contexto:** A imutabilidade de `audit_logs` (RNF-005) ja era garantida
+em duas camadas antes da Wave 6:
+
+  1. Trigger `trg_audit_logs_imutavel BEFORE UPDATE OR DELETE`
+     (Wave 0, migration 001). Bloqueia mutacoes inclusive via
+     `service_role` (triggers fazem efeito independente de bypassrls).
+  2. RLS deny-by-default — ausencia de policy
+     INSERT/UPDATE/DELETE com RLS habilitada bloqueia clientes
+     `anon` e `authenticated` (Wave 0 RLS 001 + Wave 1 RLS 004 +
+     Wave 2 RLS 005).
+
+A auditoria pre-execucao da Wave 6 (Gate 1, §2.3 do
+`docs/wave6/analysis.md`) confirmou via `has_table_privilege` que
+ambos `anon` e `authenticated` AINDA tinham GRANT-level
+INSERT/UPDATE/DELETE concedido sobre `audit_logs`. Isso nao gerava
+vazamento real (RLS + trigger blocavam), mas:
+
+  - O erro retornado para o cliente era "no policy found" (sutil).
+  - Uma migration futura que adicionasse policy INSERT/UPDATE/DELETE
+    por engano (ex: copiando boilerplate do CRUD de usuarios) NAO
+    seria bloqueada pelo REVOKE inexistente — o trigger seria a
+    unica defesa restante.
+
+**Decisao:** Adicionar **terceira camada** via
+`backend/migrations/rls/008_revoke_audit_logs_mutation.sql`:
+
+```sql
+REVOKE INSERT, UPDATE, DELETE ON public.audit_logs FROM anon, authenticated;
+```
+
+`service_role` mantem GRANT — backend continua escrevendo via
+`audit_service.log_audit()`. SELECT continua liberado (RLS
+`pol_audit_select` filtra para admin-only).
+
+**Aplicada em producao** via MCP `execute_sql` em 2026-04-29; validada
+via `has_table_privilege`.
+
+**Alternativas rejeitadas:**
+
+  - **Manter status quo (2 camadas).** Rejeitada — o REVOKE e
+    aditivo, idempotente e zero-impacto operacional; nao fazer e
+    deixar uma armadilha latente para futuras migrations.
+  - **Trigger BEFORE INSERT bloqueando tudo exceto service_role.**
+    Rejeitada — complexo, requer detectar role no trigger, e
+    quebra-se se o backend for migrado para uma role diferente.
+    REVOKE e idiomatic Postgres.
+  - **REVOKE em todas as 6 tabelas imutaveis** (`audit_logs`,
+    `movimentacoes`, `etiquetas`). Rejeitada por escopo —
+    `movimentacoes` precisa permitir INSERT via `service_role` mas
+    REVOKE em `anon`/`authenticated` faria sentido conceitualmente.
+    Adiada para Wave 6 polish ou Wave 7 — registrada aqui como
+    follow-up.
+
+**Consequencias:**
+
+  - `audit_logs` agora tem 3 camadas independentes contra mutacao.
+  - Erro de cliente que tente UPDATE/DELETE/INSERT vira "permission
+    denied" antes mesmo da RLS ser consultada — sinal mais explicito
+    que "no policy found".
+  - Documentado no `docs/wave6/analysis.md` §3.2.2.
+  - Validacao reproducivel via:
+    ```sql
+    SELECT has_table_privilege('authenticated','public.audit_logs','UPDATE');
+    -- esperado: false
+    ```

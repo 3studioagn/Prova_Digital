@@ -2,6 +2,199 @@
 
 ---
 
+## [2026-04-29 — Wave 6 Componente 18] — Interface de Log de Auditoria
+
+### Contexto
+
+Wave 6, Componente 18 entrega uma fachada read-only sobre o log de
+auditoria ja populado desde a Wave 3. RNF-005 exige acesso restrito ao
+perfil 3Studio (is_admin=true), defendido em tres camadas independentes:
+middleware FastAPI `get_admin_user` (Wave 1), RLS `pol_audit_select`
+(Wave 0/3), e guard de menu condicional ao `is_admin` no frontend. Esta
+wave NAO substitui o endpoint `GET /api/v1/provas/{id}/movimentacoes`
+da Wave 2 — convive com ele oferecendo visao admin-only, transversal e
+audit-centric.
+
+Gate 1 (analise read-only) entregue em `docs/wave6/analysis.md` no
+branch `wave6/analysis` (commit `e816167`). Gate 2 (execucao) no branch
+`wave6/componente-18`. Sem alteracao em codigo de Waves 0-5.
+
+### Endpoints novos
+
+`GET /api/v1/audit-log` — listagem paginada (page, page_size 1-200,
+sort asc/desc, from/to ISO 8601, prova_id, usuario_id, acao, q busca
+em detalhes_json::text). Response `AuditLogListResponse` com items +
+total + page + page_size. Header `Cache-Control: no-store` (audit
+precisa ser tempo real, sem TTL ou ETag).
+
+`GET /api/v1/audit-log/{id}` — detalhe com enriquecimento opcional
+de `movimentacao_relacionada` quando `acao` e transitar_status ou
+reiniciar_ciclo. Matching tripla: prova_id + status_novo (de
+detalhes_json.para) + ciclo (de detalhes_json.ciclo) com janela ±5s
+em created_at. Sem violar isolamento da Wave 3 (D2 do analysis.md,
+opcao A endurecida). `assinatura_digital` BYTEA NUNCA exposta —
+apenas boolean `assinatura_digital_presente`.
+
+`GET /api/v1/audit-log/by-prova/{prova_id}` — historico cronologico
+sem paginacao. Hard cap defensivo em 500 itens. Default sort=asc
+(cronologico). 404 se prova nao existir.
+
+### Backend
+
+- `backend/app/domain/schemas/audit_log.py` (190 linhas):
+  AuditLogListQuery com validadores (intervalo coerente, max 366d,
+  sanitizacao q), AuditLogItemResponse, AuditLogListResponse,
+  AuditLogDetailResponse, MovimentacaoSnapshot. `frozen=True` em
+  todos. Constantes MAX_PAGE_SIZE=200, DEFAULT_PAGE_SIZE=50,
+  MAX_RANGE_DAYS=366, MAX_Q_LENGTH=200, MAX_BY_PROVA_ITEMS=500.
+- `backend/app/services/audit_log_service.py` (380 linhas):
+  `listar_audit_logs` (filtros + paginacao + 2 queries: items com
+  JOIN para usuarios+provas, count separado), `buscar_audit_log_detalhe`
+  (1 query com JOIN + 1 opcional para movimentacao_relacionada),
+  `listar_audit_logs_por_prova` (sem paginacao, hard cap 500),
+  `prova_existe` (404 antes de listar).
+- `backend/app/api/v1/audit_log.py` (320 linhas): 3 endpoints com
+  `Depends(get_admin_user)`, `parse_audit_id`/`parse_prova_id_path`
+  para path params (404 em UUID malformado, consistente com Wave 2).
+  Logger INFO em cada acesso (auditoria do proprio audit, sem
+  auto-referencia em audit_logs).
+- `backend/app/main.py`: registro do router em `/api/v1/audit-log`.
+- `backend/migrations/rls/008_revoke_audit_logs_mutation.sql` (47
+  linhas): REVOKE INSERT, UPDATE, DELETE de audit_logs para anon e
+  authenticated. service_role mantem privilegios. Aplicada em
+  producao via MCP execute_sql; validada via has_table_privilege.
+  Defesa em profundidade adicional ao trigger `trg_audit_logs_imutavel`
+  e RLS deny-by-default ja existentes.
+
+### Backend tests (`backend/tests/test_audit_log_api.py`, 940 linhas)
+
+63 testes novos cobrindo:
+
+- **RBAC (8):** admin OK, vendedor/motorista/clicheria/studio-sem-admin
+  recebem 403, anonimo 401, em todos os 3 endpoints.
+- **Validacao Pydantic (9):** page<1, page_size>200, sort invalido,
+  datas invertidas, intervalo >366d, q/acao acima do max,
+  UUID malformado em path => 404.
+- **Listagem (4):** defaults, filtros passados ao service,
+  Cache-Control: no-store, BYTEA nunca aparece no payload.
+- **Detalhe (3):** id existente, 404, com/sem movimentacao_relacionada,
+  garantia BYTEA escondida.
+- **By-prova (3):** existente 200, inexistente 404, default sort=asc.
+- **Imutabilidade (12):** POST/PUT/PATCH/DELETE => 405 nos 3 endpoints.
+- **Schema query Pydantic (9):** defaults, normalizacao naive datetime
+  para UTC, strip de q vazia, control chars rejeitados, intervalo
+  invertido/365d/366d, page_size max, sort case-sensitive.
+- **Service direto (15):** listar (vazio, com rows, com filtros
+  q/periodo/acao), detalhe (id inexistente, sem movimentacao,
+  matching tripla com match e sem match, assinatura vazia,
+  reiniciar_ciclo), by-prova, prova_existe.
+
+Coverage:
+- `app/api/v1/audit_log.py`: 86%
+- `app/domain/schemas/audit_log.py`: 99%
+- `app/services/audit_log_service.py`: 99%
+- TOTAL novo codigo: 95% (target >=80%)
+
+Suite completa: 689 testes passando, 0 regressao (era 639 antes).
+
+### Frontend (`frontend/src/`)
+
+- `lib/types/auditLog.ts`: tipos TS espelho de `schemas/audit_log.py`.
+  Helpers `filtersToQueryString`, `formatAcao`, `categorizar`.
+- `hooks/useAuditLog.ts`: `useAuditLog(getToken, filters)` (refresh
+  automatico em filters change, race protection via reqId), e
+  `useAuditLogDetail(getToken)` (carga sob demanda do drawer).
+- `app/(dashboard)/auditoria/page.tsx`: pagina completa — tabela com
+  filtros pill (busca textual com debounce 350ms, acao select, datas
+  de/ate, ordem asc/desc), paginacao Anterior/Proxima, drawer lateral
+  de detalhe com formatacao do detalhes_json + movimentacao_relacionada
+  (incluindo flag assinatura_digital_presente). Estado vazio, erro,
+  acesso restrito (renderizado se !is_admin). Sem botoes de mutacao
+  por construcao.
+- `app/(dashboard)/auditoria/auditoria.module.css`: visual derivado de
+  provas.module.css. Badges coloridos por categoria (reprovacao=vermelho,
+  reinicio=laranja, criacao=verde). Drawer com slide-in animation.
+- `app/(dashboard)/layout.tsx`: item "Auditoria" no MAIN_NAV com
+  `adminOnly=true`; render filtra por `user?.is_admin === true`.
+- `components/icons.tsx`: novo `ShieldIcon`.
+- `hooks/useGlobalShortcuts.ts`: novo atalho `g a` -> /auditoria
+  (admin-only, mesma convencao do `g r` da Wave 5).
+
+Build estatico passou: `/auditoria` 5.68 kB, 164 kB First Load,
+13 rotas estaticas. TypeScript strict OK.
+
+### Smoke test backend (curl, sem dev servers)
+
+```
+GET /api/v1/audit-log no auth                  -> 401
+GET /api/v1/audit-log/abc no auth              -> 404 (UUID malformado)
+GET /api/v1/audit-log/by-prova/abc no auth     -> 404
+POST /api/v1/audit-log no auth                 -> 405
+DELETE /api/v1/audit-log/abc no auth           -> 405
+GET /api/v1/audit-log com bad token            -> 401
+```
+
+### Migrations
+
+- `backend/migrations/rls/008_revoke_audit_logs_mutation.sql` aplicada
+  em producao (`rwxlpwmnkekzuurgthkr` em sa-east-1).
+
+Sem Alembic — nao foi necessario criar indice novo (4 indices
+existentes em `audit_logs` cobrem os filtros; advisor pos-Wave 6
+removera os de "unused_index" conforme a tabela passar a ser
+consultada).
+
+### Decisoes (ADR-110, ADR-111, ADR-112)
+
+- **ADR-110**: Endpoint dedicado `/api/v1/audit-log` em vez de extender
+  `/api/v1/provas/{id}/movimentacoes`. Razao: scoping diferente
+  (admin-only vs admin+vendedor+motorista+clicheria), tabela diferente
+  (`audit_logs` cobre ate `criar_prova` e `atualizar_configuracao`,
+  enquanto `movimentacoes` so cobre transicoes), e RNF-005 exige
+  visao "completa" (toda acao do sistema, nao apenas transicoes).
+- **ADR-111**: Sem cache (Cache-Control: no-store) — diferente do
+  `/api/v1/reports` (Wave 5 ADR-097), que tem TTL de 60s. Razao:
+  audit-log e ferramenta de investigacao em tempo real; admin pode
+  estar lendo durante incidente, e dados velhos seriam perigosos.
+- **ADR-112**: Imutabilidade em 3 camadas: trigger DB (Wave 0),
+  RLS deny-by-default (Wave 0), REVOKE explicito (Wave 6 RLS 008).
+  GRANT-level REVOKE adiciona protecao contra migration futura
+  acidental — proposta na §3.7.2 do `docs/wave6/analysis.md`,
+  aprovada e aplicada.
+
+### Arquivos novos
+
+- `docs/wave6/analysis.md` (Gate 1, no branch wave6/analysis,
+  commit `e816167`)
+- `backend/migrations/rls/008_revoke_audit_logs_mutation.sql`
+- `backend/app/api/v1/audit_log.py`
+- `backend/app/domain/schemas/audit_log.py`
+- `backend/app/services/audit_log_service.py`
+- `backend/tests/test_audit_log_api.py`
+- `frontend/src/app/(dashboard)/auditoria/page.tsx`
+- `frontend/src/app/(dashboard)/auditoria/auditoria.module.css`
+- `frontend/src/hooks/useAuditLog.ts`
+- `frontend/src/lib/types/auditLog.ts`
+
+### Arquivos alterados
+
+- `backend/app/main.py` (registro do router)
+- `frontend/src/app/(dashboard)/layout.tsx` (item de menu admin-only)
+- `frontend/src/components/icons.tsx` (ShieldIcon)
+- `frontend/src/hooks/useGlobalShortcuts.ts` (atalho `g a`)
+
+Sem mudancas em codigo de Waves 0-5 — isolamento de wave preservado.
+
+### Endpoints publicos em producao apos Wave 6
+
+| Prefix | Endpoints | Wave |
+|---|---|---|
+| `/api/v1/audit-log` | `GET /` (paginado), `GET /{id}`, `GET /by-prova/{prova_id}` | 6 |
+
+(Demais endpoints inalterados.)
+
+---
+
 ## [2026-04-29 — Wave 5 Auditoria Senior Round 2] — Filtros propagam para Q4/Q5 + a11y modal + CSV summary + useMemo
 
 ### Contexto
