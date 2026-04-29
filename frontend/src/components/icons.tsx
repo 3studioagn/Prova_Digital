@@ -126,3 +126,12 @@ export function CloseIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function ShieldIcon(props: IconProps) {
+  return (
+    <svg {...baseProps} {...props} aria-hidden={props["aria-label"] ? undefined : true}>
+      <path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5l-8-3Z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}

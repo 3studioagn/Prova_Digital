@@ -44,6 +44,12 @@ export const SHORTCUT_DEFS: ShortcutDef[] = [
     label: "Acessar relatorios",
     adminOnly: true,
   },
+  {
+    key: "a",
+    path: "/auditoria",
+    label: "Acessar auditoria",
+    adminOnly: true,
+  },
 ];
 
 interface Options {

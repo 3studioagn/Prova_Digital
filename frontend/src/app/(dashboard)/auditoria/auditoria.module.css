@@ -1,0 +1,529 @@
+/*
+ * Pagina Auditoria — listagem do log imutavel (Wave 6, Componente 18).
+ *
+ * Visual derivado de provas.module.css (Wave 2 C07): tabela em card claro
+ * com dividers verticais entre colunas, filtros pill arredondados, status
+ * em texto plano. Diferenca: nao tem botao "Ver" (yellow pill); detalhe
+ * abre num drawer lateral.
+ *
+ * Alguns badges usam cores de severidade (reprovacao = vermelho, reinicio
+ * = laranja) consistente com Timeline.tsx (C12).
+ */
+
+/* ── Mobile-only notice / desktop wrapper ─────────────────────────── */
+
+.mobileNotice {
+  display: none;
+}
+
+.desktopOnly {
+  display: contents;
+}
+
+/* ── Header ───────────────────────────────────────────────────────── */
+
+.pageHeader {
+  margin-bottom: 1.5rem;
+}
+
+.title {
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 500;
+  line-height: 1.05;
+  color: var(--color-card-text);
+  letter-spacing: -0.02em;
+}
+
+.subtitle {
+  margin-top: 0.5rem;
+  font-size: var(--fs-base);
+  color: var(--color-card-text-muted);
+}
+
+/* ── Acesso restrito (estado para nao-admin) ──────────────────────── */
+
+.restricted {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+  gap: 1rem;
+}
+
+.restrictedTitle {
+  font-size: 2rem;
+  font-weight: 500;
+  color: var(--color-card-text);
+}
+
+.restrictedMessage {
+  color: var(--color-card-text-muted);
+  font-size: var(--fs-base);
+  max-width: 480px;
+}
+
+.restrictedLink {
+  display: inline-block;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  padding: 0.75rem 1.75rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.restrictedLink:hover {
+  text-decoration: none;
+  opacity: 0.85;
+}
+
+/* ── Filtros ──────────────────────────────────────────────────────── */
+
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.filterRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+  align-items: end;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--fs-base);
+  font-weight: 400;
+  color: var(--color-card-text);
+}
+
+.input,
+.select {
+  width: 100%;
+  height: 56px;
+  padding: 0 1.5rem;
+  background: var(--color-card-surface);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  transition: box-shadow 0.15s ease;
+}
+
+.input::placeholder {
+  color: var(--color-card-text-muted);
+}
+
+.input:focus,
+.select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.input[type="date"] {
+  line-height: 56px;
+}
+
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9' fill='none'><path d='M1 1l6 6 6-6' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 1.5rem center;
+  padding-right: 3rem;
+  cursor: pointer;
+}
+
+.btnSecondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 56px;
+  padding: 0 2rem;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  border: none;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.btnSecondary:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.btnSecondary:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Tabela ───────────────────────────────────────────────────────── */
+
+.tableWrap {
+  background: transparent;
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-card-lg);
+  padding: 1.5rem;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+}
+
+.tableScroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  table-layout: auto;
+}
+
+.table thead tr {
+  border-bottom: 1px solid var(--color-card-border);
+}
+
+.table th {
+  text-align: left;
+  padding: 1rem 0.75rem;
+  color: var(--color-card-text-muted);
+  font-weight: 500;
+  font-size: 1rem;
+  white-space: nowrap;
+  border-right: 1px solid var(--color-card-border);
+}
+
+.table td {
+  text-align: left;
+  padding: 0.875rem 0.75rem;
+  color: var(--color-card-text);
+  border-right: 1px solid var(--color-card-border);
+  border-bottom: 1px solid var(--color-card-border);
+  vertical-align: middle;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table tr.clickable {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.table tr.clickable:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.table th:last-child,
+.table td:last-child {
+  border-right: none;
+}
+
+/* Badges de categoria de evento */
+
+.acaoBadge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border-radius: var(--radius-pill);
+  background: var(--color-card-surface);
+  color: var(--color-card-text);
+}
+
+.acaoReprovacao {
+  background: var(--color-danger-soft);
+  color: #a82727;
+}
+
+.acaoReinicio {
+  background: #ffe2c2;
+  color: #8a5117;
+}
+
+.acaoCancelamento {
+  background: var(--color-danger-soft);
+  color: #a82727;
+}
+
+.acaoCriacao {
+  background: #d8f0d4;
+  color: #1f5e1a;
+}
+
+/* Estados loading / vazio / erro */
+
+.loadingCell,
+.emptyCell {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--color-card-text-muted);
+  font-size: 0.9375rem;
+  border-right: none !important;
+}
+
+.errorCell {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  border-right: none !important;
+}
+
+.errorMessage {
+  display: inline-block;
+  background: var(--color-danger-soft);
+  color: #a82727;
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.9375rem;
+  margin-bottom: 1rem;
+  max-width: 540px;
+}
+
+.retryBtn {
+  display: inline-block;
+  background: #000000;
+  color: #ffffff;
+  border: none;
+  padding: 0.625rem 1.5rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.875rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+
+.retryBtn:hover {
+  opacity: 0.85;
+}
+
+/* ── Paginacao ────────────────────────────────────────────────────── */
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.pageInfo {
+  color: var(--color-card-text-muted);
+  font-size: 0.875rem;
+}
+
+.pageButtons {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.pageBtn {
+  background: transparent;
+  border: 1px solid var(--color-card-border);
+  color: var(--color-card-text);
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.15s;
+}
+
+.pageBtn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.pageBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Drawer lateral de detalhe ────────────────────────────────────── */
+
+.drawerBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 80;
+  animation: fadeIn 0.18s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 100vw);
+  background: #ffffff;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
+  animation: slideIn 0.25s ease-out;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.drawerHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid var(--color-card-border);
+}
+
+.drawerTitle {
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: #000;
+}
+
+.drawerCloseBtn {
+  background: transparent;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #000;
+  padding: 0.5rem;
+  line-height: 1;
+}
+
+.drawerBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.drawerSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.drawerLabel {
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-card-text-muted);
+  font-weight: 500;
+}
+
+.drawerValue {
+  font-size: 0.9375rem;
+  color: #000;
+  word-break: break-word;
+}
+
+.detalhesBlock {
+  background: var(--color-card-surface);
+  border-radius: var(--radius-sm);
+  padding: 1rem;
+  font-size: 0.8125rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #000;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.movRelacionada {
+  background: #f6f6f6;
+  border-left: 3px solid var(--color-accent);
+  padding: 1rem;
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.movHeader {
+  font-weight: 500;
+  color: #000;
+}
+
+.movRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--color-card-text-muted);
+}
+
+.movMotivo {
+  font-style: italic;
+  color: #a82727;
+  margin-top: 0.25rem;
+}
+
+.assinaturaOk {
+  color: #1f5e1a;
+}
+
+.assinaturaFalta {
+  color: #a82727;
+}
+
+/* ── Mobile / responsivo ──────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .desktopOnly {
+    display: none;
+  }
+
+  .mobileNotice {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    text-align: center;
+  }
+
+  .mobileNotice p {
+    font-size: var(--fs-lg);
+    color: var(--color-card-text-muted);
+    max-width: 320px;
+    line-height: 1.4;
+  }
+}
+
+@media (max-width: 1280px) {
+  .filterRow {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  .filterRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

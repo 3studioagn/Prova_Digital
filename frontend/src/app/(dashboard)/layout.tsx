@@ -19,6 +19,7 @@ import {
   PlusIcon,
   ScanIcon,
   SearchIcon,
+  ShieldIcon,
   UserIcon,
 } from "@/components/icons";
 import styles from "./layout.module.css";
@@ -41,6 +42,8 @@ interface NavItemSpec {
   label: string;
   icon: ReactNode;
   href?: string;
+  /** Quando true, item so aparece para usuarios com is_admin=true. */
+  adminOnly?: boolean;
 }
 
 const MAIN_NAV: NavItemSpec[] = [
@@ -50,6 +53,15 @@ const MAIN_NAV: NavItemSpec[] = [
   { key: "escanear", label: "Escanear", icon: <ScanIcon />, href: "/escanear" },
   { key: "relatorios", label: "Relatorios", icon: <ChartIcon />, href: "/relatorios" },
   { key: "usuarios", label: "Usuarios", icon: <UserIcon />, href: "/usuarios" },
+  // Wave 6 C18 — admin-only. Defesa em profundidade: backend retorna 403
+  // se acesso direto via URL; este flag esconde o link da UI.
+  {
+    key: "auditoria",
+    label: "Auditoria",
+    icon: <ShieldIcon />,
+    href: "/auditoria",
+    adminOnly: true,
+  },
 ];
 
 const SECONDARY_NAV: NavItemSpec[] = [
@@ -232,7 +244,9 @@ export default function DashboardLayout({
           </div>
 
           <nav className={styles.nav} aria-label="Navegacao principal">
-            {MAIN_NAV.map((item) => (
+            {MAIN_NAV.filter(
+              (item) => !item.adminOnly || user?.is_admin === true,
+            ).map((item) => (
               <NavEntry
                 key={item.key}
                 item={item}
