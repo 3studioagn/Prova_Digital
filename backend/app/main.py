@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app.api.v1.audit_log import router as audit_log_router
 from app.api.v1.configuracoes import router as configuracoes_router
 from app.api.v1.provas import router as provas_router
 from app.api.v1.reports import router as reports_router
@@ -66,6 +67,7 @@ app.include_router(
     configuracoes_router, prefix="/api/v1/configuracoes", tags=["configuracoes"]
 )
 app.include_router(reports_router, prefix="/api/v1/reports", tags=["reports"])
+app.include_router(audit_log_router, prefix="/api/v1/audit-log", tags=["audit-log"])
 
 
 @app.get("/health")
