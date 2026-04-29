@@ -3584,3 +3584,103 @@ clicou no donut esperava que clicar de novo desfizesse o filtro
     via `PerspectivaRenderer`.
   - StatusFilter (ADR-106) e clique-no-donut sao redundantes mas
     sincronizados (mesma URL param) — usuario pode usar qualquer caminho.
+
+---
+
+## ADR-109 — Filtros propagam para todas as queries agregadas no mesmo response (Wave 5 Audit Round 2)
+**Data:** 2026-04-29 (Wave 5 Auditoria Senior Round 2)
+
+**Contexto:** A auditoria sênior round 2 (achado H-A1) identificou que
+`_aggregate_geral` retornava indicadores INCONSISTENTES quando o admin
+aplicava filtros (`vendedor_id`, `rota`, `q`):
+  - `total_provas`, `serie_temporal`, `distribuicao_status`,
+    `distribuicao_rota` e `ranking` corretamente FILTRADOS via
+    `_aplicar_filtros_provas`.
+  - `tempo_medio_aprovacao_horas` e `taxa_reprovacao` (Q4) GLOBAIS,
+    porque `stmt_aprov` selecionava de `Movimentacao` sem JOIN com
+    `ProvaDigital` e `_aplicar_filtros_provas` nao era chamado.
+
+Mesma divergencia identificada em `_aggregate_3studio` Q5
+(`cancelamentos_top` — achado M-A1): query selecionava de `ProvaDigital`
+mas tambem nao chamava `_aplicar_filtros_provas`.
+
+Resultado pratico: admin filtrava por "vendedor X" e via `total_provas`
+do vendedor X mas `taxa_reprovacao` da empresa inteira. Confunde a UI
+(taxa nao bate com o ranking renderizado no mesmo response).
+
+**Decisao — Padrao arquitetural: filtros propagam consistentemente:**
+
+  Toda query agregada que contribui para um indicador no mesmo response
+  do `/reports` DEVE aplicar `_aplicar_filtros_provas(stmt, filters,
+  apply_status=...)` apos garantir que `ProvaDigital` esta no FROM/JOIN.
+
+  - **Q4 (`_aggregate_geral`):** adicionado `.join(ProvaDigital,
+    ProvaDigital.id == decisao_alias.prova_id)` apos o JOIN com
+    `retirada_subq`, e `stmt_aprov = _aplicar_filtros_provas(stmt_aprov,
+    filters, apply_status=False)`. `apply_status=False` porque a query
+    ja filtra por `Movimentacao.status_novo IN (APROVADA, REPROVADA)`;
+    aplicar `filters.status` em cima de `ProvaDigital.status` produziria
+    interseccao impossivel (mesmo padrao da Q3 — auditoria M-02
+    anterior).
+  - **Q5 (`_aggregate_3studio`):** adicionado `stmt_top =
+    _aplicar_filtros_provas(stmt_top, filters, apply_status=False)`.
+    Query ja filtra por `status=CANCELADA`; aplicar `filters.status
+    != CANCELADA` zeraria resultado. Ja tinha `ProvaDigital` no FROM,
+    nao precisou de JOIN extra.
+
+**Alternativas rejeitadas:**
+  - **Manter Q4/Q5 globais (status quo):** rejeitado — causa
+    inconsistencia visivel ao admin que filtra por vendedor/rota.
+    Quebra principio de menor surpresa.
+  - **Documentar a divergencia em vez de corrigir** ("indicadores Q4/Q5
+    sao globais por design"): rejeitado — nada na UI sinaliza qual
+    indicador ignora filtros; a coerencia visual e mais valiosa que
+    uma "feature documentada".
+  - **Refatorar para 1 unica query mega-CTE:** rejeitado por
+    complexidade; o padrao "varias queries pequenas + helper
+    compartilhado" e mais sustentavel. Cache TTL 60s + ETag SHA-256
+    cobrem o custo de N queries por scope.
+
+**Consequencias:**
+  - 3 queries do `reports.py` agora consistentes:
+    - **Q3** (tempo_ciclo no scope=geral, ja corrigida em M-02 da
+      auditoria Round 1).
+    - **Q4** (tempo_aprov + taxa_reprovacao no scope=geral, H-A1).
+    - **Q5** (cancelamentos_top no scope=3studio, M-A1).
+    Todas usam JOIN com `ProvaDigital` (quando necessario) +
+    `_aplicar_filtros_provas(..., apply_status=False)`.
+  - Padrao "queries que ja filtram por `Movimentacao.status_novo`
+    especifico usam `apply_status=False`" agora consolidado em 3
+    pontos do codigo. Convencao para futuras queries similares (Wave
+    6+).
+  - Indicadores `tempo_medio_aprovacao_horas`, `taxa_reprovacao`
+    (geral) e `cancelamentos_top` (3studio) agora respondem
+    coerentemente a filtros — UI passa a mostrar a "taxa de reprovacao
+    do vendedor X no periodo X" quando filtrado, em vez da taxa
+    global.
+  - Performance: 1 JOIN extra em Q4 sobre `idx_provas_pkey` (lookup
+    O(1) por `ProvaDigital.id`). Custo desprezivel.
+  - **Smoke tests por inspecao do source** em
+    `TestAuditoriaSenior20260429Round2.test_h_a1_q4_geral_aplica_filtros_provas`
+    e `.test_m_a1_q5_3studio_aplica_filtros_provas` — falham se
+    alguem remover o JOIN ou a chamada do helper, prevenindo
+    regressao.
+
+**Aplicacao retroativa:**
+  - **Banco:** zero alteracao. Mudanca e apenas em codigo Python.
+  - **API contract:** nenhuma mudanca em response shape ou em
+    parametros aceitos. Apenas o VALOR dos campos `tempo_medio_*` e
+    `taxa_reprovacao` muda quando filtros sao aplicados (semantica
+    correta agora).
+  - **Frontend:** nenhuma mudanca necessaria; usa os mesmos campos.
+  - **Cache + ETag:** invalidados naturalmente por `?_force=1`
+    (Realtime invalidation do ADR-107). TTL de 60s expira sozinho. Em
+    pior caso, cliente ve dados velhos (taxa global) por <60s apos
+    deploy — aceitavel.
+
+**Audit trail:**
+  - ADR-109 (este registro) — H-A1 + M-A1.
+  - CHANGELOG.md entrada `[2026-04-29 — Wave 5 Auditoria Senior Round 2]`.
+  - Tests `TestAuditoriaSenior20260429Round2.test_h_a1_*` e
+    `.test_m_a1_*` previnem regressao via inspecao do source.
+

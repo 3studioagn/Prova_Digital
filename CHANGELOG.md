@@ -2,6 +2,126 @@
 
 ---
 
+## [2026-04-29 — Wave 5 Auditoria Senior Round 2] — Filtros propagam para Q4/Q5 + a11y modal + CSV summary + useMemo
+
+### Contexto
+
+Segunda rodada de auditoria sênior read-only da Wave 5, executada apos a
+round 1 do mesmo dia. Identificou 1 HIGH (H-A1), 2 MEDIUM (M-A1, M-F1) e
+2 LOW (L-A1, L-F1) que escaparam dos rounds anteriores. Todos os 5
+corrigidos com autorizacao explicita do Mario, em ordem de severidade,
+com testes apos cada passo. Nenhum arquivo de Wave 0/1/2/3/4 foi
+alterado.
+
+### Correcoes
+
+**Backend (`backend/app/api/v1/reports.py`):**
+
+- **H-A1 (HIGH)**: `_aggregate_geral` Q4 (`tempo_medio_aprovacao_horas` +
+  `taxa_reprovacao`) agora aplica `_aplicar_filtros_provas(stmt_aprov,
+  filters, apply_status=False)` apos JOIN com `ProvaDigital`. Antes da
+  correcao, `filters.vendedor_id`/`rota`/`q` nao propagavam para esses 2
+  indicadores — resposta retornava `total_provas` filtrado mas
+  `taxa_reprovacao` GLOBAL, inconsistencia visivel para o admin que
+  filtrava por vendedor X (taxa nao batia com o ranking renderizado no
+  mesmo response).
+- **M-A1 (MEDIUM)**: `_aggregate_3studio` Q5 (`cancelamentos_top`) agora
+  aplica `_aplicar_filtros_provas(stmt_top, filters, apply_status=False)`.
+  Antes da correcao, lista "Top motivos de cancelamento" retornava global
+  mesmo com filtros, divergindo dos demais indicadores do scope=3studio.
+- **L-A1 (LOW)**: `_summary_rows` para `scope=vendedores` agora expoe
+  4 linhas por vendedor no CSV summary (`volume`, `taxa_aprovacao`,
+  `taxa_reprovacao`, `tempo_medio_retirada_a_decisao_horas`). Antes
+  apenas `volume` era exportado, deixando o CSV mais pobre que a UI.
+  Format `XX.XX%` para taxas, 2 casas decimais para tempo (consistente
+  com `_format_taxa`/`_format_horas`).
+
+**Frontend (`frontend/src/`):**
+
+- **M-F1 (MEDIUM)**: `components/KeyboardShortcutsHelp.tsx` removeu
+  `aria-hidden="true"` do overlay. Era violacao do WAI-ARIA modal
+  pattern — atributo propaga aos descendentes e esconderia o dialog
+  interno do leitor de tela apesar do `role="dialog"` +
+  `aria-modal="true"` no proprio dialog. Adicionado comentario JSX
+  documentando o motivo da ausencia para prevenir regressao.
+- **L-F1 (LOW)**: `hooks/useGlobalShortcuts.ts` envolveu
+  `visibleShortcuts` em `useMemo([isAdmin])`. Antes recriava o array a
+  cada render do `(dashboard)/layout.tsx`, causando re-attach do
+  listener de keydown desnecessariamente em toda navegacao
+  authenticada.
+
+### Testes adicionados (3)
+
+- `tests/test_reports_api.py::TestAuditoriaSenior20260429Round2::test_h_a1_q4_geral_aplica_filtros_provas`
+  — smoke por inspecao do source. Verifica presenca de
+  `JOIN ProvaDigital ... decisao_alias.prova_id`, chamada
+  `stmt_aprov = _aplicar_filtros_provas(...)` e `apply_status=False`.
+  Falha se alguem remover qualquer um desses 3 elementos.
+- `tests/test_reports_api.py::TestAuditoriaSenior20260429Round2::test_m_a1_q5_3studio_aplica_filtros_provas`
+  — mesmo padrao para Q5: verifica `stmt_top = _aplicar_filtros_provas(`.
+- `tests/test_reports_api.py::TestReportsExport::test_export_summary_vendedores_inclui_taxas_l_a1`
+  — constroi payload com 1 VendedorMetrica completo (taxa_aprovacao=0.7143,
+  taxa_reprovacao=0.2857, tempo=4.5h) e verifica que o CSV summary
+  contem as 4 linhas por vendedor + formato esperado (`71.43%`,
+  `28.57%`, `4.50`).
+
+### Validacoes finais
+
+- `pytest backend/tests/`: **639 passed** (era 636; +3 novos), 0 regressao.
+- `ruff check app/ tests/`: limpo.
+- `tsc --noEmit`: limpo.
+- `next lint`: 0 warnings, 0 errors.
+- Preview server smoke: `/login` carrega 200 OK apos `window.location.reload()`
+  — confirma que mudancas em `useGlobalShortcuts.ts` (usado pelo
+  `(dashboard)/layout.tsx`) nao quebram a build do app inteiro. Erros de
+  RSC payload em `useReportFilters.ts:90` no console pre-existem (nao foi
+  arquivo tocado) e caem em fallback gracioso para browser navigation.
+
+### Arquivos modificados
+
+**Backend:**
+- `backend/app/api/v1/reports.py` (H-A1 Q4 + M-A1 Q5 + L-A1 _summary_rows)
+- `backend/tests/test_reports_api.py` (+3 testes)
+
+**Frontend:**
+- `frontend/src/components/KeyboardShortcutsHelp.tsx` (M-F1 — remove
+  aria-hidden + comentario justificativo)
+- `frontend/src/hooks/useGlobalShortcuts.ts` (L-F1 — useMemo)
+
+### ADRs novas registradas
+
+- **ADR-109** — Filtros propagam para todas as queries agregadas no
+  mesmo response (Wave 5 Audit Round 2). Padrao arquitetural: toda
+  query agregada que contribui para um indicador no mesmo response do
+  `/reports` DEVE aplicar `_aplicar_filtros_provas(stmt, filters,
+  apply_status=...)` apos garantir que `ProvaDigital` esta no FROM/JOIN.
+  `apply_status=False` quando a query ja filtra por
+  `Movimentacao.status_novo` especifico (Q3, Q4, Q5).
+
+### Achados aceitos sem correcao
+
+- **L-S1** (sem rate limiting em `/reports`): planejado para Wave 6
+  Hardening (continuidade da auditoria Round 1 L-02).
+- **L-S2** (audit log `detalhes.q` armazena texto livre — pode incluir
+  PII de cliente/prova): aceitavel em projeto admin-only; registro
+  para Wave 6 considerar redacao.
+- **L-Q1** (ruff em `migrations/versions/011_*.py`): **nao-issue** —
+  `pyproject.toml [tool.ruff] extend-exclude = ["migrations"]` ja
+  ignora; CI nao falha.
+- **L-T1** (cobertura `app/api/v1/reports.py` 47%): DAT secao 3 exige
+  80% em "camadas de dominio e servico" (atingido: 99-100%);
+  agregadores SQL validados via EXPLAIN ANALYZE em producao + seed E2E
+  manual (CHANGELOG Bloco 5.2 linha equivalente).
+
+### Veredito
+
+✅ **APROVADA**. Os 5 fixes sao contidos, sem risco de regressao, e
+mantem a Wave 5 sob os mais altos padroes de qualidade. DoD do Backlog
+seguindo 100% atendido. Padrao "filtros propagam consistentemente"
+(ADR-109) deve ser seguido em queries agregadas futuras (Wave 6+).
+
+---
+
 ## [2026-04-29 — Wave 5 Auditoria Senior + Hardening] — Auditoria read-only + 4 bugs corrigidos em teste manual
 
 ### Contexto
