@@ -895,6 +895,188 @@ class TestServicoDetalhe:
         assert mock_db.execute.await_count == 2
 
 
+# ─── UX A2 — Filtro semantico tipo_evento ─────────────────────────────────
+
+
+class TestTipoEvento:
+    """Cobre o mapeamento semantico de tipo_evento (Wave 6 UX A2)."""
+
+    @pytest.mark.parametrize(
+        "tipo,esperado",
+        [
+            ("reprovacao", "reprovacao"),
+            ("reinicio", "reinicio"),
+            ("cancelamento", "cancelamento"),
+            ("criacao", "criacao"),
+            ("admin", "admin"),
+        ],
+    )
+    def test_schema_aceita_valores_validos(self, tipo, esperado):
+        from app.domain.schemas.audit_log import AuditLogListQuery
+
+        q = AuditLogListQuery.model_validate({"tipo_evento": tipo})
+        assert q.tipo_evento == esperado
+
+    def test_schema_normaliza_todos_para_none(self):
+        from app.domain.schemas.audit_log import AuditLogListQuery
+
+        q = AuditLogListQuery.model_validate({"tipo_evento": "todos"})
+        assert q.tipo_evento is None
+
+    def test_schema_normaliza_string_vazia_para_none(self):
+        from app.domain.schemas.audit_log import AuditLogListQuery
+
+        q = AuditLogListQuery.model_validate({"tipo_evento": ""})
+        assert q.tipo_evento is None
+
+    def test_schema_rejeita_valor_invalido(self):
+        from app.domain.schemas.audit_log import AuditLogListQuery
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            AuditLogListQuery.model_validate({"tipo_evento": "outras_coisas"})
+
+    def test_schema_normaliza_case_insensitive(self):
+        from app.domain.schemas.audit_log import AuditLogListQuery
+
+        q = AuditLogListQuery.model_validate({"tipo_evento": "REPROVACAO"})
+        assert q.tipo_evento == "reprovacao"
+
+    async def test_endpoint_aceita_tipo_evento(self, admin_user, mock_db):
+        _setup(mock_db, admin=admin_user)
+        captured = {}
+
+        async def fake_listar(db, query):
+            captured["query"] = query
+            return _make_list_response(n=0, total=0)
+
+        with patch(
+            "app.api.v1.audit_log.listar_audit_logs",
+            new=AsyncMock(side_effect=fake_listar),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url=BASE
+            ) as ac:
+                resp = await ac.get(f"{PREFIX}?tipo_evento=reprovacao")
+        assert resp.status_code == 200
+        assert captured["query"].tipo_evento == "reprovacao"
+
+    async def test_endpoint_rejeita_tipo_evento_invalido_422(
+        self, admin_user, mock_db
+    ):
+        _setup(mock_db, admin=admin_user)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url=BASE
+        ) as ac:
+            resp = await ac.get(f"{PREFIX}?tipo_evento=foo")
+        assert resp.status_code == 422
+
+
+# ─── UX B4 — Ordenacao clicavel ───────────────────────────────────────────
+
+
+class TestOrderBy:
+    """Cobre order_by dinamico com whitelist (Wave 6 UX B4)."""
+
+    @pytest.mark.parametrize(
+        "col", ["created_at", "acao", "usuario_nome"]
+    )
+    def test_schema_aceita_colunas_whitelisted(self, col):
+        from app.domain.schemas.audit_log import AuditLogListQuery
+
+        q = AuditLogListQuery.model_validate({"order_by": col})
+        assert q.order_by == col
+
+    def test_schema_default_created_at(self):
+        from app.domain.schemas.audit_log import AuditLogListQuery
+
+        q = AuditLogListQuery.model_validate({})
+        assert q.order_by == "created_at"
+
+    def test_schema_rejeita_coluna_arbitraria(self):
+        """Defesa anti-SQL-injection — whitelist bloqueia entradas
+        arbitrarias mesmo que parecessem nome de coluna valida."""
+        from app.domain.schemas.audit_log import AuditLogListQuery
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            AuditLogListQuery.model_validate({"order_by": "ip_address"})
+        with pytest.raises(ValidationError):
+            AuditLogListQuery.model_validate({"order_by": "id; DROP TABLE"})
+
+    async def test_endpoint_aceita_order_by_acao(self, admin_user, mock_db):
+        _setup(mock_db, admin=admin_user)
+        captured = {}
+
+        async def fake_listar(db, query):
+            captured["query"] = query
+            return _make_list_response(n=0, total=0)
+
+        with patch(
+            "app.api.v1.audit_log.listar_audit_logs",
+            new=AsyncMock(side_effect=fake_listar),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url=BASE
+            ) as ac:
+                resp = await ac.get(f"{PREFIX}?order_by=acao&sort=asc")
+        assert resp.status_code == 200
+        assert captured["query"].order_by == "acao"
+        assert captured["query"].sort == "asc"
+
+    async def test_endpoint_rejeita_order_by_invalido_422(
+        self, admin_user, mock_db
+    ):
+        _setup(mock_db, admin=admin_user)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url=BASE
+        ) as ac:
+            resp = await ac.get(f"{PREFIX}?order_by=algumacoisa")
+        assert resp.status_code == 422
+
+    def test_resolver_order_by_column(self):
+        """Helper privado mapeia string -> coluna SQLAlchemy."""
+        from app.db.models import AuditLog, Usuario
+        from app.services.audit_log_service import _resolver_order_by_column
+
+        assert _resolver_order_by_column("created_at") is AuditLog.created_at
+        assert _resolver_order_by_column("acao") is AuditLog.acao
+        assert _resolver_order_by_column("usuario_nome") is Usuario.nome
+        # Defensive default
+        assert _resolver_order_by_column("inexistente") is AuditLog.created_at
+
+
+# ─── UX A4 — Busca q expandida para nro_requerimento ──────────────────────
+
+
+class TestBuscaQExpandida:
+    """Cobre a busca textual ampliada para nro_requerimento (Wave 6 UX A4)."""
+
+    async def test_q_busca_em_detalhes_e_nro_requerimento(self, mock_db):
+        """Verifica via inspecao de SQL que ambos os campos sao tocados."""
+        from app.domain.schemas.audit_log import AuditLogListQuery
+        from app.services.audit_log_service import listar_audit_logs
+
+        result_items = AsyncMock()
+        result_items.all = lambda: []
+        result_count = AsyncMock()
+        result_count.scalar_one = lambda: 0
+        mock_db.execute = AsyncMock(side_effect=[result_items, result_count])
+
+        q = AuditLogListQuery.model_validate({"q": "REQ-123"})
+        await listar_audit_logs(mock_db, q)
+
+        # Inspeciona os 2 statements compilados — ambos devem mencionar
+        # detalhes_json E nro_requerimento por causa do OR.
+        call_args = mock_db.execute.await_args_list
+        assert len(call_args) == 2
+        for call in call_args:
+            stmt = call.args[0]
+            sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+            assert "detalhes_json" in sql.lower() or "detalhes" in sql.lower()
+            assert "nro_requerimento" in sql.lower()
+
+
 class TestServicoByProva:
     """Testa app.services.audit_log_service.listar_audit_logs_por_prova."""
 

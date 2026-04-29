@@ -44,6 +44,39 @@ MAX_BY_PROVA_ITEMS = 500
 """Hard cap defensivo no historico por prova (sentinela para investigacao)."""
 
 
+# ─── Filtros semanticos de tipo de evento (UX A2) ─────────────────────────
+
+
+TIPOS_EVENTO_VALIDOS = frozenset({
+    "todos",
+    "reprovacao",
+    "reinicio",
+    "cancelamento",
+    "criacao",
+    "admin",
+})
+"""Conjunto de valores aceitos no filtro `tipo_evento` (Wave 6 UX iteration).
+
+Cada valor mapeia para uma combinacao de `acao` + filtro JSONB no
+service. Permite que o admin investigue por categoria semantica em vez
+de conhecer o nome interno da `acao`. Implementacao em
+`audit_log_service._aplicar_tipo_evento`.
+"""
+
+
+# ─── Ordenacao clicavel (UX B4) ───────────────────────────────────────────
+
+
+ORDER_BY_VALIDOS = frozenset({"created_at", "acao", "usuario_nome"})
+"""Colunas pelas quais a listagem pode ser ordenada (Wave 6 UX iteration).
+
+`created_at` e o default. As outras 2 sao acessiveis via clique no
+cabecalho da tabela. Mantem-se enxuto — `prova_nro_requerimento` e
+`ip_address` nao foram adicionados porque nao sao casos de uso
+reais hoje (podem entrar via ADR futuro se aparecer demanda).
+"""
+
+
 # ─── Query schema (params da listagem) ─────────────────────────────────────
 
 
@@ -59,7 +92,11 @@ class AuditLogListQuery(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE)
     sort: str = Field(default="desc", pattern="^(asc|desc)$")
-    """Ordenacao por created_at: 'desc' (mais recente primeiro) ou 'asc'."""
+    """Direcao da ordenacao: 'desc' (mais recente primeiro) ou 'asc'."""
+
+    order_by: str = Field(default="created_at")
+    """Coluna de ordenacao (Wave 6 UX B4). Aceita 'created_at',
+    'acao' ou 'usuario_nome'. Validado em `validate_order_by`."""
 
     from_dt: datetime | None = Field(default=None, alias="from")
     """Inicio do intervalo (UTC). Inclusive."""
@@ -74,10 +111,23 @@ class AuditLogListQuery(BaseModel):
     """Filtra por ator (usuario que executou a acao)."""
 
     acao: str | None = Field(default=None, max_length=100)
-    """Filtra por tipo de evento. Aceita qualquer string <= 100 chars."""
+    """Filtra por tipo de evento (string crua). Aceita qualquer
+    string <= 100 chars. Util quando o admin sabe o nome interno
+    da acao. Para filtro semantico use `tipo_evento`."""
+
+    tipo_evento: str | None = Field(default=None, max_length=20)
+    """Filtro semantico de alto nivel (Wave 6 UX A2).
+
+    Aceita: 'reprovacao', 'reinicio', 'cancelamento', 'criacao',
+    'admin', 'todos'. 'todos' e None sao equivalentes. Validado em
+    `validate_tipo_evento`. Mapeia para combinacao de `acao` +
+    filtro em `detalhes_json` no service."""
 
     q: str | None = Field(default=None, max_length=MAX_Q_LENGTH)
-    """Busca textual em detalhes_json::text (LIKE case-insensitive)."""
+    """Busca textual (Wave 6 UX A4). Procura simultaneamente em
+    `detalhes_json::text` E em `provas_digitais.nro_requerimento`
+    (LIKE case-insensitive). Permite ao admin colar um numero de
+    requerimento humano-legivel sem precisar saber UUIDs."""
 
     @model_validator(mode="after")
     def validate_date_range(self) -> "AuditLogListQuery":
@@ -113,6 +163,41 @@ class AuditLogListQuery(BaseModel):
                 object.__setattr__(self, "q", None)
             else:
                 object.__setattr__(self, "q", cleaned)
+        return self
+
+    @model_validator(mode="after")
+    def validate_tipo_evento(self) -> "AuditLogListQuery":
+        """Valida que `tipo_evento` e um dos valores conhecidos.
+
+        'todos' e tratado como None (sem filtro). Demais valores
+        validados contra TIPOS_EVENTO_VALIDOS.
+        """
+        if self.tipo_evento is not None:
+            valor = self.tipo_evento.strip().lower()
+            if valor == "" or valor == "todos":
+                object.__setattr__(self, "tipo_evento", None)
+            elif valor not in TIPOS_EVENTO_VALIDOS:
+                raise ValueError(
+                    f"tipo_evento invalido. Valores aceitos: "
+                    f"{sorted(TIPOS_EVENTO_VALIDOS)}"
+                )
+            else:
+                object.__setattr__(self, "tipo_evento", valor)
+        return self
+
+    @model_validator(mode="after")
+    def validate_order_by(self) -> "AuditLogListQuery":
+        """Valida `order_by` contra a whitelist ORDER_BY_VALIDOS.
+
+        Defesa contra SQL injection — a coluna eh inserida no
+        statement via `getattr` no service, mas a whitelist garante
+        que apenas colunas conhecidas passam.
+        """
+        if self.order_by not in ORDER_BY_VALIDOS:
+            raise ValueError(
+                f"order_by invalido. Valores aceitos: "
+                f"{sorted(ORDER_BY_VALIDOS)}"
+            )
         return self
 
 

@@ -17,7 +17,7 @@ from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Text, and_, cast, func, select
+from sqlalchemy import Text, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
@@ -40,6 +40,23 @@ from app.domain.schemas.audit_log import (
 
 
 _ACOES_COM_MOVIMENTACAO = frozenset({"transitar_status", "reiniciar_ciclo"})
+
+
+# ─── Mapeamento de tipo_evento (UX A2) ────────────────────────────────────
+#
+# Cada categoria semantica resolve para uma combinacao de `acao` + filtro
+# em `detalhes_json`. Usado por _aplicar_tipo_evento.
+#
+# - reprovacao    : transitar_status com detalhes_json.para = REPROVADA_PELO_VENDEDOR
+# - reinicio      : reiniciar_ciclo (acao dedicada — nao precisa olhar detalhes)
+# - cancelamento  : transitar_status com detalhes_json.para = CANCELADA
+# - criacao       : criar_prova
+# - admin         : atualizar_configuracao OR REPORT_EXPORTED
+#
+# 'todos' (e None) nao aplica filtro algum.
+
+_PARA_REPROVACAO = "REPROVADA_PELO_VENDEDOR"
+_PARA_CANCELAMENTO = "CANCELADA"
 """Eventos do log que correspondem a 1 linha em `movimentacoes`.
 
 Escrita pelo `executar_transicao` na mesma transacao do log. O detalhe
@@ -52,11 +69,57 @@ exibir status_anterior/status_novo validados pelo DDL e o boolean
 # ─── Helpers de aplicacao de filtros ──────────────────────────────────────
 
 
+def _aplicar_tipo_evento(stmt, tipo_evento: str | None):
+    """Mapeia o filtro semantico `tipo_evento` (Wave 6 UX A2) para o WHERE.
+
+    Os 5 tipos de evento (reprovacao, reinicio, cancelamento, criacao,
+    admin) escondem do admin a complexidade do par (acao, detalhes_json).
+    Reprovacao e cancelamento sao categorias DERIVADAS da `transitar_status`
+    via `detalhes_json.para` — sem o helper, o admin precisaria saber que
+    "reprovacao" = `acao=transitar_status AND detalhes_json->>'para'=
+    'REPROVADA_PELO_VENDEDOR'`, conhecimento de implementacao interna.
+
+    `tipo_evento=None` nao aplica filtro (equivalente a "todos").
+    """
+    if tipo_evento is None:
+        return stmt
+
+    if tipo_evento == "reprovacao":
+        return stmt.where(
+            and_(
+                AuditLog.acao == "transitar_status",
+                AuditLog.detalhes_json["para"].astext == _PARA_REPROVACAO,
+            )
+        )
+    if tipo_evento == "reinicio":
+        return stmt.where(AuditLog.acao == "reiniciar_ciclo")
+    if tipo_evento == "cancelamento":
+        return stmt.where(
+            and_(
+                AuditLog.acao == "transitar_status",
+                AuditLog.detalhes_json["para"].astext == _PARA_CANCELAMENTO,
+            )
+        )
+    if tipo_evento == "criacao":
+        return stmt.where(AuditLog.acao == "criar_prova")
+    if tipo_evento == "admin":
+        return stmt.where(
+            AuditLog.acao.in_(["atualizar_configuracao", "REPORT_EXPORTED"])
+        )
+
+    # Defensivo — schema ja valida; chegar aqui significa drift.
+    return stmt
+
+
 def _aplicar_filtros(stmt, query: AuditLogListQuery):
     """Aplica filtros do query schema sobre o stmt SELECT de audit_logs.
 
-    Espera que o stmt ja tenha `AuditLog` no FROM. Filtros sao todos AND.
-    Retorna o stmt estendido (imutavel — SQLAlchemy retorna nova instancia).
+    Espera que o stmt ja tenha `AuditLog` no FROM, e — se o filtro `q`
+    estiver ativo — `ProvaDigital` no JOIN/OUTERJOIN (a expansao da Wave 6
+    UX A4 procura tambem em `provas_digitais.nro_requerimento`).
+
+    Filtros sao todos AND. Retorna o stmt estendido (SQLAlchemy retorna
+    nova instancia — sem mutacao do original).
     """
     if query.from_dt is not None:
         stmt = stmt.where(AuditLog.created_at >= query.from_dt)
@@ -68,17 +131,41 @@ def _aplicar_filtros(stmt, query: AuditLogListQuery):
         stmt = stmt.where(AuditLog.usuario_id == query.usuario_id)
     if query.acao is not None:
         stmt = stmt.where(AuditLog.acao == query.acao)
+
+    # Filtro semantico (UX A2) — pode coexistir com `acao` cru, ambos AND.
+    stmt = _aplicar_tipo_evento(stmt, query.tipo_evento)
+
     if query.q is not None:
-        # Busca textual em detalhes_json::text via ILIKE.
-        # Postgres permite cast direto: `detalhes_json::text ILIKE pattern`.
-        # Sem escape de wildcards (%, _) — admin-only, baixo risco;
-        # consistente com Wave 5 reports.py que tambem usa ILIKE.
+        # Busca textual ampliada (UX A4): procura em detalhes_json::text
+        # OU em provas_digitais.nro_requerimento. ILIKE case-insensitive,
+        # sem escape de wildcards (%, _) — admin-only, baixo risco;
+        # consistente com Wave 5 reports.py.
         pattern = f"%{query.q}%"
-        stmt = stmt.where(cast(AuditLog.detalhes_json, Text).ilike(pattern))
+        stmt = stmt.where(
+            or_(
+                cast(AuditLog.detalhes_json, Text).ilike(pattern),
+                ProvaDigital.nro_requerimento.ilike(pattern),
+            )
+        )
     return stmt
 
 
 # ─── Listagem paginada ────────────────────────────────────────────────────
+
+
+def _resolver_order_by_column(order_by: str):
+    """Mapeia string `order_by` (validada por whitelist no schema) para
+    a coluna SQLAlchemy correspondente.
+
+    Uso isolado (em vez de `getattr`) para deixar a whitelist explicita
+    no codigo — qualquer adicao precisa passar por aqui E pelo schema.
+    """
+    if order_by == "acao":
+        return AuditLog.acao
+    if order_by == "usuario_nome":
+        return Usuario.nome
+    # Default e tambem o caso "created_at"
+    return AuditLog.created_at
 
 
 async def listar_audit_logs(
@@ -87,18 +174,25 @@ async def listar_audit_logs(
     """Lista audit_logs com filtros + paginacao + JOINs para enriquecimento.
 
     Executa 2 queries:
-      1. SELECT items com JOIN para usuarios (nome, setor) e
-         provas_digitais (nro_requerimento), com filtros + LIMIT/OFFSET.
-      2. SELECT count(*) com mesmos filtros (para `total`).
+      1. SELECT items com JOIN para usuarios (nome, setor) e OUTER JOIN
+         para provas_digitais (nro_requerimento), com filtros +
+         ORDER BY + LIMIT/OFFSET.
+      2. SELECT count(*) com mesmos filtros (para `total`). Usa o mesmo
+         shape de JOIN — necessario quando filtro `q` busca em
+         `provas_digitais.nro_requerimento` (UX A4).
 
-    A query de items inclui ORDER BY created_at conforme `query.sort`.
-    A query de count nao precisa de ORDER BY.
+    Ordenacao (UX B4): coluna controlada por `query.order_by` (whitelist
+    em ORDER_BY_VALIDOS). Sempre desempata por `AuditLog.id` para
+    ordem deterministica em paginacao quando created_at coincide.
 
-    Indice usado pelo planner: `idx_audit_created_at` (created_at) cobre
-    ORDER BY DESC + LIMIT. Filtros adicionais reduzem o conjunto antes do
-    sort se houver indice especifico (idx_audit_acao, idx_audit_prova,
-    idx_audit_usuario).
+    Indices usados pelo planner: `idx_audit_created_at` (created_at)
+    cobre o caso default; `idx_audit_acao` para ordenacao por acao;
+    para `usuario_nome` faz seq scan em `usuarios` (3 usuarios hoje —
+    custo desprezivel; promover para indice se a tabela crescer).
     """
+    direction_asc = query.sort == "asc"
+    order_col = _resolver_order_by_column(query.order_by)
+
     # Query principal — items.
     stmt = (
         select(
@@ -119,11 +213,11 @@ async def listar_audit_logs(
     )
     stmt = _aplicar_filtros(stmt, query)
 
-    # Ordenacao por created_at — sort='asc' ou 'desc' (validado pelo schema).
-    if query.sort == "asc":
-        stmt = stmt.order_by(AuditLog.created_at.asc(), AuditLog.id.asc())
+    # Ordenacao dinamica + tiebreaker por id (estabilidade da paginacao).
+    if direction_asc:
+        stmt = stmt.order_by(order_col.asc(), AuditLog.id.asc())
     else:
-        stmt = stmt.order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        stmt = stmt.order_by(order_col.desc(), AuditLog.id.desc())
 
     # Paginacao.
     offset = (query.page - 1) * query.page_size
@@ -148,8 +242,16 @@ async def listar_audit_logs(
         for row in rows
     ]
 
-    # Query de count — mesmos filtros, sem JOINs nem ORDER BY.
-    count_stmt = select(func.count(AuditLog.id))
+    # Query de count — precisa do JOIN com usuarios (filtros que tocam
+    # em Usuario nao existem hoje, mas a estrutura prepara) e OUTERJOIN
+    # com provas_digitais (filtro `q` da UX A4 toca em
+    # `pd.nro_requerimento`).
+    count_stmt = (
+        select(func.count(AuditLog.id))
+        .select_from(AuditLog)
+        .join(Usuario, Usuario.id == AuditLog.usuario_id)
+        .outerjoin(ProvaDigital, ProvaDigital.id == AuditLog.prova_id)
+    )
     count_stmt = _aplicar_filtros(count_stmt, query)
     total = (await db.execute(count_stmt)).scalar_one()
 

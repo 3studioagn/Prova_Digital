@@ -107,11 +107,13 @@ async def list_audit_logs(
     page: int = Query(1, ge=1),
     page_size: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     sort: str = Query("desc", pattern="^(asc|desc)$"),
+    order_by: str = Query("created_at"),
     from_dt: str | None = Query(None, alias="from"),
     to_dt: str | None = Query(None, alias="to"),
     prova_id: uuid.UUID | None = Query(None),
     usuario_id: uuid.UUID | None = Query(None),
     acao: str | None = Query(None, max_length=100),
+    tipo_evento: str | None = Query(None, max_length=20),
     q: str | None = Query(None, max_length=MAX_Q_LENGTH),
     admin: Usuario = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
@@ -147,11 +149,13 @@ async def list_audit_logs(
                 "page": page,
                 "page_size": page_size,
                 "sort": sort,
+                "order_by": order_by,
                 "from": from_dt,
                 "to": to_dt,
                 "prova_id": prova_id,
                 "usuario_id": usuario_id,
                 "acao": acao,
+                "tipo_evento": tipo_evento,
                 "q": q,
             }
         )
@@ -164,10 +168,12 @@ async def list_audit_logs(
         )
 
     logger.info(
-        "audit_log.list user=%s page=%d size=%d filters=%s",
+        "audit_log.list user=%s page=%d size=%d order=%s/%s filters=%s",
         admin.id,
         query_schema.page,
         query_schema.page_size,
+        query_schema.order_by,
+        query_schema.sort,
         {
             k: str(v) if v is not None else None
             for k, v in {
@@ -176,6 +182,7 @@ async def list_audit_logs(
                 "prova_id": query_schema.prova_id,
                 "usuario_id": query_schema.usuario_id,
                 "acao": query_schema.acao,
+                "tipo_evento": query_schema.tipo_evento,
                 "q": query_schema.q,
             }.items()
             if v is not None
