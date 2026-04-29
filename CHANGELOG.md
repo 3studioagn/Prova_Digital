@@ -2,6 +2,110 @@
 
 ---
 
+## [2026-04-29 — Wave 6 Auditoria Senior] — H-01 + H-02 + M-01..M-04 + L-01..L-04
+
+Auditoria senior read-only da Wave 6 executada apos a entrega do
+Componente 18 + UX iteration (pacote A+B). Identificou 0 CRITICAL,
+2 HIGH (H-01, H-02), 4 MEDIUM (M-01..M-04) e 4 LOW (L-01..L-04).
+Todos corrigidos com autorizacao explicita do Mario, em ordem de
+severidade, com testes apos cada passo. Nenhum arquivo de Wave 0/1/2/3/4/5
+foi alterado.
+
+### Correcoes
+
+**Frontend (`frontend/src/app/(dashboard)/auditoria/page.tsx`):**
+
+- **H-01 (HIGH)**: drawer lateral agora aplica `useFocusTrap` (mesmo padrao
+  de `KeyboardShortcutsHelp.tsx`). WCAG 2.1: Tab/Shift+Tab cicla apenas
+  dentro do dialog modal. Antes, keyboard users podiam tabular para fora
+  do drawer aberto. ADR-114 documenta a regra.
+- **L-03 (LOW)**: rotulo do botao trocado para "Restaurar padrao" (era
+  "Limpar filtros"). O `useEffect` re-aplica preset "Hoje" automaticamente
+  quando a URL fica vazia, entao "limpar" sugeria estado realmente vazio
+  que nao existe por design.
+- **L-04 (LOW)**: catch de `fetchUsuarios` agora emite `console.warn` em
+  falhas reais (mantendo silencio em aborts esperados do cleanup). Antes,
+  500 do `/api/v1/users` deixava o dropdown de Ator vazio sem feedback.
+
+**Backend (`backend/app/api/v1/audit_log.py`):**
+
+- **M-02 (MEDIUM)**: `status.HTTP_422_UNPROCESSABLE_ENTITY` substituido por
+  `status.HTTP_422_UNPROCESSABLE_CONTENT`. Mesmo valor 422; remove os 4
+  DeprecationWarnings que apareciam na suite Pydantic v2.
+- **M-03 (MEDIUM)**: `Pragma: no-cache` removido do `_NO_STORE_HEADERS`.
+  RFC 9111 deprecou em RESPONSES — `Cache-Control: no-store` ja basta.
+- **L-01 (LOW)**: `parse_audit_id` deixou de fazer shadowing do builtin
+  `id()`. Path param renomeado para `audit_log_id` com `alias="id"` para
+  manter a URL `/audit-log/{id}` (compat). Handler `get_audit_log_detail`
+  tambem renomeou a local var.
+
+**Backend (`backend/app/services/audit_log_service.py`):**
+
+- **M-04 (MEDIUM)**: query de `count(*)` agora condiciona o OUTERJOIN com
+  `provas_digitais` ao filtro `q` da UX A4. Para 99% das chamadas (sem
+  `q`), evita plan overhead desnecessario. 2 testes novos validam ambos
+  os caminhos.
+- **L-02 (LOW)**: comentario com magic number "3 usuarios hoje" reformulado
+  para "tabela pequena" — evita comentarios com dados que envelhecem.
+
+**Backend (`backend/tests/test_audit_log_api.py`):**
+
+- **H-02 (HIGH)**: `RotaEnum` importado mas nunca usado removido (F401).
+- **M-03**: assercao do header `Pragma` atualizada para `is None`.
+- **M-04**: 2 testes novos (`test_count_sem_q_nao_faz_outerjoin_provas`,
+  `test_count_com_q_faz_outerjoin_provas`) validam a guarda condicional
+  via inspecao de SQL compilado.
+
+**Backend (10 imports reordenados — M-01):**
+
+- **M-01 (MEDIUM)**: `ruff check .` agora retorna `All checks passed!`
+  (de 12 erros — 1 F401 + 11 I001 — para 0). Aplicado via
+  `ruff --fix --select I001` apenas nos 4 arquivos da Wave 6. Resto
+  do backend ja estava limpo.
+
+### Validacao
+
+- `pytest -q`: **724 passando** (era 722 — 2 testes novos do M-04),
+  0 regressao, 1 warning (`InsecureKeyLengthWarning` pre-existente do
+  `test_jwt`, fora de escopo Wave 6).
+- `ruff check .`: All checks passed!
+- `npx tsc --noEmit`: OK (exit 0).
+- Coverage Wave 6 mantido: 92% TOTAL (router 86%, service 88%, schemas 99%).
+
+### Decisoes
+
+- **ADR-114**: focus trap obrigatorio em modais/drawers em todas as paginas
+  futuras. Reforco do padrao Wave 3 audit + RNF-005.
+
+### Achados aceitos como follow-up Wave 7
+
+- **L-05**: matching `(prova_id, status_novo, ciclo)` + janela ±5s em
+  `_find_movimentacao_relacionada` continua sendo "opcao A endurecida"
+  do D2 do `analysis.md`. Opcao B (passar `movimentacao_id` no
+  `detalhes_json`) requer alteracao em `state_machine.executar_transicao`
+  da Wave 3 — adiada.
+- **L-06**: endpoint `GET /api/v1/audit-log/by-prova/{prova_id}` esta
+  implementado e testado mas nao consumido pelo frontend. Pode receber
+  um link "Ver historico desta prova" no drawer numa proxima iteracao.
+- **L-07**: filtro `q` aplica `ILIKE` sem escape de wildcards `%`/`_`.
+  Admin-only, baixo risco; consistente com Wave 5 reports.py.
+- **L-08**: REVOKE em `movimentacoes` e `etiquetas` (consistencia com
+  RLS 008) — registrado em ADR-112 alternativas rejeitadas.
+
+### Arquivos alterados
+
+- `backend/app/api/v1/audit_log.py` (M-02 + M-03 + L-01 + reorder I001)
+- `backend/app/services/audit_log_service.py` (M-04 + L-02 + reorder I001)
+- `backend/tests/test_audit_log_api.py` (H-02 + M-03 + M-04 + reorder I001)
+- `backend/app/domain/schemas/audit_log.py` (reorder I001)
+- `frontend/src/app/(dashboard)/auditoria/page.tsx` (H-01 + L-03 + L-04)
+- `CHANGELOG.md` (esta entrada)
+- `DECISIONS.md` (ADR-114)
+
+Sem mudancas em codigo de Waves 0-5 — isolamento de wave preservado.
+
+---
+
 ## [2026-04-29 — Wave 6 Componente 18 UX iteration] — Pacote A+B (filtros inteligentes + navegacao em volume)
 
 Apos o Gate 2 entregue, Mario pediu reforco de UX visando uso real em

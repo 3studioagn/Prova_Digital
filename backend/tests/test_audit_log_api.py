@@ -24,7 +24,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.api.deps import get_admin_user, get_current_user
-from app.db.models import RotaEnum, SetorEnum, StatusProvaEnum, LocalizacaoEnum
+from app.db.models import LocalizacaoEnum, SetorEnum, StatusProvaEnum
 from app.db.session import get_db
 from app.domain.schemas.audit_log import (
     AuditLogDetailResponse,
@@ -318,7 +318,8 @@ class TestAuditLogList:
             ) as ac:
                 resp = await ac.get(PREFIX)
         assert resp.headers.get("cache-control") == "no-store"
-        assert resp.headers.get("pragma") == "no-cache"
+        # Audit 2026-04-29 M-03: `Pragma` removido (RFC 9111 deprecou em response).
+        assert resp.headers.get("pragma") is None
 
     async def test_listagem_assinatura_digital_nao_retorna_no_payload(
         self, admin_user, mock_db
@@ -549,15 +550,17 @@ class TestAuditLogQuerySchema:
         assert q2.q == "busca"
 
     def test_q_rejeita_caracter_de_controle(self):
-        from app.domain.schemas.audit_log import AuditLogListQuery
         from pydantic import ValidationError
+
+        from app.domain.schemas.audit_log import AuditLogListQuery
 
         with pytest.raises(ValidationError):
             AuditLogListQuery.model_validate({"q": "linha1\x00linha2"})
 
     def test_intervalo_invertido_422(self):
-        from app.domain.schemas.audit_log import AuditLogListQuery
         from pydantic import ValidationError
+
+        from app.domain.schemas.audit_log import AuditLogListQuery
 
         with pytest.raises(ValidationError):
             AuditLogListQuery.model_validate(
@@ -568,8 +571,9 @@ class TestAuditLogQuerySchema:
             )
 
     def test_intervalo_grande_demais(self):
-        from app.domain.schemas.audit_log import AuditLogListQuery
         from pydantic import ValidationError
+
+        from app.domain.schemas.audit_log import AuditLogListQuery
 
         with pytest.raises(ValidationError):
             AuditLogListQuery.model_validate(
@@ -589,8 +593,9 @@ class TestAuditLogQuerySchema:
         assert q.to_dt == to_dt
 
     def test_page_size_max_200(self):
-        from app.domain.schemas.audit_log import AuditLogListQuery
         from pydantic import ValidationError
+
+        from app.domain.schemas.audit_log import AuditLogListQuery
 
         q = AuditLogListQuery.model_validate({"page_size": 200})
         assert q.page_size == 200
@@ -598,8 +603,9 @@ class TestAuditLogQuerySchema:
             AuditLogListQuery.model_validate({"page_size": 201})
 
     def test_sort_aceita_apenas_asc_desc(self):
-        from app.domain.schemas.audit_log import AuditLogListQuery
         from pydantic import ValidationError
+
+        from app.domain.schemas.audit_log import AuditLogListQuery
 
         for valor in ["asc", "desc"]:
             q = AuditLogListQuery.model_validate({"sort": valor})
@@ -756,6 +762,61 @@ class TestServicoListagem:
         )
         resp = await listar_audit_logs(mock_db, q)
         assert resp.total == 0
+
+    async def test_count_sem_q_nao_faz_outerjoin_provas(self, mock_db):
+        """Audit 2026-04-29 M-04: quando o filtro `q` esta ausente, o
+        count statement NAO deve fazer OUTERJOIN com `provas_digitais` —
+        evita plan overhead nas 99% das chamadas que nao usam `q`.
+        """
+        from app.domain.schemas.audit_log import AuditLogListQuery
+        from app.services.audit_log_service import listar_audit_logs
+
+        result_items = AsyncMock()
+        result_items.all = lambda: []
+        result_count = AsyncMock()
+        result_count.scalar_one = lambda: 0
+        mock_db.execute = AsyncMock(side_effect=[result_items, result_count])
+
+        q = AuditLogListQuery.model_validate({})
+        await listar_audit_logs(mock_db, q)
+
+        # Inspeciona os 2 statements compilados.
+        call_args = mock_db.execute.await_args_list
+        assert len(call_args) == 2
+        items_sql = str(
+            call_args[0].args[0].compile(compile_kwargs={"literal_binds": True})
+        )
+        count_sql = str(
+            call_args[1].args[0].compile(compile_kwargs={"literal_binds": True})
+        )
+        # Items SEMPRE faz OUTERJOIN (precisa do nro_requerimento na response).
+        assert "provas_digitais" in items_sql.lower()
+        # Count NAO menciona provas_digitais quando `q` esta ausente.
+        assert "provas_digitais" not in count_sql.lower()
+
+    async def test_count_com_q_faz_outerjoin_provas(self, mock_db):
+        """Audit 2026-04-29 M-04: complemento do teste anterior — quando
+        `q` esta presente, o count DEVE incluir o OUTERJOIN para suportar
+        a busca em `provas_digitais.nro_requerimento`.
+        """
+        from app.domain.schemas.audit_log import AuditLogListQuery
+        from app.services.audit_log_service import listar_audit_logs
+
+        result_items = AsyncMock()
+        result_items.all = lambda: []
+        result_count = AsyncMock()
+        result_count.scalar_one = lambda: 0
+        mock_db.execute = AsyncMock(side_effect=[result_items, result_count])
+
+        q = AuditLogListQuery.model_validate({"q": "REQ-001"})
+        await listar_audit_logs(mock_db, q)
+
+        call_args = mock_db.execute.await_args_list
+        count_sql = str(
+            call_args[1].args[0].compile(compile_kwargs={"literal_binds": True})
+        )
+        assert "provas_digitais" in count_sql.lower()
+        assert "nro_requerimento" in count_sql.lower()
 
 
 class TestServicoDetalhe:
@@ -930,8 +991,9 @@ class TestTipoEvento:
         assert q.tipo_evento is None
 
     def test_schema_rejeita_valor_invalido(self):
-        from app.domain.schemas.audit_log import AuditLogListQuery
         from pydantic import ValidationError
+
+        from app.domain.schemas.audit_log import AuditLogListQuery
 
         with pytest.raises(ValidationError):
             AuditLogListQuery.model_validate({"tipo_evento": "outras_coisas"})
@@ -996,8 +1058,9 @@ class TestOrderBy:
     def test_schema_rejeita_coluna_arbitraria(self):
         """Defesa anti-SQL-injection — whitelist bloqueia entradas
         arbitrarias mesmo que parecessem nome de coluna valida."""
-        from app.domain.schemas.audit_log import AuditLogListQuery
         from pydantic import ValidationError
+
+        from app.domain.schemas.audit_log import AuditLogListQuery
 
         with pytest.raises(ValidationError):
             AuditLogListQuery.model_validate({"order_by": "ip_address"})

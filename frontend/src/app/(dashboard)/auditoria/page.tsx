@@ -29,6 +29,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import { useAuditLog, useAuditLogDetail } from "@/hooks/useAuditLog";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import {
   type AuditLogFilters,
   type AuditLogItemResponse,
@@ -210,8 +211,13 @@ function AuditoriaPageInner() {
           { token, signal: controller.signal },
         );
         if (!controller.signal.aborted) setUsuarios(data.items);
-      } catch {
-        // silent — dropdown fica vazio
+      } catch (err) {
+        // Audit 2026-04-29 L-04: aborts sao esperados (cleanup); demais
+        // falhas (ex: 500 do /users) viraram log warn — antes eram engolidas
+        // silenciosamente, deixando o dropdown vazio sem feedback ao admin.
+        if (!controller.signal.aborted) {
+          console.warn("Falha ao carregar lista de atores:", err);
+        }
       }
     }
     fetchUsuarios();
@@ -224,6 +230,9 @@ function AuditoriaPageInner() {
   // ── Hook do detalhe (drawer) ────────────────────────────────────────
   const detail = useAuditLogDetail(getToken);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // Audit 2026-04-29 H-01: focus trap obrigatorio em modais (WCAG 2.1).
+  // Mesmo padrao usado em KeyboardShortcutsHelp.tsx (Wave 5).
+  const drawerTrapRef = useFocusTrap<HTMLElement>(drawerOpen);
 
   const openDrawer = useCallback(
     (id: string) => {
@@ -558,13 +567,16 @@ function AuditoriaPageInner() {
             </div>
 
             <div className={styles.field}>
+              {/* Audit 2026-04-29 L-03: rotulo "Restaurar padrao" reflete
+                  que o useEffect re-aplica preset "Hoje" quando a URL fica
+                  vazia — "Limpar filtros" sugeria estado realmente vazio. */}
               <button
                 type="button"
                 className={styles.btnSecondary}
                 onClick={handleLimparFiltros}
                 disabled={!temFiltrosAtivos}
               >
-                Limpar filtros
+                Restaurar padrao
               </button>
             </div>
           </div>
@@ -729,6 +741,7 @@ function AuditoriaPageInner() {
               aria-hidden="true"
             />
             <aside
+              ref={drawerTrapRef}
               className={styles.drawer}
               role="dialog"
               aria-modal="true"

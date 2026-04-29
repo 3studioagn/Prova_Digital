@@ -24,7 +24,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.db.models import RotaEnum, SetorEnum, StatusProvaEnum
 
-
 # ─── Constantes de validacao ───────────────────────────────────────────────
 
 

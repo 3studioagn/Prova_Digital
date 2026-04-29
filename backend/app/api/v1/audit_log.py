@@ -36,12 +36,12 @@ from app.api.deps import get_admin_user
 from app.db.models import Usuario
 from app.db.session import get_db
 from app.domain.schemas.audit_log import (
-    AuditLogDetailResponse,
-    AuditLogListQuery,
-    AuditLogListResponse,
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
     MAX_Q_LENGTH,
+    AuditLogDetailResponse,
+    AuditLogListQuery,
+    AuditLogListResponse,
 )
 from app.services.audit_log_service import (
     buscar_audit_log_detalhe,
@@ -58,9 +58,11 @@ router = APIRouter()
 # ─── Header anti-cache ────────────────────────────────────────────────────
 
 
+# Audit 2026-04-29 M-03: `Pragma: no-cache` removido — RFC 9111 (HTTP caching)
+# deprecia o header em RESPOSTAS. So fazia sentido em request HTTP/1.0.
+# `Cache-Control: no-store` ja garante que clientes modernos nao guardem copia.
 _NO_STORE_HEADERS = {
     "Cache-Control": "no-store",
-    "Pragma": "no-cache",
 }
 
 
@@ -68,13 +70,19 @@ _NO_STORE_HEADERS = {
 
 
 def parse_audit_id(
-    id: str = Path(..., description="UUID do registro de audit_log"),
+    audit_log_id: str = Path(
+        ..., alias="id", description="UUID do registro de audit_log"
+    ),
 ) -> uuid.UUID:
     """Converte path param para UUID, retornando 404 (consistente com
     parse_prova_id da Wave 2 — qualquer string mal formada ou inexistente
-    e tratada uniformemente como 'nao encontrado')."""
+    e tratada uniformemente como 'nao encontrado').
+
+    Uso de `alias="id"` mantem a URL `/audit-log/{id}` (compat) enquanto
+    o parametro interno `audit_log_id` evita shadowing do builtin `id()`.
+    """
     try:
-        return uuid.UUID(id)
+        return uuid.UUID(audit_log_id)
     except (ValueError, AttributeError):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -163,7 +171,7 @@ async def list_audit_logs(
         # Pydantic ValidationError ja traz detalhes; FastAPI seria 500 se
         # nao traduzissemos. 422 e o codigo apropriado para validacao.
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         )
 
@@ -278,7 +286,7 @@ async def list_audit_logs_by_prova(
 @router.get("/{id}", response_model=AuditLogDetailResponse)
 async def get_audit_log_detail(
     response: Response,
-    id: uuid.UUID = Depends(parse_audit_id),
+    audit_log_id: uuid.UUID = Depends(parse_audit_id),
     admin: Usuario = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> AuditLogDetailResponse:
@@ -299,13 +307,13 @@ async def get_audit_log_detail(
     Raises:
         401, 403, 404, 502 (mesmos do list).
     """
-    logger.info("audit_log.detail user=%s id=%s", admin.id, id)
+    logger.info("audit_log.detail user=%s id=%s", admin.id, audit_log_id)
 
     try:
-        result = await buscar_audit_log_detalhe(db, id)
+        result = await buscar_audit_log_detalhe(db, audit_log_id)
     except SQLAlchemyError:
         logger.exception(
-            "audit_log.detail DB error user=%s id=%s", admin.id, id
+            "audit_log.detail DB error user=%s id=%s", admin.id, audit_log_id
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

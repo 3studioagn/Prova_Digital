@@ -3971,3 +3971,59 @@ anti-SQL-injection em duas camadas: schema rejeita arbitrario antes
 de chegar; service nunca usa `getattr` reflexivo). Teste
 `test_schema_rejeita_coluna_arbitraria` cobre `"id; DROP TABLE"` e
 `"ip_address"` (nao na whitelist).
+
+---
+
+## ADR-114 — Focus trap obrigatorio em modais/drawers (audit Wave 6)
+**Data:** 2026-04-29 (Wave 6, auditoria senior)
+
+**Contexto:** A Wave 3 audit (2026-04-13) estabeleceu o `useFocusTrap`
+em `frontend/src/hooks/useFocusTrap.ts` como padrao para modais
+(WCAG 2.1 — focus management em dialogs). O hook foi aplicado em todos
+os modais da Wave 3 (`AdminActions.tsx`, `VisualizarEtiquetaModal.tsx`)
+e na Wave 5 em `KeyboardShortcutsHelp.tsx`.
+
+A auditoria senior da Wave 6 descobriu que o **drawer lateral** da
+`/auditoria` (Componente 18) declarava `role="dialog" + aria-modal="true"`
+mas **nao aplicava** `useFocusTrap`. O Gate 1 (`docs/wave6/analysis.md`
+§3.5.3) listava o hook como "obrigatorio no drawer" — divergencia entre
+analise e execucao.
+
+**Decisao:** Aplicar `useFocusTrap` em **todo elemento com `role="dialog"`
+ou `aria-modal="true"`** sem excecoes. Padrao reforcado:
+
+```tsx
+const trapRef = useFocusTrap<HTMLElement>(open);
+// ...
+<aside ref={trapRef} role="dialog" aria-modal="true" ...>
+```
+
+**Razao em 3 pontos:**
+
+  1. **WCAG 2.1 Guideline 2.4.3 (Focus Order):** dialogs modais devem
+     reter o foco dentro de seu container. Sem trap, Tab/Shift+Tab
+     leva o usuario para elementos da pagina por tras do backdrop —
+     que ja recebeu `aria-hidden` em alguns casos, mas nao em todos.
+  2. **Defesa em profundidade:** o `aria-modal="true"` informa o leitor
+     de tela mas nao bloqueia teclado. O hook fecha o gap.
+  3. **Consistencia:** todos os outros modais do projeto ja tem o trap.
+     Drawer da /auditoria foi a unica regressao — corrigida nesta
+     auditoria.
+
+**Alternativas rejeitadas:**
+
+  - **Aceitar como debito tecnico:** rejeitada (Mario aprovou correcao
+    imediata, opcao A na Fase 4 da auditoria). 3 linhas de codigo,
+    risco zero, padrao ja validado.
+  - **Implementar focus trap nativo via `inert` attribute:** considerado.
+    `inert` e suportado em todos os browsers modernos (Chrome 102+,
+    Firefox 112+, Safari 15.5+). Mas trocar `useFocusTrap` por `inert`
+    seria refactor de todos os modais existentes — fora do escopo da
+    auditoria. Registrar como follow-up se virar pattern.
+
+**Consequencias:**
+
+  - 1 import + 1 hook call + 1 ref na `auditoria/page.tsx` (Wave 6).
+  - Padrao reforcado em ADR para futuras paginas com dialogs/drawers.
+  - Auditorias futuras devem checar explicitamente: todo `role="dialog"`
+    deve ter `ref={useFocusTrap(open)}`.

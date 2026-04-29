@@ -27,14 +27,13 @@ from app.db.models import (
     Usuario,
 )
 from app.domain.schemas.audit_log import (
+    MAX_BY_PROVA_ITEMS,
     AuditLogDetailResponse,
     AuditLogItemResponse,
     AuditLogListQuery,
     AuditLogListResponse,
-    MAX_BY_PROVA_ITEMS,
     MovimentacaoSnapshot,
 )
-
 
 # ─── Acoes que tem movimentacao espelhada ─────────────────────────────────
 
@@ -187,8 +186,8 @@ async def listar_audit_logs(
 
     Indices usados pelo planner: `idx_audit_created_at` (created_at)
     cobre o caso default; `idx_audit_acao` para ordenacao por acao;
-    para `usuario_nome` faz seq scan em `usuarios` (3 usuarios hoje —
-    custo desprezivel; promover para indice se a tabela crescer).
+    para `usuario_nome` faz seq scan em `usuarios` (tabela pequena —
+    seq scan e aceitavel; promover para indice em (nome) se necessario).
     """
     direction_asc = query.sort == "asc"
     order_col = _resolver_order_by_column(query.order_by)
@@ -242,16 +241,21 @@ async def listar_audit_logs(
         for row in rows
     ]
 
-    # Query de count — precisa do JOIN com usuarios (filtros que tocam
-    # em Usuario nao existem hoje, mas a estrutura prepara) e OUTERJOIN
-    # com provas_digitais (filtro `q` da UX A4 toca em
-    # `pd.nro_requerimento`).
+    # Query de count — JOIN com `usuarios` mantido (a estrutura prepara
+    # para filtros futuros que toquem em Usuario; sem custo perceptivel
+    # com 3 usuarios). O OUTERJOIN com `provas_digitais` so e necessario
+    # quando o filtro `q` (UX A4) procura em `pd.nro_requerimento` —
+    # adiciona-o condicionalmente para evitar plan overhead nos 99% das
+    # chamadas que nao usam `q`. Audit 2026-04-29 M-04.
     count_stmt = (
         select(func.count(AuditLog.id))
         .select_from(AuditLog)
         .join(Usuario, Usuario.id == AuditLog.usuario_id)
-        .outerjoin(ProvaDigital, ProvaDigital.id == AuditLog.prova_id)
     )
+    if query.q is not None:
+        count_stmt = count_stmt.outerjoin(
+            ProvaDigital, ProvaDigital.id == AuditLog.prova_id
+        )
     count_stmt = _aplicar_filtros(count_stmt, query)
     total = (await db.execute(count_stmt)).scalar_one()
 
