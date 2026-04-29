@@ -40,6 +40,45 @@
   color: var(--color-card-text-muted);
 }
 
+/* ── Presets de data (UX A1) ──────────────────────────────────────── */
+
+.presetsBar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.presetsLabel {
+  color: var(--color-card-text-muted);
+  font-size: 0.9375rem;
+  margin-right: 0.5rem;
+}
+
+.presetPill,
+.presetPillActive {
+  background: transparent;
+  border: 1px solid var(--color-card-border);
+  color: var(--color-card-text);
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.presetPill:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.presetPillActive {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+}
+
 /* ── Acesso restrito (estado para nao-admin) ──────────────────────── */
 
 .restricted {
@@ -187,13 +226,29 @@
 .tableScroll {
   width: 100%;
   overflow-x: auto;
+  /* Container visual para o sticky header (UX B3) — sem altura maxima
+   * o sticky nao "gruda" porque nao ha contexto de scroll. Uso 70vh para
+   * que o admin sempre tenha a tabela enquadrada no viewport. */
+  max-height: 70vh;
+  overflow-y: auto;
 }
 
 .table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.9375rem;
   table-layout: auto;
+}
+
+/* Sticky header (UX B3) — fica fixo no topo durante scroll vertical. */
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--color-card-bg, #eaeaea);
+  /* Border simulada — sticky desabilita borders padrao da row pai. */
+  box-shadow: 0 1px 0 var(--color-card-border);
 }
 
 .table thead tr {
@@ -208,6 +263,30 @@
   font-size: 1rem;
   white-space: nowrap;
   border-right: 1px solid var(--color-card-border);
+}
+
+/* Header clicavel (UX B4) — botao interno para a11y, alvo de clique amplo. */
+.sortableHeader,
+.sortableHeaderActive {
+  background: transparent;
+  border: none;
+  font: inherit;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  transition: color 0.12s;
+}
+
+.sortableHeader:hover {
+  color: var(--color-card-text);
+}
+
+.sortableHeaderActive {
+  color: var(--color-card-text);
+  font-weight: 600;
 }
 
 .table td {
@@ -324,6 +403,7 @@
   align-items: center;
   gap: 0.75rem;
   margin-top: 1.25rem;
+  flex-wrap: wrap;
 }
 
 .pageInfo {
@@ -334,17 +414,22 @@
 .pageButtons {
   display: flex;
   gap: 0.375rem;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
-.pageBtn {
+.pageBtn,
+.pageBtnActive {
   background: transparent;
   border: 1px solid var(--color-card-border);
   color: var(--color-card-text);
-  padding: 0.5rem 1.25rem;
+  padding: 0.5rem 0.875rem;
   border-radius: var(--radius-pill);
   cursor: pointer;
   font-size: 0.875rem;
-  transition: background 0.15s;
+  font-family: inherit;
+  min-width: 36px;
+  transition: background 0.15s, border-color 0.15s;
 }
 
 .pageBtn:hover:not(:disabled) {
@@ -354,6 +439,78 @@
 .pageBtn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.pageBtnActive {
+  background: #000;
+  color: #fff;
+  border-color: #000;
+  font-weight: 500;
+}
+
+.pageEllipsis {
+  color: var(--color-card-text-muted);
+  padding: 0.5rem 0.25rem;
+  font-size: 0.875rem;
+  user-select: none;
+}
+
+/* Page jump form (UX B1) — input numerico + botao Ir. */
+.pageJump {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 1rem;
+}
+
+.pageJumpLabel {
+  color: var(--color-card-text-muted);
+  font-size: 0.875rem;
+}
+
+.pageJumpInput {
+  width: 70px;
+  height: 36px;
+  padding: 0 0.75rem;
+  border: 1px solid var(--color-card-border);
+  background: transparent;
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--color-card-text);
+  text-align: center;
+}
+
+.pageJumpInput:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+/* Remove spinners do input number — visual mais limpo */
+.pageJumpInput::-webkit-outer-spin-button,
+.pageJumpInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.pageJumpInput[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.pageJumpBtn {
+  background: var(--color-accent);
+  color: var(--color-card-text);
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-family: inherit;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.pageJumpBtn:hover {
+  background: var(--color-accent-hover);
 }
 
 /* ── Drawer lateral de detalhe ────────────────────────────────────── */

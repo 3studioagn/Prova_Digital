@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Pagina /auditoria — Wave 6, Componente 18.
+ * Pagina /auditoria — Wave 6, Componente 18 + UX iteration (pacote A+B).
  *
  * Listagem do log imutavel de auditoria (RNF-005), restrita ao perfil
  * 3Studio (is_admin=true). Defesa em tres camadas:
@@ -10,26 +10,41 @@
  *   3. Frontend: este guard renderiza estado restrito se is_admin=false;
  *      item de menu condicional ja esconde o link.
  *
- * Visual: tabela em card claro (alinhada com /provas), filtros inline em
- * grid 4xN, paginacao, drawer lateral de detalhe. Sem botoes de mutacao
- * por construcao — auditoria e read-only.
+ * UX iteration (Wave 6 pos-Gate 2):
+ *   A1 — Presets de data (Hoje/7d/30d/90d/Personalizado), default Hoje
+ *   A2 — Filtro semantico tipo_evento (em vez do `acao` cru)
+ *   A3 — Filtro de usuario (dropdown populado via /users)
+ *   A4 — Busca q expandida para nro_requerimento (placeholder reflete)
+ *   B1 — Paginacao numerada (1 ... N) + input "ir para"
+ *   B2 — Page size selector (25/50/100/200)
+ *   B3 — Sticky header da tabela
+ *   B4 — Ordenacao clicavel nas colunas (Data/Acao/Ator)
+ *
+ * Sem botoes de mutacao por construcao — auditoria e read-only.
  */
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { useAuditLog, useAuditLogDetail } from "@/hooks/useAuditLog";
 import {
-  ACOES_CONHECIDAS,
   type AuditLogFilters,
   type AuditLogItemResponse,
+  type DatePresetKey,
+  type OrderBy,
+  type TipoEvento,
   categorizar,
-  DEFAULT_FILTERS,
+  DATE_PRESET_LABELS,
+  detectPreset,
   formatAcao,
+  PAGE_SIZE_OPTIONS,
+  presetToRange,
+  TIPO_EVENTO_LABELS,
+  TIPO_EVENTO_OPTIONS,
 } from "@/lib/types/auditLog";
-import type { MeResponse } from "@/lib/types/usuario";
+import type { MeResponse, UsuarioListResponse, UsuarioResponse } from "@/lib/types/usuario";
 import styles from "./auditoria.module.css";
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -51,29 +66,23 @@ function formatDateTime(iso: string): string {
   }
 }
 
-/** Converte string YYYY-MM-DD (BRT) para ISO UTC inicio do dia. */
+/** Converte string YYYY-MM-DD (BRT) para ISO UTC inicio/fim do dia. */
 function dateToIsoBrt(dateStr: string, endOfDay: boolean): string | null {
   if (!dateStr) return null;
   const [y, m, d] = dateStr.split("-").map(Number);
   if (!y || !m || !d) return null;
-  // Constroi como meia-noite/fim do dia em America/Sao_Paulo (UTC-3 sem DST hoje).
-  // Brasil aboliu DST em 2019; assumimos UTC-3. Se reintroduzir, usar Intl como
-  // o DateRangeFilter da Wave 5 faz dinamicamente — para Wave 6 fica em offset
-  // fixo (admin-tool, baixo risco operacional).
   const hh = endOfDay ? 23 : 0;
   const mm = endOfDay ? 59 : 0;
   const ss = endOfDay ? 59 : 0;
-  // Date.UTC retorna ms desde epoch em UTC. Adicionamos 3h para converter BRT->UTC.
   const utcMs = Date.UTC(y, m - 1, d, hh + 3, mm, ss);
   return new Date(utcMs).toISOString();
 }
 
-/** Converte ISO UTC para YYYY-MM-DD em BRT (para preencher o input date). */
+/** Converte ISO UTC para YYYY-MM-DD em BRT. */
 function isoUtcToDateBrt(iso: string | null): string {
   if (!iso) return "";
   try {
     const d = new Date(iso);
-    // Subtrai 3h para BRT (assumindo UTC-3).
     const brt = new Date(d.getTime() - 3 * 60 * 60 * 1000);
     return brt.toISOString().split("T")[0];
   } catch {
@@ -99,23 +108,57 @@ function AuditoriaPageInner() {
       DEFAULT_PAGE_SIZE;
     const sortRaw = searchParams.get("sort");
     const sort: "asc" | "desc" = sortRaw === "asc" ? "asc" : "desc";
+    const orderByRaw = searchParams.get("order_by");
+    const order_by: OrderBy =
+      orderByRaw === "acao" || orderByRaw === "usuario_nome"
+        ? orderByRaw
+        : "created_at";
+    const tipoEventoRaw = searchParams.get("tipo_evento");
+    const tipo_evento: TipoEvento | null =
+      tipoEventoRaw &&
+      (TIPO_EVENTO_OPTIONS as readonly string[]).includes(tipoEventoRaw)
+        ? (tipoEventoRaw as TipoEvento)
+        : null;
     return {
       page,
       page_size,
       sort,
+      order_by,
       from_dt: searchParams.get("from"),
       to_dt: searchParams.get("to"),
       prova_id: searchParams.get("prova_id"),
       usuario_id: searchParams.get("usuario_id"),
       acao: searchParams.get("acao"),
+      tipo_evento,
       q: searchParams.get("q"),
     };
   }, [searchParams]);
+
+  // ── Default "Hoje" no primeiro acesso (UX A1) ───────────────────────
+  // Quando o admin entra em /auditoria sem filtros de data, aplica o
+  // preset "Hoje" automaticamente. Reduz o conjunto retornado de "tudo
+  // que existe" para "o que aconteceu nas ultimas horas". O admin pode
+  // expandir conscientemente trocando o pill.
+  const router_replace = router.replace;
+  const hasUrlFilters = useMemo(() => {
+    return Array.from(searchParams.keys()).length > 0;
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (hasUrlFilters) return;
+    const range = presetToRange("hoje");
+    if (!range.from || !range.to) return;
+    const next = new URLSearchParams();
+    next.set("from", range.from);
+    next.set("to", range.to);
+    router_replace(`/auditoria?${next.toString()}`);
+  }, [hasUrlFilters, router_replace]);
 
   // ── Inputs locais (texto/data com debounce) ─────────────────────────
   const [qInput, setQInput] = useState(filters.q ?? "");
   const [fromInput, setFromInput] = useState(isoUtcToDateBrt(filters.from_dt));
   const [toInput, setToInput] = useState(isoUtcToDateBrt(filters.to_dt));
+  const [pageJumpInput, setPageJumpInput] = useState("");
 
   useEffect(() => {
     setQInput(filters.q ?? "");
@@ -123,7 +166,7 @@ function AuditoriaPageInner() {
     setToInput(isoUtcToDateBrt(filters.to_dt));
   }, [filters.q, filters.from_dt, filters.to_dt]);
 
-  // ── Carrega usuario logado para guard de admin ──────────────────────
+  // ── Carrega usuario logado ──────────────────────────────────────────
   const [me, setMe] = useState<MeResponse | null>(null);
   const [meLoading, setMeLoading] = useState(true);
 
@@ -152,7 +195,30 @@ function AuditoriaPageInner() {
     return () => controller.abort();
   }, [getToken]);
 
-  // ── Hook do listing — dispara automatico em filters change ──────────
+  // ── Carrega lista de usuarios (UX A3 — para dropdown de filtro) ────
+  const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([]);
+
+  useEffect(() => {
+    if (!me?.is_admin) return;
+    const controller = new AbortController();
+    async function fetchUsuarios() {
+      const token = await getToken();
+      if (!token || controller.signal.aborted) return;
+      try {
+        const data = await apiFetch<UsuarioListResponse>(
+          "/api/v1/users/?ativo=true&page_size=200",
+          { token, signal: controller.signal },
+        );
+        if (!controller.signal.aborted) setUsuarios(data.items);
+      } catch {
+        // silent — dropdown fica vazio
+      }
+    }
+    fetchUsuarios();
+    return () => controller.abort();
+  }, [me?.is_admin, getToken]);
+
+  // ── Hook do listing ─────────────────────────────────────────────────
   const { loading, error, data, refresh } = useAuditLog(getToken, filters);
 
   // ── Hook do detalhe (drawer) ────────────────────────────────────────
@@ -172,7 +238,6 @@ function AuditoriaPageInner() {
     detail.clear();
   }, [detail]);
 
-  // ESC fecha o drawer
   useEffect(() => {
     if (!drawerOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -193,7 +258,8 @@ function AuditoriaPageInner() {
           next.set(key, value);
         }
       }
-      // Reset de pagina quando qualquer filtro muda
+      // Reset de pagina quando qualquer filtro muda (exceto se patch ja
+      // declara explicitamente uma nova page).
       if (!("page" in patch)) {
         next.delete("page");
       }
@@ -203,12 +269,40 @@ function AuditoriaPageInner() {
     [router, searchParams],
   );
 
-  // Handlers imediatos
-  const handleAcaoChange = (v: string) => updateUrl({ acao: v || null });
-  const handleSortChange = (v: string) =>
-    updateUrl({ sort: v === "asc" ? "asc" : null });
+  // ── Handlers dos filtros ────────────────────────────────────────────
 
-  // Handler com debounce (q)
+  const handleTipoEventoChange = (v: string) => {
+    updateUrl({ tipo_evento: v && v !== "todos" ? v : null });
+  };
+
+  const handleUsuarioChange = (v: string) => {
+    updateUrl({ usuario_id: v || null });
+  };
+
+  const handleSortChange = (v: string) => {
+    updateUrl({ sort: v === "asc" ? "asc" : null });
+  };
+
+  const handlePageSizeChange = (v: string) => {
+    const n = Number(v);
+    if (!n || n === DEFAULT_PAGE_SIZE) {
+      updateUrl({ page_size: null });
+    } else {
+      updateUrl({ page_size: String(n) });
+    }
+  };
+
+  // Presets de data (UX A1)
+  const handlePreset = (key: DatePresetKey) => {
+    if (key === "personalizado") {
+      // mantem from/to como esta — usuario edita os date inputs
+      return;
+    }
+    const range = presetToRange(key);
+    updateUrl({ from: range.from, to: range.to });
+  };
+
+  // Busca q (UX A4) — debounce
   const qTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleQChange = (v: string) => {
     setQInput(v);
@@ -218,7 +312,7 @@ function AuditoriaPageInner() {
     }, 350);
   };
 
-  // Datas — convertem BRT->UTC ao perder foco/onChange
+  // Datas customizadas
   const handleFromChange = (v: string) => {
     setFromInput(v);
     updateUrl({ from: dateToIsoBrt(v, false) });
@@ -245,7 +339,28 @@ function AuditoriaPageInner() {
     updateUrl({ page: String(newPage) });
   };
 
-  // ── Estado: nao admin ───────────────────────────────────────────────
+  // Ordenacao clicavel (UX B4) — toggle asc/desc na mesma coluna,
+  // ou troca para a coluna nova com sort=desc default.
+  const handleHeaderSort = (col: OrderBy) => {
+    if (filters.order_by === col) {
+      // Mesma coluna — toggle direcao.
+      updateUrl({ sort: filters.sort === "asc" ? null : "asc" });
+    } else {
+      // Coluna nova — vai pro default (desc) explicitando order_by.
+      updateUrl({ order_by: col === "created_at" ? null : col, sort: null });
+    }
+  };
+
+  // Pagination numerada — calcula janela de paginas a exibir.
+  const totalPages = data
+    ? Math.max(1, Math.ceil(data.total / data.page_size))
+    : 1;
+  const pageWindow = useMemo(
+    () => buildPageWindow(filters.page, totalPages),
+    [filters.page, totalPages],
+  );
+
+  // Estado: nao admin
   if (!meLoading && me && !me.is_admin) {
     return (
       <div className={styles.restricted}>
@@ -261,10 +376,6 @@ function AuditoriaPageInner() {
     );
   }
 
-  // ── Render ──────────────────────────────────────────────────────────
-  const totalPages = data
-    ? Math.max(1, Math.ceil(data.total / data.page_size))
-    : 1;
   const showingFrom = data && data.total > 0
     ? (data.page - 1) * data.page_size + 1
     : 0;
@@ -272,14 +383,27 @@ function AuditoriaPageInner() {
     ? Math.min(data.page * data.page_size, data.total)
     : 0;
 
+  const presetAtivo: DatePresetKey = detectPreset(filters.from_dt, filters.to_dt);
+
   const temFiltrosAtivos =
     !!filters.from_dt ||
     !!filters.to_dt ||
     !!filters.acao ||
+    !!filters.tipo_evento ||
     !!filters.q ||
     !!filters.prova_id ||
     !!filters.usuario_id ||
-    filters.sort !== DEFAULT_FILTERS.sort;
+    filters.sort !== "desc" ||
+    filters.order_by !== "created_at" ||
+    filters.page_size !== DEFAULT_PAGE_SIZE;
+
+  const handlePageJumpSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const n = Number(pageJumpInput);
+    if (!n || n < 1 || n > totalPages) return;
+    handlePage(n);
+    setPageJumpInput("");
+  };
 
   return (
     <>
@@ -295,7 +419,29 @@ function AuditoriaPageInner() {
           </p>
         </header>
 
-        {/* ── Filtros ──────────────────────────────────────────────── */}
+        {/* ── Presets de data (UX A1) ────────────────────────────── */}
+        <section className={styles.presetsBar} aria-label="Periodo">
+          <span className={styles.presetsLabel}>Periodo:</span>
+          {(["hoje", "7d", "30d", "90d", "personalizado"] as DatePresetKey[]).map(
+            (key) => (
+              <button
+                key={key}
+                type="button"
+                className={
+                  presetAtivo === key
+                    ? styles.presetPillActive
+                    : styles.presetPill
+                }
+                onClick={() => handlePreset(key)}
+                aria-pressed={presetAtivo === key}
+              >
+                {DATE_PRESET_LABELS[key]}
+              </button>
+            ),
+          )}
+        </section>
+
+        {/* ── Filtros principais ──────────────────────────────────── */}
         <section className={styles.filters} aria-label="Filtros">
           <div className={styles.filterRow}>
             <div className={styles.field}>
@@ -306,31 +452,67 @@ function AuditoriaPageInner() {
                 id="filtro_q"
                 type="search"
                 className={styles.input}
-                placeholder="motivo, cliente..."
+                placeholder="motivo, cliente ou nro requerimento"
                 value={qInput}
                 onChange={(e) => handleQChange(e.target.value)}
               />
             </div>
 
             <div className={styles.field}>
-              <label htmlFor="filtro_acao" className={styles.label}>
-                Acao:
+              <label htmlFor="filtro_tipo_evento" className={styles.label}>
+                Tipo de evento:
               </label>
               <select
-                id="filtro_acao"
+                id="filtro_tipo_evento"
                 className={styles.select}
-                value={filters.acao ?? ""}
-                onChange={(e) => handleAcaoChange(e.target.value)}
+                value={filters.tipo_evento ?? "todos"}
+                onChange={(e) => handleTipoEventoChange(e.target.value)}
               >
-                <option value="">Todas</option>
-                {ACOES_CONHECIDAS.map((a) => (
-                  <option key={a} value={a}>
-                    {formatAcao(a)}
+                {TIPO_EVENTO_OPTIONS.map((t) => (
+                  <option key={t} value={t}>
+                    {TIPO_EVENTO_LABELS[t]}
                   </option>
                 ))}
               </select>
             </div>
 
+            <div className={styles.field}>
+              <label htmlFor="filtro_usuario" className={styles.label}>
+                Ator:
+              </label>
+              <select
+                id="filtro_usuario"
+                className={styles.select}
+                value={filters.usuario_id ?? ""}
+                onChange={(e) => handleUsuarioChange(e.target.value)}
+              >
+                <option value="">Todos</option>
+                {usuarios.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nome} ({u.setor})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className={styles.field}>
+              <label htmlFor="filtro_sort" className={styles.label}>
+                Ordem:
+              </label>
+              <select
+                id="filtro_sort"
+                className={styles.select}
+                value={filters.sort}
+                onChange={(e) => handleSortChange(e.target.value)}
+              >
+                <option value="desc">Mais recentes primeiro</option>
+                <option value="asc">Mais antigos primeiro</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Linha 2: datas custom + page_size + limpar */}
+          <div className={styles.filterRow}>
             <div className={styles.field}>
               <label htmlFor="filtro_from" className={styles.label}>
                 De:
@@ -356,25 +538,24 @@ function AuditoriaPageInner() {
                 onChange={(e) => handleToChange(e.target.value)}
               />
             </div>
-          </div>
 
-          <div className={styles.filterRow}>
             <div className={styles.field}>
-              <label htmlFor="filtro_sort" className={styles.label}>
-                Ordem:
+              <label htmlFor="filtro_page_size" className={styles.label}>
+                Linhas por pagina:
               </label>
               <select
-                id="filtro_sort"
+                id="filtro_page_size"
                 className={styles.select}
-                value={filters.sort}
-                onChange={(e) => handleSortChange(e.target.value)}
+                value={String(filters.page_size)}
+                onChange={(e) => handlePageSizeChange(e.target.value)}
               >
-                <option value="desc">Mais recentes primeiro</option>
-                <option value="asc">Mais antigos primeiro</option>
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
               </select>
             </div>
-
-            <div className={styles.field} style={{ gridColumn: "span 2" }} />
 
             <div className={styles.field}>
               <button
@@ -395,9 +576,27 @@ function AuditoriaPageInner() {
             <table className={styles.table}>
               <thead>
                 <tr>
-                  <th>Data e hora</th>
-                  <th>Acao</th>
-                  <th>Ator</th>
+                  <SortableTh
+                    label="Data e hora"
+                    column="created_at"
+                    activeColumn={filters.order_by}
+                    direction={filters.sort}
+                    onClick={handleHeaderSort}
+                  />
+                  <SortableTh
+                    label="Acao"
+                    column="acao"
+                    activeColumn={filters.order_by}
+                    direction={filters.sort}
+                    onClick={handleHeaderSort}
+                  />
+                  <SortableTh
+                    label="Ator"
+                    column="usuario_nome"
+                    activeColumn={filters.order_by}
+                    direction={filters.sort}
+                    onClick={handleHeaderSort}
+                  />
                   <th>Setor</th>
                   <th>Prova</th>
                   <th>IP</th>
@@ -445,7 +644,7 @@ function AuditoriaPageInner() {
           </div>
         </div>
 
-        {/* ── Paginacao ────────────────────────────────────────────── */}
+        {/* ── Paginacao numerada (UX B1) ──────────────────────────── */}
         {data && data.total > 0 && (
           <nav className={styles.pagination} aria-label="Paginacao">
             <span className={styles.pageInfo}>
@@ -460,6 +659,31 @@ function AuditoriaPageInner() {
               >
                 Anterior
               </button>
+              {pageWindow.map((entry, idx) =>
+                entry === "..." ? (
+                  <span
+                    key={`ellipsis-${idx}`}
+                    className={styles.pageEllipsis}
+                    aria-hidden="true"
+                  >
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={entry}
+                    type="button"
+                    className={
+                      entry === filters.page
+                        ? styles.pageBtnActive
+                        : styles.pageBtn
+                    }
+                    onClick={() => handlePage(entry)}
+                    aria-current={entry === filters.page ? "page" : undefined}
+                  >
+                    {entry}
+                  </button>
+                ),
+              )}
               <button
                 type="button"
                 className={styles.pageBtn}
@@ -469,6 +693,30 @@ function AuditoriaPageInner() {
                 Proxima
               </button>
             </div>
+            {totalPages > 5 && (
+              <form
+                className={styles.pageJump}
+                onSubmit={handlePageJumpSubmit}
+                aria-label="Ir para pagina"
+              >
+                <label htmlFor="page_jump" className={styles.pageJumpLabel}>
+                  Ir para:
+                </label>
+                <input
+                  id="page_jump"
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  className={styles.pageJumpInput}
+                  value={pageJumpInput}
+                  onChange={(e) => setPageJumpInput(e.target.value)}
+                  placeholder={String(filters.page)}
+                />
+                <button type="submit" className={styles.pageJumpBtn}>
+                  Ir
+                </button>
+              </form>
+            )}
           </nav>
         )}
 
@@ -605,6 +853,46 @@ function AuditoriaPageInner() {
   );
 }
 
+// ─── Helpers de UI ─────────────────────────────────────────────────────
+
+interface SortableThProps {
+  label: string;
+  column: OrderBy;
+  activeColumn: OrderBy;
+  direction: "asc" | "desc";
+  onClick: (col: OrderBy) => void;
+}
+
+function SortableTh({
+  label,
+  column,
+  activeColumn,
+  direction,
+  onClick,
+}: SortableThProps) {
+  const isActive = activeColumn === column;
+  const ariaSort = isActive
+    ? direction === "asc"
+      ? "ascending"
+      : "descending"
+    : "none";
+  const arrow = isActive ? (direction === "asc" ? " ↑" : " ↓") : "";
+  return (
+    <th aria-sort={ariaSort}>
+      <button
+        type="button"
+        className={
+          isActive ? styles.sortableHeaderActive : styles.sortableHeader
+        }
+        onClick={() => onClick(column)}
+      >
+        {label}
+        <span aria-hidden="true">{arrow}</span>
+      </button>
+    </th>
+  );
+}
+
 interface RowProps {
   item: AuditLogItemResponse;
   onClick: () => void;
@@ -648,6 +936,37 @@ function DrawerSection({ label, value }: DrawerSectionProps) {
       <span className={styles.drawerValue}>{value}</span>
     </div>
   );
+}
+
+/** Constroi a janela de paginas a renderizar (UX B1).
+ *
+ * Padrao: sempre mostra 1, current-1, current, current+1, last, com
+ * ellipsis (...) entre saltos. Em totalPages <= 7, mostra todos.
+ *
+ * Exemplos para current=10, total=84:
+ *   [1, "...", 9, 10, 11, "...", 84]
+ *
+ * Exemplos para current=2, total=10:
+ *   [1, 2, 3, 4, 5, "...", 10]
+ */
+function buildPageWindow(
+  current: number,
+  total: number,
+): Array<number | "..."> {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, i) => i + 1);
+  }
+
+  const result: Array<number | "..."> = [1];
+  const start = Math.max(2, current - 1);
+  const end = Math.min(total - 1, current + 1);
+
+  if (start > 2) result.push("...");
+  for (let i = start; i <= end; i++) result.push(i);
+  if (end < total - 1) result.push("...");
+
+  result.push(total);
+  return result;
 }
 
 export default function AuditoriaPage() {
