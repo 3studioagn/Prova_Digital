@@ -569,6 +569,10 @@ async def _aggregate_geral(
 
     # Q4: tempo medio aprovacao + taxa de reprovacao sobre ciclos.
     # Pares (RETIRADA, APROVADA|REPROVADA) por (prova_id, ciclo).
+    # JOIN com ProvaDigital permite que filters (vendedor_id, rota, q) tambem
+    # restrinjam o calculo — corrige inconsistencia onde indicadores filtrados
+    # (total_provas) divergiam de indicadores globais (taxa_reprovacao,
+    # tempo_medio_aprovacao) no mesmo response. Audit 2026-04-29 H-A1.
     retirada_subq = (
         select(
             Movimentacao.prova_id,
@@ -602,6 +606,7 @@ async def _aggregate_geral(
                 retirada_subq.c.ciclo == decisao_alias.ciclo,
             ),
         )
+        .join(ProvaDigital, ProvaDigital.id == decisao_alias.prova_id)
         .where(
             decisao_alias.status_novo.in_(
                 (
@@ -613,6 +618,11 @@ async def _aggregate_geral(
             decisao_alias.created_at < filters.to,
         )
     )
+    # apply_status=False: query ja filtra por mov.status_novo IN
+    # (APROVADA, REPROVADA); aplicar filters.status sobre ProvaDigital.status
+    # produziria interseccao impossivel quando filtro nao bate com decisao
+    # registrada (mesmo padrao Q3).
+    stmt_aprov = _aplicar_filtros_provas(stmt_aprov, filters, apply_status=False)
     aprov_row = (await db.execute(stmt_aprov)).one_or_none()
     media_aprov_seg = aprov_row.media_seg if aprov_row else None
     aprovacoes = aprov_row.aprovacoes if aprov_row else 0
@@ -761,7 +771,10 @@ async def _aggregate_3studio(
     resp_row = (await db.execute(stmt_resp)).one_or_none()
     media_resp_seg = resp_row.media_seg if resp_row else None
 
-    # Q5: top motivos de cancelamento no periodo
+    # Q5: top motivos de cancelamento no periodo.
+    # Filtros (q, vendedor_id, rota) tambem propagam — admin que filtra por
+    # vendedor X ve apenas os motivos de cancelamento das provas daquele
+    # vendedor. Audit 2026-04-29 M-A1.
     stmt_top = (
         select(
             ProvaDigital.motivo_cancelamento.label("motivo"),
@@ -777,6 +790,10 @@ async def _aggregate_3studio(
         .order_by(func.count().desc())
         .limit(10)
     )
+    # apply_status=False: query ja filtra por status=CANCELADA; aplicar
+    # filters.status quando != CANCELADA produziria resultado vazio. Mesmo
+    # padrao de Q3/Q4.
+    stmt_top = _aplicar_filtros_provas(stmt_top, filters, apply_status=False)
     top_rows = (await db.execute(stmt_top)).all()
 
     # Q6: serie temporal por dia (UTC) — mesma logica do scope=geral.
@@ -1347,12 +1364,32 @@ def _summary_rows(payload: Any) -> Iterable[list[str]]:
             [scope, "vendedores_filial", str(payload.distribuicao_localizacao.filial)]
         )
         rows.append([scope, "ranking_size", str(len(payload.ranking))])
+        # Audit 2026-04-29 L-A1: alem do volume, expor metricas de qualidade
+        # (taxa de aprovacao, taxa de reprovacao, tempo medio retirada->decisao)
+        # para que o CSV summary nao seja mais pobre que a UI.
         for v in payload.ranking:
+            rows.append(
+                [scope, f"vendedor:{v.vendedor_nome}:volume", str(v.volume)]
+            )
             rows.append(
                 [
                     scope,
-                    f"vendedor:{v.vendedor_nome}:volume",
-                    str(v.volume),
+                    f"vendedor:{v.vendedor_nome}:taxa_aprovacao",
+                    _format_taxa(v.taxa_aprovacao),
+                ]
+            )
+            rows.append(
+                [
+                    scope,
+                    f"vendedor:{v.vendedor_nome}:taxa_reprovacao",
+                    _format_taxa(v.taxa_reprovacao),
+                ]
+            )
+            rows.append(
+                [
+                    scope,
+                    f"vendedor:{v.vendedor_nome}:tempo_medio_retirada_a_decisao_horas",
+                    _format_horas(v.tempo_medio_retirada_a_decisao_horas),
                 ]
             )
     else:  # clicheria

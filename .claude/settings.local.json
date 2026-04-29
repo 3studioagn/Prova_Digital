@@ -56,7 +56,21 @@
       "Bash(/c/Users/mario.souza/provaDigital/.venv/Scripts/python -m ruff check app/api/v1/reports.py app/domain/schemas/report.py)",
       "Bash(/c/Users/mario.souza/provaDigital/.venv/Scripts/python -m pytest tests/test_report_schemas.py tests/test_reports_api.py --no-header -q)",
       "Bash(/c/Users/mario.souza/provaDigital/.venv/Scripts/python -m ruff check app/ tests/ ../scripts/seed_reports_fixture.py)",
-      "mcp__c7b61d2f-6c38-4259-895b-4f5b8a04ebdc__apply_migration"
+      "mcp__c7b61d2f-6c38-4259-895b-4f5b8a04ebdc__apply_migration",
+      "Bash(npx --prefix frontend tsc --noEmit -p frontend/tsconfig.json)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(npm run *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :3000)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code} %{content_type}\\\\n\" http://localhost:3000)",
+      "Bash(findstr :8000)",
+      "Bash(tasklist /FI \"PID eq 38948\")",
+      "Bash(tasklist /FI \"PID eq 19960\")",
+      "Bash(tasklist /FI \"PID eq 30940\")",
+      "PowerShell(Get-Process | Where-Object { $_.Id -in 38948, 19960, 30940 } | ForEach-Object { \"$\\($_.Id\\) $\\($_.ProcessName\\)\" })",
+      "Bash(curl -sL --max-time 5 http://localhost:3000/relatorios -o /tmp/page.html -w \"%{http_code} size=%{size_download}\\\\n\")",
+      "Bash(echo \"tsc exit: $?\")",
+      "Bash(echo \"tsc: $?\")"
     ]
   }
 }

@@ -44,8 +44,13 @@ export function KeyboardShortcutsHelp({ open, onClose, shortcuts }: Props) {
     <div
       className={styles.overlay}
       onClick={onClose}
-      aria-hidden="true"
     >
+      {/*
+        IMPORTANTE: o overlay NAO pode ter `aria-hidden="true"` — esconderia
+        o dialog (descendente) do leitor de tela. WAI-ARIA modal pattern: o
+        proprio dialog usa `role="dialog"` + `aria-modal="true"` para
+        comunicar o estado modal. Audit 2026-04-29 M-F1.
+      */}
       <div
         className={styles.dialog}
         ref={trapRef}

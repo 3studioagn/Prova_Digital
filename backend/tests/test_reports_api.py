@@ -683,6 +683,63 @@ class TestReportsExport:
             )
         assert resp.status_code == 403
 
+    async def test_export_summary_vendedores_inclui_taxas_l_a1(
+        self, admin_user, mock_db
+    ):
+        """L-A1: CSV summary scope=vendedores deve expor taxas + tempo medio
+        por vendedor, alem do volume. Antes da correcao, so volume era
+        exportado, deixando o CSV mais pobre que a UI."""
+        import uuid
+
+        from app.domain.schemas.report import VendedorMetrica
+
+        vendedor = VendedorMetrica(
+            vendedor_id=uuid.uuid4(),
+            vendedor_nome="Mario Souza",
+            localizacao=LocalizacaoEnum.MATRIZ,
+            volume=42,
+            aprovacoes=30,
+            reprovacoes=12,
+            taxa_aprovacao=0.7143,
+            taxa_reprovacao=0.2857,
+            tempo_medio_retirada_a_decisao_horas=4.5,
+            provas_atrasadas_em_poder=2,
+        )
+        payload = ReportResponseVendedores(
+            periodo=_periodo_dummy(),
+            ranking=[vendedor],
+            distribuicao_localizacao=DistLocalizacao(matriz=42, filial=0),
+            atrasadas_em_poder=[],
+            atualizado_em=datetime.now(UTC),
+        )
+        _setup(mock_db, admin=admin_user)
+        with patch(
+            "app.api.v1.reports.log_audit", new=AsyncMock()
+        ), patch(
+            "app.api.v1.reports._aggregate_vendedores",
+            new=AsyncMock(return_value=payload),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url=BASE
+            ) as ac:
+                resp = await ac.get(
+                    f"{PREFIX}/export?scope=vendedores&dataset=summary"
+                )
+        assert resp.status_code == 200
+        text = resp.content.decode("utf-8-sig")
+        # Volume continua presente
+        assert "vendedor:Mario Souza:volume" in text
+        assert "42" in text
+        # Novas linhas: taxas e tempo medio
+        assert "vendedor:Mario Souza:taxa_aprovacao" in text
+        assert "vendedor:Mario Souza:taxa_reprovacao" in text
+        assert "vendedor:Mario Souza:tempo_medio_retirada_a_decisao_horas" in text
+        # Format: percentual com 2 casas + sufixo %
+        assert "71.43%" in text
+        assert "28.57%" in text
+        # Tempo formatado com 2 casas
+        assert "4.50" in text
+
 
 # ─── /reports nao loga audit (so /export loga) ────────────────────────────
 
@@ -832,6 +889,59 @@ class TestReportsCacheNoDbCall:
 
 
 # ─── _aplicar_filtros_provas: apply_status=False (auditoria M-02) ─────────
+
+
+class TestAuditoriaSenior20260429Round2:
+    """Auditoria sênior 2026-04-29 (round 2) — H-A1 + M-A1.
+
+    Filtros (vendedor_id, rota, q) devem propagar para TODAS as queries
+    agregadas que retornam indicadores no mesmo response. Antes do round 2,
+    Q4 do _aggregate_geral (taxa_reprovacao + tempo_medio_aprovacao) e Q5 do
+    _aggregate_3studio (cancelamentos_top) ignoravam filtros, causando
+    inconsistencia visivel entre indicadores filtrados e nao-filtrados.
+
+    Verificacao por inspecao do source — testar SQL real exigiria seed
+    determinístico, fora do padrao deste arquivo. Smoke test que falha se
+    alguem remover a chamada a _aplicar_filtros_provas.
+    """
+
+    def test_h_a1_q4_geral_aplica_filtros_provas(self):
+        """H-A1: Q4 do _aggregate_geral chama _aplicar_filtros_provas com
+        apply_status=False, e tem JOIN com ProvaDigital."""
+        import inspect
+
+        from app.api.v1 import reports
+
+        src = inspect.getsource(reports._aggregate_geral)
+        # JOIN com ProvaDigital permite que _aplicar_filtros_provas funcione
+        assert "ProvaDigital, ProvaDigital.id == decisao_alias.prova_id" in src, (
+            "H-A1 regressao: Q4 nao tem JOIN com ProvaDigital — "
+            "filters.vendedor_id/rota/q nao propagam"
+        )
+        # _aplicar_filtros_provas deve ser chamado em stmt_aprov
+        assert "stmt_aprov = _aplicar_filtros_provas(" in src, (
+            "H-A1 regressao: Q4 nao chama _aplicar_filtros_provas — "
+            "taxa_reprovacao + tempo_medio_aprovacao serao globais"
+        )
+        # apply_status=False (mesma logica de Q3)
+        assert "apply_status=False" in src, (
+            "H-A1 regressao: apply_status nao e False — "
+            "interseccao status sobre Movimentacao filtrada quebraria queries"
+        )
+
+    def test_m_a1_q5_3studio_aplica_filtros_provas(self):
+        """M-A1: Q5 do _aggregate_3studio (cancelamentos_top) chama
+        _aplicar_filtros_provas para propagar filters.vendedor_id/rota/q."""
+        import inspect
+
+        from app.api.v1 import reports
+
+        src = inspect.getsource(reports._aggregate_3studio)
+        # stmt_top deve passar por _aplicar_filtros_provas
+        assert "stmt_top = _aplicar_filtros_provas(" in src, (
+            "M-A1 regressao: Q5 (cancelamentos_top) nao chama "
+            "_aplicar_filtros_provas — top motivos sera global mesmo com filtros"
+        )
 
 
 class TestAplicarFiltrosProvasApplyStatus:
