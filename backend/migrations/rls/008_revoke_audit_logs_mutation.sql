@@ -1,0 +1,47 @@
+-- =============================================================================
+-- 008_revoke_audit_logs_mutation.sql
+-- Wave 6 — Componente 18 (Interface de Log de Auditoria)
+--
+-- Defesa em profundidade RNF-005: imutabilidade do log de auditoria.
+--
+-- Antes desta migration, audit_logs ja estava protegida em duas camadas:
+--   1. Trigger trg_audit_logs_imutavel (BEFORE UPDATE OR DELETE) — bloqueia
+--      mutacoes inclusive via service_role (triggers fazem efeito independente
+--      de bypassrls). Migration Alembic 001.
+--   2. RLS deny-by-default — ausencia de policy INSERT/UPDATE/DELETE em
+--      audit_logs faz com que clientes nao-bypassrls (anon, authenticated)
+--      recebam "policy not found" ao tentar mutar. Migration RLS 001.
+--
+-- Esta migration adiciona uma 3a camada: REVOKE explicito do GRANT-level
+-- privilege para anon e authenticated. Beneficios:
+--   - Erro mais explicito (`permission denied for table audit_logs`) em
+--     vez do mais sutil "no policy".
+--   - Se uma migration futura adicionar policy INSERT/UPDATE/DELETE por
+--     engano (ex: copiando boilerplate do CRUD de usuarios), o REVOKE
+--     ainda bloquearia.
+--   - Auditavel via `\dp public.audit_logs` no psql.
+--
+-- IMPORTANTE: service_role MANTEM os privilegios — backend continua
+--   inserindo via app/services/audit_service.py log_audit().
+--   O REVOKE so atinge anon e authenticated (clientes diretos via supabase-js).
+--
+-- Idempotente: REVOKE de privilegio ja ausente e no-op silencioso.
+--
+-- Aplicacao: executar via SQL Editor do Supabase Dashboard ou via MCP
+-- execute_sql / apply_migration. Convencao do projeto e usar apply_rls.py
+-- para versionar — este arquivo segue o mesmo padrao dos 001-007.
+-- =============================================================================
+
+-- audit_logs: bloqueia INSERT/UPDATE/DELETE para clientes nao-privilegiados.
+REVOKE INSERT, UPDATE, DELETE ON public.audit_logs FROM anon, authenticated;
+
+-- SELECT permanece concedido — RLS pol_audit_select filtra para admin-only.
+-- Sem REVOKE em SELECT, garantindo que admins continuem lendo via Wave 6.
+
+-- Validacao pos-aplicacao:
+--   1. SELECT has_table_privilege('authenticated','public.audit_logs','UPDATE');
+--      deve retornar false.
+--   2. SELECT has_table_privilege('authenticated','public.audit_logs','SELECT');
+--      deve retornar true (RLS faz o filtro).
+--   3. SELECT has_table_privilege('service_role','public.audit_logs','INSERT');
+--      deve retornar true (backend continua escrevendo).
