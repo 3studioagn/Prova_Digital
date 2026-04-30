@@ -188,6 +188,7 @@
 
 .shortcutScan:hover {
   opacity: 0.85;
+  text-decoration: none;
 }
 
 .shortcutScanLabel {
@@ -220,6 +221,7 @@
 
 .shortcutNova:hover {
   background: var(--color-accent-hover);
+  text-decoration: none;
 }
 
 .shortcutNovaLabel {
@@ -228,30 +230,6 @@
   color: #000;
 }
 
-/* ─── Botao Acessar Relatorios (laranja) — Wave 5 Componente 17 ─────── */
-
-.shortcutRelatorios {
-  display: flex;
-  align-items: center;
-  padding: 1.25rem 2rem;
-  background: #ff8a3d;
-  border-radius: 31px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-  text-decoration: none;
-  border: none;
-  flex: 1;
-}
-
-.shortcutRelatorios:hover {
-  background: #ee7625;
-}
-
-.shortcutRelatoriosLabel {
-  font-size: clamp(1rem, 1.3vw, 1.25rem);
-  font-weight: 400;
-  color: #fff;
-}
 
 /* ─── Loading / Error ────────────────────────────────────────────────── */
 

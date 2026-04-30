@@ -216,11 +216,6 @@ export default function DashboardPage() {
         <Link href="/nova-prova" className={styles.shortcutNova}>
           <span className={styles.shortcutNovaLabel}>Nova Prova</span>
         </Link>
-        <Link href="/relatorios" className={styles.shortcutRelatorios}>
-          <span className={styles.shortcutRelatoriosLabel}>
-            Acessar Relatorios
-          </span>
-        </Link>
       </div>
 
       {/* Row 3, Col 2: Na clicheria (mesma altura dos outros cards)

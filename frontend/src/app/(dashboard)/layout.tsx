@@ -14,7 +14,6 @@ import {
   CloseIcon,
   GearIcon,
   HomeIcon,
-  InfoIcon,
   LaptopIcon,
   PlusIcon,
   ScanIcon,
@@ -53,6 +52,10 @@ const MAIN_NAV: NavItemSpec[] = [
   { key: "escanear", label: "Escanear", icon: <ScanIcon />, href: "/escanear" },
   { key: "relatorios", label: "Relatorios", icon: <ChartIcon />, href: "/relatorios" },
   { key: "usuarios", label: "Usuarios", icon: <UserIcon />, href: "/usuarios" },
+];
+
+const SECONDARY_NAV: NavItemSpec[] = [
+  { key: "configuracoes", label: "Configuracoes", icon: <GearIcon />, href: "/configuracoes" },
   // Wave 6 C18 — admin-only. Defesa em profundidade: backend retorna 403
   // se acesso direto via URL; este flag esconde o link da UI.
   {
@@ -62,11 +65,6 @@ const MAIN_NAV: NavItemSpec[] = [
     href: "/auditoria",
     adminOnly: true,
   },
-];
-
-const SECONDARY_NAV: NavItemSpec[] = [
-  { key: "configuracoes", label: "Configuracoes", icon: <GearIcon />, href: "/configuracoes" },
-  { key: "informacoes", label: "Informacoes", icon: <InfoIcon /> },
 ];
 
 function NavEntry({
@@ -258,8 +256,14 @@ export default function DashboardLayout({
           <div className={styles.navDivider} role="separator" />
 
           <nav className={styles.nav} aria-label="Navegacao secundaria">
-            {SECONDARY_NAV.map((item) => (
-              <NavEntry key={item.key} item={item} active={false} />
+            {SECONDARY_NAV.filter(
+              (item) => !item.adminOnly || user?.is_admin === true,
+            ).map((item) => (
+              <NavEntry
+                key={item.key}
+                item={item}
+                active={Boolean(item.href && pathname === item.href)}
+              />
             ))}
           </nav>
         </div>
