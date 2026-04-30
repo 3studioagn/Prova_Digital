@@ -1,26 +1,31 @@
 "use client";
 
 /**
- * Atalhos de teclado globais (Wave 5, Componente 17 — RF-016).
+ * Atalhos de teclado globais (Wave 5 C17 — RF-016; Wave 1 v4.0 alinhado
+ * com Matriz de Acesso).
  *
  * State machine de 2 keystrokes (estilo GitHub):
  *   1. Usuario pressiona `g` -> entra em modo "leader" por 1.5s.
- *   2. Dentro do timeout, segunda tecla dispara a navegacao:
- *      - `g s` -> /escanear
- *      - `g p` -> /provas
- *      - `g r` -> /relatorios (apenas admin; vendedor/motorista nao veem)
+ *   2. Dentro do timeout, segunda tecla dispara a navegacao.
  *   3. Tecla `?` (sem leader) abre/fecha o modal de help.
  *   4. `Esc` no modo leader cancela.
  *
+ * Wave 1 v4.0: a lista de atalhos visiveis e derivada da Matriz de
+ * Acesso (shared/access-matrix.json) — para cada SHORTCUT_KEYS abaixo,
+ * o atalho aparece apenas se `evaluateRule(rule, user).acesso != negado`.
+ * Substitui o flag `adminOnly` hardcoded.
+ *
  * Ignora keystrokes quando o foco esta em <input>, <textarea> ou
  * `[contenteditable]` — para nao quebrar digitacao em formularios/buscas.
- *
- * Hook expoe `{ helpOpen, openHelp, closeHelp }` para que o caller
- * (layout) renderize o modal de help. `?` chama `openHelp`
- * internamente; modal pode ser fechado externamente via `closeHelp`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+
+import {
+  evaluateRule,
+  getRuleByKey,
+  type UserLike,
+} from "@/lib/access-matrix";
 
 const LEADER_TIMEOUT_MS = 1_500;
 
@@ -31,30 +36,21 @@ export interface ShortcutDef {
   path: string;
   /** Texto exibido no modal de help. */
   label: string;
-  /** Quando true, atalho so aparece para admin. */
-  adminOnly?: boolean;
+  /** Chave correspondente na Matriz (shared/access-matrix.json). */
+  ruleKey: string;
 }
 
+/** Lista canonica de atalhos. Chave da Matriz controla visibilidade. */
 export const SHORTCUT_DEFS: ShortcutDef[] = [
-  { key: "s", path: "/escanear", label: "Escanear QR Code" },
-  { key: "p", path: "/provas", label: "Listar provas" },
-  {
-    key: "r",
-    path: "/relatorios",
-    label: "Acessar relatorios",
-    adminOnly: true,
-  },
-  {
-    key: "a",
-    path: "/auditoria",
-    label: "Acessar auditoria",
-    adminOnly: true,
-  },
+  { key: "s", path: "/escanear", label: "Escanear QR Code", ruleKey: "scanner" },
+  { key: "p", path: "/provas", label: "Listar provas", ruleKey: "provas.list" },
+  { key: "r", path: "/relatorios", label: "Acessar relatorios", ruleKey: "relatorios" },
+  { key: "a", path: "/auditoria", label: "Acessar auditoria", ruleKey: "auditoria" },
 ];
 
 interface Options {
-  /** Habilita atalhos restritos a admin. Default: false. */
-  isAdmin: boolean;
+  /** Usuario logado (resposta de /users/me). null durante carga. */
+  user: UserLike | null;
 }
 
 /** Verifica se o foco atual esta num campo editavel. */
@@ -80,17 +76,23 @@ export interface UseGlobalShortcutsResult {
 export function useGlobalShortcuts(
   options: Options,
 ): UseGlobalShortcutsResult {
-  const { isAdmin } = options;
+  const { user } = options;
   const router = useRouter();
   const [helpOpen, setHelpOpen] = useState(false);
   const leaderActiveRef = useRef(false);
   const leaderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Audit 2026-04-29 L-F1: useMemo estabiliza a referencia para que o
-  // useEffect de keydown nao re-attach o listener a cada render do layout.
+  // Wave 1 v4.0: filtra atalhos consultando a Matriz de Acesso por
+  // ruleKey. Se a regra inexiste ou avalia para 'negado', o atalho nao
+  // aparece. useMemo evita re-attach do listener (audit 2026-04-29 L-F1).
   const visibleShortcuts = useMemo(
-    () => SHORTCUT_DEFS.filter((s) => !s.adminOnly || isAdmin),
-    [isAdmin],
+    () =>
+      SHORTCUT_DEFS.filter((s) => {
+        const rule = getRuleByKey(s.ruleKey);
+        if (rule === null) return false;
+        return evaluateRule(rule, user).acesso !== "negado";
+      }),
+    [user],
   );
 
   const openHelp = useCallback(() => setHelpOpen(true), []);

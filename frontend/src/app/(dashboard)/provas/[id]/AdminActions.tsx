@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useAuthorization } from "@/lib/hooks/use-authorization";
 import { useCancelarProva } from "@/hooks/useCancelarProva";
 import { useReiniciarCiclo } from "@/hooks/useReiniciarCiclo";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
@@ -32,7 +32,12 @@ type ModalState =
   | { kind: "reiniciar" };
 
 export function AdminActions({ prova, onActionComplete }: Props) {
-  const { user, loading: userLoading } = useCurrentUser();
+  // Wave 1 v4.0: cada acao tem chave propria na Matriz de Acesso
+  // (provas.cancel + provas.restart). Hoje ambas sao admin-only, mas a
+  // checagem por chave deixa explicito qual celula esta sendo aplicada
+  // e permite expansao futura sem refactor.
+  const cancelAuth = useAuthorization("provas.cancel");
+  const restartAuth = useAuthorization("provas.restart");
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const [motivo, setMotivo] = useState("");
   const focusTrapRef = useFocusTrap<HTMLDivElement>(modal.kind !== "closed");
@@ -92,13 +97,15 @@ export function AdminActions({ prova, onActionComplete }: Props) {
     }
   }, [reiniciar, prova.id, handleCloseModal, onActionComplete]);
 
-  // Nao renderiza se nao e admin ou ainda carregando
-  if (userLoading || !user?.is_admin) return null;
+  // Nao renderiza se nenhuma das duas acoes esta autorizada (loading
+  // tambem cai aqui — Hook devolve hasAccess=false enquanto loading).
+  if (!cancelAuth.hasAccess && !restartAuth.hasAccess) return null;
 
-  const podeCancelar = CANCELAVEIS.has(prova.status);
-  const podeReiniciar = prova.status === "REPROVADA_PELO_VENDEDOR";
+  const podeCancelar = cancelAuth.hasAccess && CANCELAVEIS.has(prova.status);
+  const podeReiniciar =
+    restartAuth.hasAccess && prova.status === "REPROVADA_PELO_VENDEDOR";
 
-  // Nenhuma acao disponivel
+  // Nenhuma acao disponivel para o estado atual
   if (!podeCancelar && !podeReiniciar) return null;
 
   return (

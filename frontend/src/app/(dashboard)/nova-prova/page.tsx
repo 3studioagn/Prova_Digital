@@ -14,6 +14,8 @@ import { createClient } from "@/lib/supabase/client";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useCreateProva } from "@/hooks/useCreateProva";
 import { PlusIcon } from "@/components/icons";
+import { useAuthorization } from "@/lib/hooks/use-authorization";
+import { Restricted } from "@/components/Restricted";
 import {
   ALLOWED_IMAGE_TYPES,
   MAX_UPLOAD_BYTES,
@@ -43,6 +45,9 @@ function formatBytes(n: number): string {
 }
 
 export default function NovaProvaPage() {
+  // Wave 1 v4.0 — guard via Matriz. provas.create = admin-only.
+  const auth = useAuthorization("provas.create");
+
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [arquivo, setArquivo] = useState<File | null>(null);
   const [arquivoPreview, setArquivoPreview] = useState<string | null>(null);
@@ -315,6 +320,11 @@ export default function NovaProvaPage() {
         </div>
       </>
     );
+  }
+
+  // Wave 1 v4.0: sem acesso -> Restricted (sem renderizar form).
+  if (!auth.loading && !auth.hasAccess) {
+    return <Restricted ruleKey="provas.create" profile={auth.profile} />;
   }
 
   // ─── Formulario de criacao ──────────────────────────────────────────

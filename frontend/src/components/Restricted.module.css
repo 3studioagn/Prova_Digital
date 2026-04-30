@@ -1,0 +1,46 @@
+/*
+ * Restricted — componente reutilizavel de "Acesso restrito" (Wave 1 v4.0).
+ *
+ * Visual consistente com o estado restricted da pagina /auditoria
+ * (Wave 6) — replicado aqui para que outras paginas usem o mesmo padrao
+ * sem duplicar CSS. A pagina /auditoria continua com seus estilos
+ * proprios pois ja existia; futuras paginas devem usar este componente.
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  text-align: center;
+  gap: 1rem;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: 500;
+  color: var(--color-card-text);
+}
+
+.message {
+  color: var(--color-card-text-muted);
+  font-size: var(--fs-base);
+  max-width: 480px;
+}
+
+.link {
+  display: inline-block;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  padding: 0.75rem 1.75rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: none;
+  opacity: 0.85;
+}

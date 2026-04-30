@@ -46,6 +46,8 @@ import {
   TIPO_EVENTO_OPTIONS,
 } from "@/lib/types/auditLog";
 import type { MeResponse, UsuarioListResponse, UsuarioResponse } from "@/lib/types/usuario";
+import { useAuthorization } from "@/lib/hooks/use-authorization";
+import { Restricted } from "@/components/Restricted";
 import styles from "./auditoria.module.css";
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -94,6 +96,10 @@ function isoUtcToDateBrt(iso: string | null): string {
 function AuditoriaPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Wave 1 v4.0 — guard via Matriz de Acesso (substitui o check ad-hoc
+  // `me.is_admin` que existia neste mesmo arquivo).
+  const auth = useAuthorization("auditoria");
 
   const getToken = useCallback(async () => {
     const supabase = createClient();
@@ -369,20 +375,10 @@ function AuditoriaPageInner() {
     [filters.page, totalPages],
   );
 
-  // Estado: nao admin
-  if (!meLoading && me && !me.is_admin) {
-    return (
-      <div className={styles.restricted}>
-        <h1 className={styles.restrictedTitle}>Acesso restrito</h1>
-        <p className={styles.restrictedMessage}>
-          A interface de auditoria e restrita ao perfil 3Studio (Administrador).
-          Caso precise acessar, solicite a um administrador (RNF-005).
-        </p>
-        <Link href="/dashboard" className={styles.restrictedLink}>
-          Voltar ao dashboard
-        </Link>
-      </div>
-    );
+  // Wave 1 v4.0: guard via Matriz de Acesso. Substitui o check ad-hoc
+  // que comparava `me.is_admin` diretamente.
+  if (!auth.loading && !auth.hasAccess) {
+    return <Restricted ruleKey="auditoria" profile={auth.profile} />;
   }
 
   const showingFrom = data && data.total > 0

@@ -9,6 +9,13 @@ import { apiFetch } from "@/lib/api";
 import { useGlobalShortcuts } from "@/hooks/useGlobalShortcuts";
 import { useInactivityTimeout } from "@/hooks/useInactivityTimeout";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
+import { AuthToast } from "@/components/AuthToast";
+import {
+  evaluateRule,
+  getRuleByKey,
+  type Setor,
+  type UserLike,
+} from "@/lib/access-matrix";
 import {
   ChartIcon,
   CloseIcon,
@@ -25,7 +32,7 @@ import styles from "./layout.module.css";
 
 interface UserInfo {
   nome: string;
-  setor: string;
+  setor: Setor;
   is_admin: boolean;
 }
 
@@ -41,31 +48,36 @@ interface NavItemSpec {
   label: string;
   icon: ReactNode;
   href?: string;
-  /** Quando true, item so aparece para usuarios com is_admin=true. */
-  adminOnly?: boolean;
+  /**
+   * Wave 1 v4.0: chave correspondente em shared/access-matrix.json. Usada
+   * para esconder o item de menu quando a Matriz negar acesso. Itens sem
+   * `ruleKey` (ex.: "Informacoes" placeholder) sao sempre visiveis.
+   */
+  ruleKey?: string;
 }
 
 const MAIN_NAV: NavItemSpec[] = [
-  { key: "dashboard", label: "Dashboard", icon: <HomeIcon />, href: "/dashboard" },
-  { key: "provas", label: "Provas", icon: <LaptopIcon />, href: "/provas" },
-  { key: "nova-prova", label: "Nova prova", icon: <PlusIcon />, href: "/nova-prova" },
-  { key: "escanear", label: "Escanear", icon: <ScanIcon />, href: "/escanear" },
-  { key: "relatorios", label: "Relatorios", icon: <ChartIcon />, href: "/relatorios" },
-  { key: "usuarios", label: "Usuarios", icon: <UserIcon />, href: "/usuarios" },
+  { key: "dashboard",  label: "Dashboard",  icon: <HomeIcon />,   href: "/dashboard",  ruleKey: "dashboard" },
+  { key: "provas",     label: "Provas",     icon: <LaptopIcon />, href: "/provas",     ruleKey: "provas.list" },
+  { key: "nova-prova", label: "Nova prova", icon: <PlusIcon />,   href: "/nova-prova", ruleKey: "provas.create" },
+  { key: "escanear",   label: "Escanear",   icon: <ScanIcon />,   href: "/escanear",   ruleKey: "scanner" },
+  { key: "relatorios", label: "Relatorios", icon: <ChartIcon />,  href: "/relatorios", ruleKey: "relatorios" },
+  { key: "usuarios",   label: "Usuarios",   icon: <UserIcon />,   href: "/usuarios",   ruleKey: "usuarios" },
 ];
 
 const SECONDARY_NAV: NavItemSpec[] = [
-  { key: "configuracoes", label: "Configuracoes", icon: <GearIcon />, href: "/configuracoes" },
-  // Wave 6 C18 — admin-only. Defesa em profundidade: backend retorna 403
-  // se acesso direto via URL; este flag esconde o link da UI.
-  {
-    key: "auditoria",
-    label: "Auditoria",
-    icon: <ShieldIcon />,
-    href: "/auditoria",
-    adminOnly: true,
-  },
+  { key: "configuracoes", label: "Configuracoes", icon: <GearIcon />,   href: "/configuracoes", ruleKey: "configuracoes" },
+  { key: "auditoria",     label: "Auditoria",     icon: <ShieldIcon />, href: "/auditoria",     ruleKey: "auditoria" },
 ];
+
+/** Wave 1 v4.0: filtro central pela Matriz de Acesso. Item sem ruleKey
+ * (placeholder de wave futura) e sempre exibido. */
+function isNavItemVisible(item: NavItemSpec, user: UserLike | null): boolean {
+  if (!item.ruleKey) return true;
+  const rule = getRuleByKey(item.ruleKey);
+  if (rule === null) return true;
+  return evaluateRule(rule, user).acesso !== "negado";
+}
 
 function NavEntry({
   item,
@@ -159,9 +171,9 @@ export default function DashboardLayout({
   // RNF-003: 30 min inactivity timeout
   useInactivityTimeout(INACTIVITY_TIMEOUT_MS, handleLogout);
 
-  // Wave 5 Componente 17: atalhos de teclado globais (g+s, g+p, g+r, ?)
+  // Wave 5 C17 + Wave 1 v4.0 C05: atalhos derivados da Matriz de Acesso.
   const { helpOpen, closeHelp, visibleShortcuts } = useGlobalShortcuts({
-    isAdmin: user?.is_admin ?? false,
+    user,
   });
 
   const firstName = user?.nome ? user.nome.split(" ")[0] : "";
@@ -242,9 +254,7 @@ export default function DashboardLayout({
           </div>
 
           <nav className={styles.nav} aria-label="Navegacao principal">
-            {MAIN_NAV.filter(
-              (item) => !item.adminOnly || user?.is_admin === true,
-            ).map((item) => (
+            {MAIN_NAV.filter((item) => isNavItemVisible(item, user)).map((item) => (
               <NavEntry
                 key={item.key}
                 item={item}
@@ -256,9 +266,7 @@ export default function DashboardLayout({
           <div className={styles.navDivider} role="separator" />
 
           <nav className={styles.nav} aria-label="Navegacao secundaria">
-            {SECONDARY_NAV.filter(
-              (item) => !item.adminOnly || user?.is_admin === true,
-            ).map((item) => (
+            {SECONDARY_NAV.filter((item) => isNavItemVisible(item, user)).map((item) => (
               <NavEntry
                 key={item.key}
                 item={item}
@@ -295,6 +303,10 @@ export default function DashboardLayout({
         onClose={closeHelp}
         shortcuts={visibleShortcuts}
       />
+
+      {/* Wave 1 v4.0: le cookie auth-toast setado pelo middleware quando
+          ele redireciona por acesso negado. */}
+      <AuthToast />
     </div>
   );
 }

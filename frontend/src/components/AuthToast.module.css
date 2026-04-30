@@ -1,0 +1,17 @@
+/* AuthToast — toast simples para mensagem de acesso negado (Wave 1 v4.0).
+ * Sem Framer Motion (Wave 6 substituira por Toaster global). */
+
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  z-index: 9999;
+  background: #1f1f1f;
+  color: #fff;
+  padding: 0.875rem 1.25rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font-size: 0.9375rem;
+  max-width: 360px;
+  border-left: 3px solid #f5a623;
+}

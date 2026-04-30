@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { CheckIcon } from "@/components/icons";
 import { useConfiguracoes } from "@/hooks/useConfiguracoes";
+import { useAuthorization } from "@/lib/hooks/use-authorization";
+import { Restricted } from "@/components/Restricted";
 import {
   CHAVE_TEMPLATE_ETIQUETA,
   CHAVE_TEMPO_ATRASO,
@@ -31,6 +33,9 @@ const EMPTY_STATUS: SectionStatus = {
 };
 
 export default function ConfiguracoesPage() {
+  // Wave 1 v4.0 — guard via Matriz. Configuracoes = admin-only (RF-022).
+  const auth = useAuthorization("configuracoes");
+
   const getToken = useCallback(async () => {
     const supabase = createClient();
     const { data } = await supabase.auth.getSession();
@@ -126,6 +131,11 @@ export default function ConfiguracoesPage() {
   );
 
   // ── Render ──────────────────────────────────────────────────────────
+
+  if (!auth.loading && !auth.hasAccess) {
+    return <Restricted ruleKey="configuracoes" profile={auth.profile} />;
+  }
+
   return (
     <>
       <div className={styles.mobileNotice}>

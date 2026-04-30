@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch, ApiError } from "@/lib/api";
 import { ChevronDownIcon, SearchIcon } from "@/components/icons";
+import { useAuthorization } from "@/lib/hooks/use-authorization";
+import { Restricted } from "@/components/Restricted";
 import styles from "./usuarios.module.css";
 
 interface User {
@@ -41,6 +43,12 @@ async function getToken(): Promise<string | null> {
 }
 
 export default function UsuariosPage() {
+  // Wave 1 v4.0 — guard proativo via Matriz de Acesso. Antes desta wave a
+  // pagina renderizava completamente para qualquer perfil; o backend
+  // retornava 403 mas o vendedor ainda via os controles e o erro vinha
+  // num modal (UX ruim).
+  const auth = useAuthorization("usuarios");
+
   const [data, setData] = useState<ListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -223,6 +231,11 @@ export default function UsuariosPage() {
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  // Wave 1 v4.0: sem acesso -> Restricted (sem expor controles).
+  if (!auth.loading && !auth.hasAccess) {
+    return <Restricted ruleKey="usuarios" profile={auth.profile} />;
+  }
 
   return (
     <>

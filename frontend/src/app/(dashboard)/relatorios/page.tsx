@@ -23,6 +23,8 @@ import { createBrowserClient } from "@supabase/ssr";
 import { useReport } from "@/hooks/useReport";
 import { useReportExport } from "@/hooks/useReportExport";
 import { useReportFilters } from "@/hooks/useReportFilters";
+import { useAuthorization } from "@/lib/hooks/use-authorization";
+import { Restricted } from "@/components/Restricted";
 
 import { DateRangeFilter } from "./DateRangeFilter";
 import { ExportButton } from "./ExportButton";
@@ -59,6 +61,13 @@ const POLLING_INTERVAL_MS = 30_000;
 // ─── Pagina principal ──────────────────────────────────────────────────
 
 function RelatoriosContent() {
+  // Wave 1 v4.0 — guard proativo via Matriz de Acesso. Substitui o
+  // guard reativo (parsing de "administrad" na mensagem de erro do backend)
+  // que existia neste arquivo. Beneficio: nao dispara fetch quando
+  // usuario sem acesso entra (ex.: vendedor que digita /relatorios na URL),
+  // exibindo mensagem padronizada imediatamente.
+  const auth = useAuthorization("relatorios");
+
   const { filters, setFilter, setFilters, toQueryString } = useReportFilters();
   const queryString = toQueryString();
   const { loading, refreshing, error, data, refresh, invalidate } = useReport(
@@ -113,6 +122,15 @@ function RelatoriosContent() {
   }, [debouncedInvalidate, refresh]);
 
   // ─── Render ──────────────────────────────────────────────────────────
+
+  // Wave 1 v4.0: guard proativo. Sem acesso -> Restricted (sem fetch).
+  if (!auth.loading && !auth.hasAccess) {
+    return (
+      <div className={styles.page}>
+        <Restricted ruleKey="relatorios" profile={auth.profile} />
+      </div>
+    );
+  }
 
   // Loading inicial sem dados
   if (loading && !data) {

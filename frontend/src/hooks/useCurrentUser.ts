@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
+import type { Setor } from "@/lib/access-matrix";
 
 interface UserInfo {
   id: string;
   nome: string;
-  setor: string;
+  /** Wave 1 v4.0: tipado como union literal pelo `lib/access-matrix.ts`
+   *  para que o hook seja consumivel direto pelo `evaluateRule`. */
+  setor: Setor;
   is_admin: boolean;
 }
 
