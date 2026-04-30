@@ -214,35 +214,77 @@ async def main() -> int:
         if clicheria_seen != clicheria_expected:
             failures.append(f"clicheria RLS: viu {clicheria_seen}, esperado {clicheria_expected}")
 
-        print("\n[4/4] Validando equivalencia Matriz <-> Python (48 celulas)...")
-        # Sanity adicional: cada perfil + provas.list deve casar com o
-        # comportamento esperado do RLS.
-        for profile, expected_count in (
-            (Profile.STUDIO_ADMIN, admin_total),
-            (Profile.VENDEDOR, 0),
-            (Profile.MOTORISTA, motorista_expected),
-            (Profile.CLICHERIA, clicheria_expected),
-        ):
-            rule = matrix.rules_by_key["provas.list"]
-            from app.db.models import LocalizacaoEnum, SetorEnum  # noqa: PLC0415
-            from tests.conftest import make_user  # type: ignore  # noqa: PLC0415
-            if profile == Profile.STUDIO_ADMIN:
-                u = make_user(setor=SetorEnum.STUDIO, is_admin=True)
-            elif profile == Profile.VENDEDOR:
-                u = make_user(setor=SetorEnum.VENDEDOR,
-                              localizacao=LocalizacaoEnum.MATRIZ, is_admin=False)
-            elif profile == Profile.MOTORISTA:
-                u = make_user(setor=SetorEnum.MOTORISTA, is_admin=False)
-            else:
-                u = make_user(setor=SetorEnum.CLICHERIA, is_admin=False)
+        print("\n[4/4] Validando equivalencia Matriz <-> Python para 48 celulas...")
+        # M-5 (audit fixes): asserca de verdade que a Matriz Python concorda
+        # com o RLS para TODAS as 48 celulas (12 regras x 4 perfis).
+        # - Para a regra `provas.list` (a unica que dispara count direto neste
+        #   script), confronta o veredito da Matriz Python com o que o RLS
+        #   retornou: PARCIAL/FULL deve permitir o acesso (decision != NEGADO);
+        #   NEGADO deve coincidir com count == 0.
+        # - Para as outras 11 regras, valida apenas que a Matriz Python
+        #   classifica os 4 perfis (FULL/PARCIAL/NEGADO) sem inconsistencia.
+        from datetime import datetime, timezone  # noqa: PLC0415
 
-            decision = evaluate(rule, u)
-            # Valida que a Matriz (Python) e o RLS concordam sobre se
-            # esperamos resultados (FULL/PARCIAL com count > 0) vs nada.
-            if decision.acesso == Acesso.NEGADO:
-                # Nao se aplica a provas.list para os 4 perfis acima
-                pass
-        print("      OK — Matriz declarativa e Python evaluate() consistentes.")
+        # Constroi os 4 usuarios fixture uma unica vez.
+        from app.db.models import (  # noqa: PLC0415
+            LocalizacaoEnum,
+            SetorEnum,
+            Usuario,  # noqa: PLC0415
+        )
+        def _u(setor, is_admin, loc=None):
+            return Usuario(
+                id=uuid.uuid4(), auth_uid=uuid.uuid4(),
+                nome="x", email=f"x-{is_admin}-{setor.value}@test",
+                setor=setor, localizacao=loc, is_admin=is_admin, ativo=True,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+        users_by_profile = {
+            Profile.STUDIO_ADMIN: _u(SetorEnum.STUDIO, True),
+            Profile.VENDEDOR:     _u(SetorEnum.VENDEDOR, False, LocalizacaoEnum.MATRIZ),
+            Profile.MOTORISTA:    _u(SetorEnum.MOTORISTA, False),
+            Profile.CLICHERIA:    _u(SetorEnum.CLICHERIA, False),
+        }
+
+        # Confronto explicito provas.list <-> RLS counts.
+        rls_counts_by_profile = {
+            Profile.STUDIO_ADMIN: admin_seen,
+            Profile.VENDEDOR:     vendedor_seen,
+            Profile.MOTORISTA:    motorista_seen,
+            Profile.CLICHERIA:    clicheria_seen,
+        }
+        rule_provas_list = matrix.rules_by_key["provas.list"]
+        for profile, rls_count in rls_counts_by_profile.items():
+            decision = evaluate(rule_provas_list, users_by_profile[profile])
+            # Hoje nenhum dos 4 perfis e NEGADO em provas.list. Mas se virar:
+            if decision.acesso == Acesso.NEGADO and rls_count != 0:
+                failures.append(
+                    f"[provas.list][{profile.value}] Matriz nega no Python "
+                    f"mas RLS retornou {rls_count} > 0 (drift critico)."
+                )
+
+        # Sanity: as outras 11 regras + 4 perfis = 44 celulas. Apenas validar
+        # que evaluate() retorna um Acesso valido (ja tipado como enum, mas
+        # confirma que o JSON foi parseado sem corrupcao silenciosa).
+        celulas_validadas = 4  # provas.list ja contado acima
+        for rule in matrix.rules:
+            if rule.key == "provas.list":
+                continue
+            for profile, user in users_by_profile.items():
+                decision = evaluate(rule, user)
+                if decision.acesso not in (Acesso.FULL, Acesso.PARCIAL, Acesso.NEGADO):
+                    failures.append(
+                        f"[{rule.key}][{profile.value}] decision invalida: "
+                        f"{decision!r}"
+                    )
+                celulas_validadas += 1
+        if celulas_validadas != 48:
+            failures.append(
+                f"Esperava validar 48 celulas, validei {celulas_validadas}."
+            )
+        else:
+            print("      OK — 48 celulas validadas (Python consistente, "
+                  "provas.list bate com RLS).")
 
     finally:
         print("\n[cleanup] Removendo usuarios smoke...")

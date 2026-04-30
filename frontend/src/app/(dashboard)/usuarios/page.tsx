@@ -233,7 +233,9 @@ export default function UsuariosPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   // Wave 1 v4.0: sem acesso -> Restricted (sem expor controles).
-  if (!auth.loading && !auth.hasAccess) {
+  // M-1 (audit fixes): retorna null durante loading evita flash de UI.
+  if (auth.loading) return null;
+  if (!auth.hasAccess) {
     return <Restricted ruleKey="usuarios" profile={auth.profile} />;
   }
 

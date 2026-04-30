@@ -79,10 +79,26 @@ function buildHomeByProfile(): Record<Profile, string> {
   return out;
 }
 
+// M-3 (audit fixes): conjuntos canonicos para validacao runtime — paridade
+// com matrix.py (FAIL FAST se JSON tiver typo ou esquema invalido).
+const VALID_ACESSOS = new Set<Acesso>(["full", "parcial", "negado"]);
+const VALID_SCOPES = new Set<ScopeKind>([
+  "self_vendedor",
+  "status_motorista_em_transito",
+  "status_clicheria",
+]);
+const VALID_MATCHES = new Set<MatchKind>(["exact", "prefix", "dynamic", "action"]);
+
 function buildRules(): { rules: AccessRule[]; byKey: Record<string, AccessRule> } {
   const rules: AccessRule[] = [];
   const byKey: Record<string, AccessRule> = {};
   for (const r of raw.rules) {
+    if (!VALID_MATCHES.has(r.match as MatchKind)) {
+      throw new Error(
+        `access-matrix.json: regra '${r.key}' tem match='${r.match}' invalido. ` +
+          `Aceitos: ${[...VALID_MATCHES].join(", ")}.`,
+      );
+    }
     const perfis = {} as Record<Profile, PerfilDecision>;
     for (const p of PROFILES_ORDER) {
       const d = r.perfis[p];
@@ -91,10 +107,37 @@ function buildRules(): { rules: AccessRule[]; byKey: Record<string, AccessRule> 
           `access-matrix.json: regra '${r.key}' sem decisao para perfil '${p}'.`,
         );
       }
-      perfis[p] = {
-        acesso: d.acesso as Acesso,
-        scope: d.scope as ScopeKind | undefined,
-      };
+      // M-3 (audit fixes): valida `acesso` e `scope` em runtime (typo no
+      // JSON quebra startup, em vez de cair no fallback false() em runtime).
+      if (!VALID_ACESSOS.has(d.acesso as Acesso)) {
+        throw new Error(
+          `access-matrix.json: regra '${r.key}'[${p}] acesso='${d.acesso}' ` +
+            `invalido. Aceitos: ${[...VALID_ACESSOS].join(", ")}.`,
+        );
+      }
+      const acesso = d.acesso as Acesso;
+      const scope = d.scope as ScopeKind | undefined;
+      if (acesso === "parcial") {
+        if (scope === undefined) {
+          throw new Error(
+            `access-matrix.json: regra '${r.key}'[${p}] e parcial mas sem 'scope'.`,
+          );
+        }
+        if (!VALID_SCOPES.has(scope)) {
+          throw new Error(
+            `access-matrix.json: regra '${r.key}'[${p}] scope='${scope}' invalido. ` +
+              `Aceitos: ${[...VALID_SCOPES].join(", ")}. Para adicionar um novo, ` +
+              `atualize tambem ScopeKind + scope_filter_for (Python) e o ` +
+              `branch correspondente do middleware.`,
+          );
+        }
+      } else if (scope !== undefined) {
+        throw new Error(
+          `access-matrix.json: regra '${r.key}'[${p}] tem acesso='${acesso}' mas ` +
+            `tem 'scope' definido. 'scope' so faz sentido para acesso=parcial.`,
+        );
+      }
+      perfis[p] = { acesso, scope };
     }
     const rule: AccessRule = {
       key: r.key,
@@ -128,8 +171,17 @@ export function getRuleByKey(key: string): AccessRule | null {
  *
  * Regras tipo 'action' nao tem path navegavel (path = '(action)'); sao
  * usadas apenas via getRuleByKey.
+ *
+ * M-4 (audit fixes): trailing slashes sao normalizados antes do match para
+ * fechar o gap onde Next.js poderia entregar `/provas/` ao middleware
+ * (por config trailingSlash:true ou comportamento futuro). Sem essa
+ * normalizacao, exact/dynamic/prefix falham todos para `/provas/` e o
+ * middleware passaria `null -> pass-through` (bypass do RBAC).
  */
 export function getRuleForPath(pathname: string): AccessRule | null {
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    pathname = pathname.slice(0, -1);
+  }
   // exact match primeiro
   for (const r of ALL_RULES) {
     if (r.match === "exact" && r.path === pathname) return r;

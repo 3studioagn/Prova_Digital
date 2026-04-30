@@ -110,21 +110,60 @@ def _load_matrix() -> MatrixSnapshot:
         )
     home_by_profile = {Profile(k): v for k, v in home_by_profile_raw.items()}
 
+    # M-2 (audit fixes): conjunto canonico de scopes aceitos. Mantem
+    # sincronia com `ScopeKind` (Literal) e com o frontend
+    # `lib/access-matrix.ts`. Se um novo scope for adicionado a Matriz,
+    # esta lista PRECISA ser atualizada (e o `scope_filter_for` em
+    # scopes.py implementar o branch correspondente).
+    valid_scopes: Final[frozenset[str]] = frozenset({
+        "self_vendedor",
+        "status_motorista_em_transito",
+        "status_clicheria",
+    })
+
     rules: list[AccessRule] = []
     for rule_dict in raw.get("rules", []):
+        rule_key_for_err = rule_dict.get("key", "<sem_key>")
         perfis_raw = rule_dict["perfis"]
         if set(perfis_raw.keys()) != expected_perfis:
             raise ValueError(
-                f"shared/access-matrix.json: regra '{rule_dict.get('key')}' deve "
+                f"shared/access-matrix.json: regra '{rule_key_for_err}' deve "
                 f"ter decisao para os 4 perfis, tem {sorted(perfis_raw.keys())}."
             )
-        perfis = {
-            Profile(p): PerfilDecision(
-                acesso=Acesso(d["acesso"]),
-                scope=d.get("scope"),
+        perfis: dict[Profile, PerfilDecision] = {}
+        for p, d in perfis_raw.items():
+            acesso_value = Acesso(d["acesso"])
+            scope_value = d.get("scope")
+
+            # M-2 (audit fixes): FAIL FAST. Antes destas checagens,
+            # `parcial` sem scope ou com scope desconhecido passava silenciosamente
+            # — bug so aparecia em runtime no scope_filter_for (que cai no
+            # else final + retorna false()), mascarando configuracao errada.
+            if acesso_value == Acesso.PARCIAL:
+                if scope_value is None:
+                    raise ValueError(
+                        f"shared/access-matrix.json: regra '{rule_key_for_err}' "
+                        f"[{p}] tem acesso=parcial mas nao tem campo 'scope'."
+                    )
+                if scope_value not in valid_scopes:
+                    raise ValueError(
+                        f"shared/access-matrix.json: regra '{rule_key_for_err}' "
+                        f"[{p}] tem scope='{scope_value}' invalido. "
+                        f"Aceitos: {sorted(valid_scopes)}. Para adicionar um "
+                        "novo scope, atualize tambem ScopeKind em matrix.py + "
+                        "scope_filter_for em scopes.py + access-matrix.ts."
+                    )
+            elif scope_value is not None:
+                raise ValueError(
+                    f"shared/access-matrix.json: regra '{rule_key_for_err}' "
+                    f"[{p}] tem acesso='{acesso_value.value}' mas tem campo "
+                    "'scope' definido. 'scope' so faz sentido para acesso=parcial."
+                )
+
+            perfis[Profile(p)] = PerfilDecision(
+                acesso=acesso_value,
+                scope=scope_value,
             )
-            for p, d in perfis_raw.items()
-        }
         rules.append(
             AccessRule(
                 key=rule_dict["key"],

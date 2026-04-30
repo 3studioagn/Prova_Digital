@@ -132,7 +132,9 @@ export default function ConfiguracoesPage() {
 
   // ── Render ──────────────────────────────────────────────────────────
 
-  if (!auth.loading && !auth.hasAccess) {
+  // M-1 (audit fixes): retorna null durante loading evita flash de UI.
+  if (auth.loading) return null;
+  if (!auth.hasAccess) {
     return <Restricted ruleKey="configuracoes" profile={auth.profile} />;
   }
 

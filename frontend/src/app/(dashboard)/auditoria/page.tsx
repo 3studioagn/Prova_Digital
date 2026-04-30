@@ -380,7 +380,10 @@ function AuditoriaPageInner() {
 
   // Wave 1 v4.0: guard via Matriz de Acesso. Substitui o check ad-hoc
   // que comparava `me.is_admin` diretamente.
-  if (!auth.loading && !auth.hasAccess) {
+  // M-1 (audit fixes): durante loading, retornar null evita flash de UI
+  // proibida (controles admin renderizando brevemente antes do guard).
+  if (auth.loading) return null;
+  if (!auth.hasAccess) {
     return <Restricted ruleKey="auditoria" profile={auth.profile} />;
   }
 

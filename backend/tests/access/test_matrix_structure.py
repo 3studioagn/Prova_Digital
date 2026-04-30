@@ -193,3 +193,132 @@ class TestMatrixSemanticInvariants:
                 f"detail[{profile.value}] != list[{profile.value}]"
             )
             assert rl.perfis[profile].scope == rd.perfis[profile].scope
+
+
+class TestMatrixRuntimeValidation:
+    """M-2 (audit fixes): JSON com schema invalido faz startup falhar.
+
+    Recreia _load_matrix em isolamento (sem o lru_cache global) com cada
+    payload mockado e verifica que ValueError e levantado com a mensagem
+    correta. Garante que typos no JSON (acesso='fulll', parcial sem scope,
+    etc.) nao passam silenciosamente.
+    """
+
+    def _build_payload(self, rules: list[dict]) -> dict:
+        """Payload base com perfis/home_by_profile validos + rules custom."""
+        return {
+            "version": "1",
+            "perfis": ["studio_admin", "vendedor", "motorista", "clicheria"],
+            "home_by_profile": {
+                "studio_admin": "/dashboard",
+                "vendedor": "/dashboard",
+                "motorista": "/escanear",
+                "clicheria": "/dashboard",
+            },
+            "rules": rules,
+        }
+
+    def _full_decision_for_all_4(self) -> dict:
+        return {
+            "studio_admin": {"acesso": "full"},
+            "vendedor": {"acesso": "full"},
+            "motorista": {"acesso": "full"},
+            "clicheria": {"acesso": "full"},
+        }
+
+    def _validate(self, payload: dict) -> None:
+        """Reimplementa o nucleo da validacao do _load_matrix com payload
+        em memoria. Mantemos sincronia manual com matrix.py — se mudar
+        lá, mudar aqui."""
+        import json
+        from pathlib import Path
+        from unittest.mock import patch
+
+        import app.access.matrix as matrix_module
+
+        # Limpa cache
+        matrix_module._load_matrix.cache_clear()
+
+        # Escreve payload temporariamente em arquivo, pois _load_matrix le
+        # do disco. tmp_path do pytest seria mais limpo, mas isolar cache
+        # por um teste e suficiente.
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        ) as f:
+            json.dump(payload, f)
+            tmp = Path(f.name)
+        try:
+            with patch.object(matrix_module, "_MATRIX_JSON_PATH", tmp):
+                matrix_module._load_matrix.cache_clear()
+                matrix_module._load_matrix()
+        finally:
+            tmp.unlink(missing_ok=True)
+            matrix_module._load_matrix.cache_clear()
+
+    def test_parcial_sem_scope_raises(self):
+        import pytest
+
+        rule = {
+            "key": "x",
+            "path": "/x",
+            "match": "exact",
+            "perfis": {
+                "studio_admin": {"acesso": "full"},
+                "vendedor": {"acesso": "parcial"},  # parcial sem scope
+                "motorista": {"acesso": "full"},
+                "clicheria": {"acesso": "full"},
+            },
+        }
+        with pytest.raises(ValueError, match="parcial mas nao tem campo 'scope'"):
+            self._validate(self._build_payload([rule]))
+
+    def test_parcial_com_scope_invalido_raises(self):
+        import pytest
+
+        rule = {
+            "key": "x",
+            "path": "/x",
+            "match": "exact",
+            "perfis": {
+                "studio_admin": {"acesso": "full"},
+                "vendedor": {"acesso": "parcial", "scope": "scope_inexistente"},
+                "motorista": {"acesso": "full"},
+                "clicheria": {"acesso": "full"},
+            },
+        }
+        with pytest.raises(ValueError, match="scope='scope_inexistente' invalido"):
+            self._validate(self._build_payload([rule]))
+
+    def test_full_com_scope_raises(self):
+        import pytest
+
+        rule = {
+            "key": "x",
+            "path": "/x",
+            "match": "exact",
+            "perfis": {
+                "studio_admin": {"acesso": "full", "scope": "self_vendedor"},
+                "vendedor": {"acesso": "full"},
+                "motorista": {"acesso": "full"},
+                "clicheria": {"acesso": "full"},
+            },
+        }
+        with pytest.raises(ValueError, match="'scope' so faz sentido"):
+            self._validate(self._build_payload([rule]))
+
+    def test_payload_valido_passa(self):
+        rule = {
+            "key": "x",
+            "path": "/x",
+            "match": "exact",
+            "perfis": {
+                "studio_admin": {"acesso": "full"},
+                "vendedor": {"acesso": "parcial", "scope": "self_vendedor"},
+                "motorista": {"acesso": "negado"},
+                "clicheria": {"acesso": "negado"},
+            },
+        }
+        # Nao deve lancar.
+        self._validate(self._build_payload([rule]))

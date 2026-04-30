@@ -87,22 +87,30 @@ async function loadProfile(
 
   const { data, error } = await supabase
     .from("usuarios")
-    .select("id, setor, is_admin")
+    .select("id, setor, is_admin, ativo")
     .eq("auth_uid", authUid)
     .maybeSingle();
 
   let snapshot: ProfileSnapshot | null = null;
-  if (!error && data && (data as { ativo?: boolean }).ativo !== false) {
+  // H-1 (audit fixes): coluna `ativo` agora vem no select e e checada
+  // explicitamente. Antes o campo nao era selecionado e a checagem
+  // `(data as ...).ativo !== false` era sempre true (undefined !== false),
+  // permitindo que usuario desativado passasse pelo middleware (defesa em
+  // profundidade comprometida; backend ainda bloqueava via get_current_user).
+  if (!error && data) {
     const row = data as {
       id: string;
       setor: string;
       is_admin: boolean;
+      ativo: boolean;
     };
-    snapshot = {
-      user_id: row.id,
-      setor: row.setor as Setor,
-      is_admin: row.is_admin,
-    };
+    if (row.ativo !== false) {
+      snapshot = {
+        user_id: row.id,
+        setor: row.setor as Setor,
+        is_admin: row.is_admin,
+      };
+    }
   }
 
   // Cache (best-effort LRU: drop oldest se exceder)
@@ -131,8 +139,12 @@ function redirectWithToast(
     "auth-toast",
     JSON.stringify({ kind: reason, ts: Date.now() }),
     {
-      httpOnly: false, // lido por client component
+      httpOnly: false, // lido por client component (AuthToast)
       sameSite: "lax",
+      // H-2 (audit fixes): em producao (HTTPS) o cookie precisa ter Secure
+      // para nao ser enviado via HTTP (boa pratica). Em dev (localhost) o
+      // browser aceita Secure=false. NODE_ENV=='production' no build da Vercel.
+      secure: process.env.NODE_ENV === "production",
       path: "/",
       maxAge: 10,
     },

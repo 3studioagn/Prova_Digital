@@ -124,7 +124,9 @@ function RelatoriosContent() {
   // ─── Render ──────────────────────────────────────────────────────────
 
   // Wave 1 v4.0: guard proativo. Sem acesso -> Restricted (sem fetch).
-  if (!auth.loading && !auth.hasAccess) {
+  // M-1 (audit fixes): retorna null durante loading evita flash de UI.
+  if (auth.loading) return null;
+  if (!auth.hasAccess) {
     return (
       <div className={styles.page}>
         <Restricted ruleKey="relatorios" profile={auth.profile} />
