@@ -1033,3 +1033,79 @@ D-5.
 - **Advisor Supabase:** limpo (apenas os 2 históricos esperados —
   alembic_version no-policy e auth_leaked_password).
 - **Frontend tsc/lint/build:** limpos, middleware = 82.5 kB.
+
+---
+
+## Auditoria pós-implementação (Audit Fixes — 2026-04-30, commit `ac3be70`)
+
+> Após o push para `development` e a primeira validação em produção,
+> foi solicitada uma auditoria crítica + metódica de TUDO o que foi
+> mexido na wave. O resultado está abaixo, com os fixes aplicados na
+> mesma sessão (commit `ac3be70`, fast-forward em `development`).
+
+### A.1 Findings categorizados
+
+**Total: 0 CRITICAL · 2 HIGH · 6 MEDIUM · 8 LOW.**
+
+#### HIGH (corrigidos em `ac3be70`)
+
+| ID | Bug | Arquivo | Fix |
+|----|---|---|---|
+| **H-1** | `loadProfile` no middleware fazia `select('id, setor, is_admin')` sem `ativo`, mas a checagem `(data as { ativo?: boolean }).ativo !== false` lia o campo ausente. `undefined !== false` = `true` ⇒ snapshot sempre construído mesmo se user desativado. Backend ainda bloqueava via `get_current_user`, mas a defesa em profundidade ficava comprometida. | `frontend/src/lib/supabase/middleware.ts:88-115` | Incluir `ativo` no `select` e checar explicitamente. |
+| **H-2** | Cookie `auth-toast` setado sem `secure: true`. Em produção HTTPS era enviado também via HTTP (boa prática OWASP). Cookie não carrega dados sensíveis (apenas `{kind, ts}`), mas alinhamento recomendado. | `frontend/src/lib/supabase/middleware.ts:130-145` | `secure: process.env.NODE_ENV === "production"` (false em dev, true em build Vercel). |
+
+#### MEDIUM (M-1..M-5 corrigidos em `ac3be70`; M-6 follow-up)
+
+| ID | Bug | Arquivo | Fix |
+|----|---|---|---|
+| **M-1** | Flash de UI proibida durante carga do `/users/me` (~50-200ms) nas 5 pages com guard. `if (!auth.loading && !auth.hasAccess) return <Restricted/>` permitia conteúdo da página renderizar antes do guard aplicar. | `auditoria`, `relatorios`, `usuarios`, `configuracoes`, `nova-prova` | Adicionar `if (auth.loading) return null;` antes do guard. |
+| **M-2** | `_load_matrix` Python aceitava silenciosamente JSON com `acesso="parcial"` sem `scope`, ou `scope` inválido, ou `acesso="full"/"negado"` com `scope` definido. Falha só aparecia em runtime no `scope_filter_for` (else final + `false()`). | `backend/app/access/matrix.py:113-152` | Validação FAIL FAST no startup com `valid_scopes` frozenset. **+4 testes novos** em `TestMatrixRuntimeValidation`. |
+| **M-3** | `buildRules` TS fazia casts diretos `d.acesso as Acesso` sem validação runtime. Typo no JSON (`'fulll'`) passava. | `frontend/src/lib/access-matrix.ts:82-141` | `VALID_ACESSOS`, `VALID_SCOPES`, `VALID_MATCHES` como `Set` + `throw new Error` no `buildRules`. Paridade com Python. |
+| **M-4** | `getRuleForPath` falhava em paths com trailing slash (`/provas/`). Resultado: `null` → middleware pass-through → bypass do RBAC. Mitigado por Next.js default `trailingSlash: false`, mas frágil. | `frontend/src/lib/access-matrix.ts:120-160` | Normalizar trailing slash no início de `getRuleForPath` (1 linha defensiva). Smoke preview validou: `/auditoria/` (anon) → `/login`. |
+| **M-5** | Etapa "[4/4]" do `verify_rbac_equivalence.py` era "teatro": iterava 4 perfis, declarava `expected_count` não usado, fazia `if NEGADO: pass`. Sempre imprimia OK sem assertar. | `scripts/verify_rbac_equivalence.py:217-280` | Asserção real: confronta Matriz Python (`provas.list` decision) com counts RLS coletados na etapa [3/4]; valida que as 44 outras células retornam `Acesso` enum válido. |
+| **M-6** | `verify_rbac_equivalence.py` só valida `provas_digitais`. Smoke MCP cobriu as 6 tabelas, mas não está reproduzível pelo script. | `scripts/verify_rbac_equivalence.py` | **Follow-up:** estender com counts para `movimentacoes`, `etiquetas`, `audit_logs`, `configuracoes_sistema`, `usuarios`. |
+
+#### LOW (registrados como follow-up — não corrigidos em `ac3be70`)
+
+| ID | Local | Issue | Fix sugerido |
+|----|---|---|---|
+| L-1 | `frontend/src/lib/supabase/middleware.ts` | Sem teste unitário próprio (cache LRU, redirect com cookie, header `x-rbac-scope`) | Criar `__tests__/middleware.test.ts` mockando `createServerClient`. |
+| L-2 | `backend/app/api/v1/provas.py:661` | `_scoping_filter` virou shim que delega — tech debt | Inline as ~7 chamadas para `scope_filter_for` em wave futura. |
+| L-3 | `frontend/src/hooks/useGlobalShortcuts.ts:88-96` | Atalhos `g s`/`g p` não funcionam durante ~50-200ms iniciais (user=null → visibleShortcuts=[]) | Aceitável — listener reataca quando user carrega. |
+| L-4 | `frontend/src/hooks/useCurrentUser.ts` | Cada `useAuthorization` re-fetch `/users/me` | ADR-087 já aceitou. Migrar para Context em wave futura. |
+| L-5 | `frontend/src/components/Restricted.tsx:64` | `<h1>` pode quebrar hierarquia semântica em algumas páginas | Mudar para `role="alert"` + título via prop opcional. |
+| L-6 | `frontend/src/lib/supabase/middleware.ts:80` | `loadProfile` sem error handler — falha Supabase silenciosa retorna null | Adicionar `console.error` com correlation id. |
+| L-7 | `backend/app/access/matrix.py:30` | Path 4-`.parent` é frágil — se arquivo se mover quebra silenciosamente no startup | Permitir override via env var `ACCESS_MATRIX_JSON_PATH`. |
+| L-8 | `backend/app/access/enforce.py:67` | Log de denial perde `setor` quando `profile is None` | `profile=<unmapped:STUDIO>` em vez de só `<unmapped>`. |
+
+### A.2 Decisões registradas pela auditoria
+
+- **D-6** (DECISIONS.md) — Validação runtime FAIL FAST do JSON SSoT em
+  ambos os lados. Justifica M-2 + M-3.
+- **D-7** (DECISIONS.md) — Trailing slash normalizado defensivamente em
+  `getRuleForPath`. Justifica M-4.
+
+### A.3 Validação pós-fixes
+
+- **761 testes backend passando** (era 757 + 4 novos do M-2). 0 regressão.
+- `npx tsc --noEmit + next lint + next build`: limpos. Middleware
+  82.9 kB (era 82.5).
+- `ruff check`: limpo.
+- `scripts/verify_rbac_equivalence.py` em produção: SUCESSO com a nova
+  asserção real (`48 células validadas; admin 16/16, vendedor 0,
+  motorista 0, clicheria 2`).
+- Smoke preview: `/auditoria` e `/auditoria/` (anônimos) ambos →
+  `/login`. Console limpo.
+
+### A.4 O que ficou sólido após a auditoria
+
+- **Defesa em profundidade restaurada** — middleware agora respeita
+  `ativo` (H-1).
+- **Boa prática OWASP** — cookie `Secure` em produção (H-2).
+- **Sem flash de UI** — guards aguardam `useCurrentUser` (M-1).
+- **JSON SSoT à prova de typos** — validação runtime em ambos os lados
+  (M-2 + M-3); adicionar novo `scope` agora exige PR atomico nos 3
+  pontos (matrix.py + scopes.py + access-matrix.ts).
+- **Trailing slash não bypassa RBAC** — defensivo independente da config
+  do Next (M-4).
+- **Script verify de verdade** — etapa [4/4] não é mais teatro (M-5).

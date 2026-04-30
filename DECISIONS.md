@@ -4195,3 +4195,94 @@ chama `enforce_access_for("rule_key", user)` que valida via Matriz.
     `access_required(rule_key)`; endpoints com invariantes de negocio
     nao mapeadas (RN-010 em users.py) continuam usando
     `get_admin_user` direto.
+
+
+## D-6 — Validacao runtime FAIL FAST do JSON SSoT em ambos os lados
+
+**Adicionada na sessao de Audit Fixes (2026-04-30, commit `ac3be70`).**
+
+**Contexto:** auditoria pos-implementacao identificou (M-2 + M-3) que
+tanto `_load_matrix` (Python) quanto `buildRules` (TypeScript)
+aceitavam silenciosamente JSON com schema invalido — typo no `acesso`
+(`'fulll'`), `acesso='parcial'` sem campo `scope`, `scope` com valor
+fora do conjunto canonico, `acesso='full'/'negado'` com `scope`
+indevido. Falhas so apareciam em runtime no `scope_filter_for` (else
+final + `false()` defensivo) ou em deny silencioso no middleware,
+mascarando bugs de configuracao da Matriz.
+
+**Decisao:** validacao FAIL FAST no startup nos dois lados, com
+mensagens explicitas que nomeiam os 3 pontos a atualizar quando um
+novo `scope` for introduzido (matrix.py + scopes.py + access-matrix.ts).
+
+  - Python (`backend/app/access/matrix.py`):
+    `valid_scopes: frozenset[str] = frozenset({"self_vendedor",
+    "status_motorista_em_transito", "status_clicheria"})`. Cada perfil
+    de cada regra e validado: `parcial` exige `scope ∈ valid_scopes`;
+    `full`/`negado` proibe `scope`. `ValueError` aborta o boot do
+    processo FastAPI.
+  - TypeScript (`frontend/src/lib/access-matrix.ts`): `VALID_ACESSOS`,
+    `VALID_SCOPES`, `VALID_MATCHES` como `Set<...>`. `throw new Error`
+    em `buildRules` aborta o build do Next.
+
+**Alternativas avaliadas:**
+  - **JSON Schema externo (ajv / pydantic):** rejeitada — overhead de
+    dependencia para 4 invariantes simples. Validacao manual cabe em
+    ~30 linhas em cada lado e mantem mensagens contextuais.
+  - **Apenas validar em testes:** rejeitada — falha em runtime e mais
+    visivel que falha em CI; e validacao em testes nao previne JSON
+    quebrado em hotfix de producao.
+  - **Soft-fail com `console.warn` + decision negado defensivo:**
+    rejeitada — silenciosamente mascarar configuracao errada e exatamente
+    o problema que esta wave tenta evitar (risco R-1 da analysis).
+
+**Consequencias:**
+  - 4 testes novos em `tests/access/test_matrix_structure.py`
+    (`TestMatrixRuntimeValidation`) garantem comportamento na camada
+    Python.
+  - Total de testes backend: 761 (era 757 + 4).
+  - Adicionar novo `scope` agora exige PR atomico atualizando os 3
+    pontos — alinhado com o objetivo central da Wave 1 v4.0.
+
+
+## D-7 — Decisao defensiva no middleware: trailing slash normalizado
+
+**Adicionada na sessao de Audit Fixes (2026-04-30, commit `ac3be70`).**
+
+**Contexto:** auditoria identificou (M-4) que `getRuleForPath` falhava
+em paths com trailing slash:
+  - `/provas/` nao bate em `match=exact path=/provas` (`!==`).
+  - `/provas/` nao bate em `match=dynamic path=/provas/[id]`
+    (`length === prefix.length` falha na condicao `>`).
+  - `/provas/` nao bate em qualquer `match=prefix` (nenhum cobre).
+  - Resultado: `null` -> middleware pass-through -> bypass do RBAC.
+
+Em producao com Next.js 14 default `trailingSlash: false`, o framework
+normaliza antes do middleware e o caso nao acontece. Mas a config pode
+mudar (ex.: SEO leva a `trailingSlash: true`) e o bug ficaria latente.
+
+**Decisao:** normalizar trailing slash no inicio de `getRuleForPath`
+(uma linha defensiva) em vez de depender da config do Next:
+
+```typescript
+if (pathname.length > 1 && pathname.endsWith("/")) {
+  pathname = pathname.slice(0, -1);
+}
+```
+
+**Alternativas avaliadas:**
+  - **Forcar `trailingSlash: false` no `next.config.js` e documentar:**
+    rejeitada — configuracao runtime e fora do escopo da camada de
+    logica de acesso; quebra encapsulamento.
+  - **Estender cada `match` (exact/dynamic/prefix) com aceitacao de
+    trailing slash:** rejeitada — duplicacao em 3 branches; mais
+    superficie para bug.
+  - **Normalizar tambem `/foo//bar`, query strings:** rejeitada —
+    `pathname` ja chega sem query no middleware do Next; double-slash
+    nao e gerado pelo App Router.
+
+**Consequencias:**
+  - 1 linha de codigo no `getRuleForPath`.
+  - Smoke preview validou: `/auditoria` e `/auditoria/` (anonimos)
+    ambos -> redirect `/login`. Comportamento identico.
+  - Camada inferior (RLS) ja era invariante a trailing slash (so olha
+    para queries SQL), entao paridade preservada.

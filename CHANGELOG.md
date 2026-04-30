@@ -8101,3 +8101,114 @@ fakes inseridos+removidos).
 - `npx tsc --noEmit + next lint + next build` no frontend: limpos.
 - `scripts/verify_rbac_equivalence.py` em producao: SUCESSO (3 camadas
   consistentes).
+
+
+## v4.0 — Wave 1 — Componente 05 — Audit Fixes (pos-implementacao)
+**Data:** 2026-04-30
+**Branch:** `wave1-v4/audit-fixes` -> fast-forward em `development`
+**Commit:** `ac3be70`
+**Escopo:** auditoria critica + metodica do trabalho da Wave 1 v4.0
+identificou **0 CRITICAL · 2 HIGH · 6 MEDIUM · 8 LOW**. Este commit corrige
+os 2 HIGH + 5 MEDIUM (M-1..M-5). Os itens L-1..L-8 + M-6 ficam como
+follow-up registrado.
+
+### Modificado
+
+- **H-1** — `frontend/src/lib/supabase/middleware.ts` (linhas 88-115).
+  Bug: `loadProfile` selecionava apenas `id, setor, is_admin` mas a
+  checagem `(data as { ativo?: boolean }).ativo !== false` lia o campo
+  ausente. `undefined !== false` = `true` => snapshot sempre construido,
+  permitindo usuario desativado passar pelo middleware. Backend ainda
+  bloqueava via `get_current_user`, mas a defesa em profundidade ficava
+  comprometida. Fix: incluir `ativo` no select e checar explicitamente.
+
+- **H-2** — `frontend/src/lib/supabase/middleware.ts` (linhas 130-145).
+  Bug: cookie `auth-toast` setado sem `secure: true`. Em producao HTTPS
+  era enviado tambem via HTTP (boa pratica). Cookie nao carrega dados
+  sensiveis (apenas `{kind, ts}`), mas alinhamento com OWASP recomendado.
+  Fix: `secure: process.env.NODE_ENV === "production"` (false em dev,
+  true em build Vercel).
+
+- **M-1** — flash de UI proibida durante carga do `/users/me` em 5
+  pages: `auditoria`, `relatorios`, `usuarios`, `configuracoes`,
+  `nova-prova`. Bug: `if (!auth.loading && !auth.hasAccess) return
+  <Restricted/>` permitia conteudo da pagina (formularios, controles
+  admin) renderizar por ~50-200ms ate `useCurrentUser` resolver. Fix:
+  adicionar `if (auth.loading) return null;` antes do guard. Trade-off:
+  flash em branco breve > flash de controles admin para vendedor.
+
+- **M-2** — `backend/app/access/matrix.py` (linhas 113-152). Bug:
+  `_load_matrix` aceitava silenciosamente JSON com `acesso="parcial"`
+  sem `scope`, ou `scope` invalido, ou `acesso="full"/"negado"` com
+  `scope` definido. Falhas so apareciam em runtime no `scope_filter_for`
+  (else final + `false()`), mascarando configuracao errada. Fix:
+  validacao FAIL FAST no startup com `valid_scopes` frozenset e
+  mensagens claras indicando os 3 pontos a atualizar (matrix.py +
+  scopes.py + access-matrix.ts) ao adicionar novo scope.
+
+- **M-3** — `frontend/src/lib/access-matrix.ts` (linhas 82-141). Bug:
+  `buildRules` fazia casts diretos `d.acesso as Acesso` sem validacao
+  runtime, aceitando typo no JSON ('fulll' em vez de 'full' passava).
+  Fix: `VALID_ACESSOS`, `VALID_SCOPES`, `VALID_MATCHES` como `Set` +
+  `throw new Error` com mensagem explicita. Paridade com Python.
+
+- **M-4** — `frontend/src/lib/access-matrix.ts` (linhas 120-160).
+  `getRuleForPath` falhava em paths com trailing slash (ex.: `/provas/`).
+  Match exact `/provas` !== `/provas/`; dynamic prefix `/provas/` mas
+  `length === prefix.length` falha; nenhuma prefix bate. Resultado:
+  `null` -> middleware pass-through -> bypass do RBAC. Mitigado por
+  Next.js default `trailingSlash: false`, mas fragil se config mudar.
+  Fix: normalizar trailing slash no inicio de `getRuleForPath`. Smoke
+  preview validou: `/auditoria/` (anon) -> redirect `/login`.
+
+- **M-5** — `scripts/verify_rbac_equivalence.py` (linhas 217-280). Bug:
+  etapa "[4/4] Validando equivalencia Matriz <-> Python" iterava 4
+  perfis, declarava `expected_count` nao usado, fazia `if NEGADO: pass`.
+  Sempre imprimia OK mesmo sem assercao real. Fix: agora confronta
+  Matriz Python (provas.list decision) com counts RLS coletados na
+  etapa [3/4]; valida que as 44 outras celulas (11 regras x 4 perfis)
+  retornam `Acesso` enum valido. Saida final: "48 celulas validadas
+  (Python consistente, provas.list bate com RLS)".
+
+### Adicionado
+
+- `backend/tests/access/test_matrix_structure.py` ganhou
+  `TestMatrixRuntimeValidation` — 4 testes que escrevem JSON em
+  arquivo temporario, mockam `_MATRIX_JSON_PATH` e verificam que
+  `_load_matrix` levanta `ValueError` para: parcial sem scope, parcial
+  com scope inexistente, full com scope, e que payload valido passa.
+
+### Validacao
+
+- 761 testes backend passando (era 757 + 4 novos do M-2). 0 regressao.
+- `npx tsc --noEmit + next lint + next build` no frontend: limpos.
+  Middleware: 82.9 kB (era 82.5).
+- `ruff check`: limpo.
+- `scripts/verify_rbac_equivalence.py` em producao: SUCESSO com a nova
+  assercao real (`48 celulas validadas; admin 16/16, vendedor 0,
+  motorista 0, clicheria 2`).
+- Smoke preview: `/auditoria` e `/auditoria/` (anonimos) ambos
+  redirecionam para `/login`. Console limpo. M-4 confirmado visualmente.
+
+### Itens NAO incluidos neste fix (registrados como follow-up)
+
+- **M-6** — `verify_rbac_equivalence.py` so valida `provas_digitais`.
+  Estender para 6 tabelas (movimentacoes, etiquetas, audit_logs,
+  configuracoes_sistema, usuarios) cobririam tambem L-RLS-1 fechada
+  pela RLS 011.
+- **L-1** — `frontend/src/lib/supabase/middleware.ts` sem teste unitario
+  proprio (cache LRU, redirect com cookie, header `x-rbac-scope`).
+- **L-2** — `_scoping_filter` em `provas.py` virou shim que delega para
+  `scope_filter_for("provas.list", user)` — tech debt; inline as ~7
+  chamadas em wave futura.
+- **L-3** — atalhos `g s`/`g p` nao funcionam durante ~50-200ms iniciais
+  (user=null -> visibleShortcuts=[]). Aceitavel.
+- **L-4** — `useAuthorization` em cada componente refaz fetch de
+  `/users/me` (ADR-087 ja aceitou).
+- **L-5** — `Restricted` `<h1>` pode quebrar hierarquia semantica em
+  algumas paginas. A11y minor.
+- **L-6** — `loadProfile` sem error handler (falha Supabase silenciosa).
+- **L-7** — `matrix.py` path 4-`.parent` fragil. Permitir override via
+  env var `ACCESS_MATRIX_JSON_PATH` em wave futura.
+- **L-8** — `enforce_access_for` log de denial perde `setor` quando
+  `profile is None`.
