@@ -1,0 +1,171 @@
+{
+  "_comment": "Wave 1 v4.0 — Componente 05 (Atualizacao v4.0). Fonte unica de verdade do RBAC. Espelhada por: (a) middleware do Next.js [frontend/src/middleware.ts]; (b) hook useAuthorization [frontend/src/lib/hooks/use-authorization.ts]; (c) backend [backend/app/access/]; (d) policies RLS [backend/migrations/rls/009-011]. Toda alteracao desta tabela exige PR cobrindo as 4 camadas. Espelhada pela Secao 6 do RequisitosProvasDigitais_v4_0.docx.",
+  "version": "1",
+  "perfis": ["studio_admin", "vendedor", "motorista", "clicheria"],
+  "perfil_predicates": {
+    "_comment": "Predicado SQL/TS para classificar um Usuario em um perfil. Avaliados em ordem; o primeiro match vence (admin > setor).",
+    "studio_admin": "is_admin = true",
+    "vendedor": "is_admin = false AND setor = 'VENDEDOR'",
+    "motorista": "is_admin = false AND setor = 'MOTORISTA'",
+    "clicheria": "is_admin = false AND setor = 'CLICHERIA'"
+  },
+  "home_by_profile": {
+    "_comment": "Pagina inicial usada pelos redirects 302 do middleware quando acesso e negado.",
+    "studio_admin": "/dashboard",
+    "vendedor": "/dashboard",
+    "motorista": "/escanear",
+    "clicheria": "/dashboard"
+  },
+  "scope_kinds": {
+    "_comment": "Identificadores das regras de escopo aplicadas quando acesso = 'parcial'. Cada um corresponde a uma clausula SQL no scope_filter_for() do backend e a um filtro UI no frontend.",
+    "self_vendedor": "vendedor_id = current_user.id (vendedor ve apenas suas provas)",
+    "status_motorista_em_transito": "status IN (estados COM_MOTORISTA*) (motorista ve apenas em transito)",
+    "status_clicheria": "status IN (ENVIADA_PARA_CLICHERIA, ENCAMINHADA_A_CLICHERIA, RECEBIDA_PELA_CLICHERIA)"
+  },
+  "rules": [
+    {
+      "key": "login",
+      "path": "/login",
+      "match": "prefix",
+      "_matrix_row": "Login",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "full" },
+        "motorista":    { "acesso": "full" },
+        "clicheria":    { "acesso": "full" }
+      }
+    },
+    {
+      "key": "dashboard",
+      "path": "/dashboard",
+      "match": "exact",
+      "_matrix_row": "Dashboard",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "full" },
+        "motorista":    { "acesso": "full" },
+        "clicheria":    { "acesso": "full" }
+      }
+    },
+    {
+      "key": "scanner",
+      "path": "/escanear",
+      "match": "prefix",
+      "_matrix_row": "Escanear QR Code",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "full" },
+        "motorista":    { "acesso": "full" },
+        "clicheria":    { "acesso": "full" }
+      }
+    },
+    {
+      "key": "provas.list",
+      "path": "/provas",
+      "match": "exact",
+      "_matrix_row": "Listagem de Provas",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "parcial", "scope": "self_vendedor" },
+        "motorista":    { "acesso": "parcial", "scope": "status_motorista_em_transito" },
+        "clicheria":    { "acesso": "full" }
+      }
+    },
+    {
+      "key": "provas.detail",
+      "path": "/provas/[id]",
+      "match": "dynamic",
+      "_matrix_row": "Visualizacao de Prova (detalhe) + Timeline",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "parcial", "scope": "self_vendedor" },
+        "motorista":    { "acesso": "parcial", "scope": "status_motorista_em_transito" },
+        "clicheria":    { "acesso": "full" }
+      }
+    },
+    {
+      "key": "provas.create",
+      "path": "/nova-prova",
+      "match": "exact",
+      "_matrix_row": "Criar Prova",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "negado" },
+        "motorista":    { "acesso": "negado" },
+        "clicheria":    { "acesso": "negado" }
+      }
+    },
+    {
+      "key": "usuarios",
+      "path": "/usuarios",
+      "match": "prefix",
+      "_matrix_row": "Cadastro de Usuarios",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "negado" },
+        "motorista":    { "acesso": "negado" },
+        "clicheria":    { "acesso": "negado" }
+      }
+    },
+    {
+      "key": "relatorios",
+      "path": "/relatorios",
+      "match": "prefix",
+      "_matrix_row": "Relatorios",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "negado" },
+        "motorista":    { "acesso": "negado" },
+        "clicheria":    { "acesso": "negado" }
+      }
+    },
+    {
+      "key": "configuracoes",
+      "path": "/configuracoes",
+      "match": "prefix",
+      "_matrix_row": "Configuracoes do Sistema",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "negado" },
+        "motorista":    { "acesso": "negado" },
+        "clicheria":    { "acesso": "negado" }
+      }
+    },
+    {
+      "key": "auditoria",
+      "path": "/auditoria",
+      "match": "prefix",
+      "_matrix_row": "Log de Auditoria",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "negado" },
+        "motorista":    { "acesso": "negado" },
+        "clicheria":    { "acesso": "negado" }
+      }
+    },
+    {
+      "key": "provas.cancel",
+      "path": "(action)",
+      "match": "action",
+      "_matrix_row": "Cancelar Prova (acao em /provas/[id])",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "negado" },
+        "motorista":    { "acesso": "negado" },
+        "clicheria":    { "acesso": "negado" }
+      }
+    },
+    {
+      "key": "provas.restart",
+      "path": "(action)",
+      "match": "action",
+      "_matrix_row": "Reiniciar Ciclo (acao em /provas/[id])",
+      "perfis": {
+        "studio_admin": { "acesso": "full" },
+        "vendedor":     { "acesso": "negado" },
+        "motorista":    { "acesso": "negado" },
+        "clicheria":    { "acesso": "negado" }
+      }
+    }
+  ]
+}
