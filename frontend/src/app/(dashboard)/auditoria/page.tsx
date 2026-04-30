@@ -206,6 +206,9 @@ function AuditoriaPageInner() {
   const [usuarios, setUsuarios] = useState<UsuarioResponse[]>([]);
 
   useEffect(() => {
+    // Wave 1 v4.0: este check NAO e RBAC — o guard via useAuthorization
+    // ja bloqueou o render para nao-admin acima. E apenas otimizacao
+    // (evitar GET /users/ se /me ainda nao retornou).
     if (!me?.is_admin) return;
     const controller = new AbortController();
     async function fetchUsuarios() {

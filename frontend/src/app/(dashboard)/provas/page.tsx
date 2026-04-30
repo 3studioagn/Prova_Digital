@@ -23,6 +23,7 @@ import type {
   UsuarioListResponse,
   UsuarioResponse,
 } from "@/lib/types/usuario";
+import { useAuthorization } from "@/lib/hooks/use-authorization";
 import styles from "./provas.module.css";
 
 // C07 B1 (auditoria externa Wave 2): `MeResponse` extraido para
@@ -221,7 +222,12 @@ function ProvasPageInner() {
     !!urlFilters.cliente ||
     !!urlFilters.busca;
 
-  const showVendedorFilter = me?.is_admin === true;
+  // Wave 1 v4.0: filtro de vendedor so para perfis com acesso 'full' a
+  // /provas (admin). Vendedor/motorista/clicheria sao 'parcial' e ja veem
+  // apenas o subconjunto definido pela Matriz — filtrar por vendedor_id
+  // alheio nao faz sentido para eles.
+  const provasListAuth = useAuthorization("provas.list");
+  const showVendedorFilter = provasListAuth.level === "full";
 
   return (
     <>
