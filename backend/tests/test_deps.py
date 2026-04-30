@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
-from app.api.deps import get_admin_user, get_current_user, require_role
+from app.api.deps import get_admin_user, get_current_user
 from app.core.config import settings
 from app.db.models import LocalizacaoEnum, SetorEnum, Usuario
 from tests.conftest import make_user
@@ -135,27 +135,6 @@ async def test_get_admin_user_non_admin_raises_403():
     assert "administradores" in exc.value.detail.lower()
 
 
-# ── require_role ─────────────────────────────────────────────────────────────
-
-
-async def test_require_role_allows_matching_setor():
-    dep = require_role(SetorEnum.MOTORISTA)
-    motorista = make_user(setor=SetorEnum.MOTORISTA)
-    result = await dep(user=motorista)
-    assert result is motorista
-
-
-async def test_require_role_allows_one_of_many():
-    dep = require_role(SetorEnum.MOTORISTA, SetorEnum.CLICHERIA)
-    cliche = make_user(setor=SetorEnum.CLICHERIA)
-    result = await dep(user=cliche)
-    assert result is cliche
-
-
-async def test_require_role_blocks_wrong_setor():
-    dep = require_role(SetorEnum.MOTORISTA)
-    studio = make_user(setor=SetorEnum.STUDIO)
-    with pytest.raises(HTTPException) as exc:
-        await dep(user=studio)
-    assert exc.value.status_code == 403
-    assert "perfil" in exc.value.detail.lower()
+# require_role removido na Wave 1 v4.0 — factory nunca usado em producao.
+# Endpoints novos usam app.access.access_required(rule_key) que consulta
+# a Matriz de Acesso unificada (shared/access-matrix.json).

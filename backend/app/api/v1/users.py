@@ -1,7 +1,22 @@
 """Users CRUD router — Componente 04 do Backlog.
 
 All endpoints under /api/v1/users.
-Admin-only unless specified otherwise.
+
+Autorizacao (Wave 1 v4.0):
+  - GET /me                      -> qualquer logado (universal).
+  - GET /{id} (self ou admin)    -> nao mapeado na Matriz por ser uma
+                                    invariante de leitura ('self ou admin'),
+                                    nao uma celula de pagina. Continua
+                                    usando `get_current_user` + check
+                                    inline (ver linha 192-193).
+  - POST /, GET /, PATCH /{id},
+    DELETE /{id}                 -> `access_required("usuarios")` —
+                                    celula "Cadastro de Usuarios" da
+                                    Matriz (Secao 6 do RequisitosV4).
+                                    3Studio = full; demais = negado.
+
+RN-010 (admin nao remove proprio acesso, sistema mantem >= 1 admin)
+permanece como regra de negocio em PATCH/DELETE — NAO e RBAC de pagina.
 """
 import logging
 from uuid import UUID
@@ -10,7 +25,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_admin_user, get_current_user
+from app.access import access_required
+from app.api.deps import get_current_user
 from app.core.supabase_admin import (
     create_auth_user,
     delete_auth_user,
@@ -63,7 +79,7 @@ async def get_me(user: Usuario = Depends(get_current_user)):
 async def create_user(
     body: UserCreate,
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("usuarios")),
 ):
     """Create a new user (admin only).
 
@@ -130,7 +146,7 @@ async def create_user(
 @router.get("/", response_model=UserListResponse)
 async def list_users(
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("usuarios")),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     setor: SetorEnum | None = Query(None),
@@ -202,7 +218,7 @@ async def update_user(
     user_id: UUID,
     body: UserUpdate,
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("usuarios")),
 ):
     """Update user fields (admin only). Enforces RN-010."""
     result = await db.execute(select(Usuario).where(Usuario.id == user_id))
@@ -350,7 +366,7 @@ async def update_user(
 async def deactivate_user(
     user_id: UUID,
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("usuarios")),
 ):
     """Soft delete: set ativo=false (admin only). Enforces RN-010.
 

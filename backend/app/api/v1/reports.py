@@ -11,7 +11,10 @@ Estrategia 'minimizar queries' (WAVE5_ANALYSIS §4.4):
   - SQLAlchemy compiled cache (gratuito).
   - Realtime invalida cache do front (Wave 4 reuse).
 
-RBAC: todos os endpoints exigem `is_admin=true` (US-014).
+RBAC (Wave 1 v4.0): todos os endpoints exigem
+`access_required("relatorios")` — corresponde a celula "Relatorios" da
+Matriz de Acesso (Secao 6 do RequisitosProvasDigitais_v4_0.docx).
+3Studio = full; demais perfis = negado (US-014).
 
 Auditoria (RNF-005, ADR-095/099):
   - GET /reports: NAO loga (consulta cacheada e idempotente).
@@ -53,7 +56,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_admin_user
+from app.access import access_required
 from app.db.models import (
     ConfiguracaoSistema,
     LocalizacaoEnum,
@@ -1070,7 +1073,7 @@ async def get_report(
         ),
     ),
     db: AsyncSession = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_user),
+    current_user: Usuario = Depends(access_required("relatorios")),
 ):
     """Retorna o relatorio para o `scope` requisitado (US-014, RBAC admin).
 
@@ -1156,7 +1159,7 @@ async def export_report(
     rota: RotaEnum | None = Query(None),
     status_filter: StatusProvaEnum | None = Query(None, alias="status"),
     db: AsyncSession = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_user),
+    current_user: Usuario = Depends(access_required("relatorios")),
 ) -> StreamingResponse:
     """Exporta relatorio em CSV (UTF-8 com BOM, Excel-compatible).
 

@@ -64,11 +64,12 @@
       "path": "/provas",
       "match": "exact",
       "_matrix_row": "Listagem de Provas",
+      "_clicheria_divergence_note": "Matriz Secao 6 literal diz Clicheria = full ('3Studio e Clicheria veem todas'). Hoje em producao (v3.0) Clicheria e PARCIAL com filtro por status_clicheria — mesma semantica de pol_provas_select desde RLS 005/006. A Wave 1 v4.0 mantem o comportamento conservador (parcial) para nao alterar produto sem autorizacao explicita. Follow-up obrigatorio na primeira oportunidade: confirmar com solicitante se Clicheria deve passar a ver todas (como diz a Matriz literal) ou se a Matriz deve ser ajustada para refletir o filtro por status. Ver DECISIONS.md.",
       "perfis": {
         "studio_admin": { "acesso": "full" },
         "vendedor":     { "acesso": "parcial", "scope": "self_vendedor" },
         "motorista":    { "acesso": "parcial", "scope": "status_motorista_em_transito" },
-        "clicheria":    { "acesso": "full" }
+        "clicheria":    { "acesso": "parcial", "scope": "status_clicheria" }
       }
     },
     {
@@ -76,11 +77,12 @@
       "path": "/provas/[id]",
       "match": "dynamic",
       "_matrix_row": "Visualizacao de Prova (detalhe) + Timeline",
+      "_clicheria_divergence_note": "Espelha provas.list — ver nota acima.",
       "perfis": {
         "studio_admin": { "acesso": "full" },
         "vendedor":     { "acesso": "parcial", "scope": "self_vendedor" },
         "motorista":    { "acesso": "parcial", "scope": "status_motorista_em_transito" },
-        "clicheria":    { "acesso": "full" }
+        "clicheria":    { "acesso": "parcial", "scope": "status_clicheria" }
       }
     },
     {

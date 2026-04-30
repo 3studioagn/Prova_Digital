@@ -10,10 +10,14 @@ Implementa RNF-005: leitura imutavel do log de auditoria, restrito ao perfil
   - GET /api/v1/audit-log/by-prova/{id} -> historico cronologico por prova
 
 RBAC em tres camadas (defesa em profundidade):
-  1. Middleware: `Depends(get_admin_user)` em todos os endpoints — 401 sem
-     token, 403 sem is_admin=true, antes de qualquer query DB.
-  2. RLS pol_audit_select (RLS 005) bloqueia clientes nao-bypassrls.
-  3. Frontend guard de menu condicional ao is_admin (defesa de UX).
+  1. Middleware (Wave 1 v4.0): `Depends(access_required("auditoria"))` em
+     todos os endpoints — corresponde a celula "Log de Auditoria" da
+     Matriz de Acesso. 401 sem token, 403 sem is_admin=true, antes de
+     qualquer query DB.
+  2. RLS pol_audit_select (RLS 010 + 012 — Wave 1 v4.0) bloqueia
+     clientes nao-bypassrls via app_private.current_user_is_admin().
+  3. Frontend guard de menu condicional ao is_admin via
+     useAuthorization('auditoria') (Wave 1 v4.0 — defesa de UX).
 
 Sem cache: a UI de auditoria precisa refletir o estado atual em tempo real
 (admin pode estar investigando incidente). `Cache-Control: no-store`.
@@ -32,7 +36,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, st
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_admin_user
+from app.access import access_required
 from app.db.models import Usuario
 from app.db.session import get_db
 from app.domain.schemas.audit_log import (
@@ -123,7 +127,7 @@ async def list_audit_logs(
     acao: str | None = Query(None, max_length=100),
     tipo_evento: str | None = Query(None, max_length=20),
     q: str | None = Query(None, max_length=MAX_Q_LENGTH),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("auditoria")),
     db: AsyncSession = Depends(get_db),
 ) -> AuditLogListResponse:
     """Lista registros de audit_logs com filtros + paginacao.
@@ -225,7 +229,7 @@ async def list_audit_logs_by_prova(
     response: Response,
     prova_id: uuid.UUID = Depends(parse_prova_id_path),
     sort: str = Query("asc", pattern="^(asc|desc)$"),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("auditoria")),
     db: AsyncSession = Depends(get_db),
 ) -> AuditLogListResponse:
     """Lista todos os audit_logs de uma prova especifica, em ordem cronologica.
@@ -287,7 +291,7 @@ async def list_audit_logs_by_prova(
 async def get_audit_log_detail(
     response: Response,
     audit_log_id: uuid.UUID = Depends(parse_audit_id),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("auditoria")),
     db: AsyncSession = Depends(get_db),
 ) -> AuditLogDetailResponse:
     """Carrega detalhe de um audit_log, com enriquecimento opcional.

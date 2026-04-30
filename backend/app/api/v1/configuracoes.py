@@ -5,10 +5,15 @@ Endpoints:
   - GET   /api/v1/configuracoes/{chave}   -> ConfiguracaoResponse
   - PATCH /api/v1/configuracoes/{chave}   -> ConfiguracaoResponse
 
-Autorizacao: todos os endpoints exigem `get_admin_user` (RF-021 + RF-019).
-RLS ja esta ativa em `public.configuracoes_sistema` com policies admin-only
-(pol_config_select, pol_config_update), mas o backend usa service_role e
-bypassa RLS — a checagem principal e via dependency FastAPI.
+Autorizacao (Wave 1 v4.0): todos os endpoints exigem
+`access_required("configuracoes")` — corresponde a celula da Matriz de
+Acesso (Secao 6 do RequisitosProvasDigitais_v4_0.docx, linha
+"Configuracoes do Sistema"). 3Studio = full; demais perfis = negado.
+
+RLS ja esta ativa em `public.configuracoes_sistema` com policies
+admin-only (pol_config_select, pol_config_update — ver migrations RLS
+009/010/012), mas o backend usa service_role e bypassa RLS — a
+checagem primaria e via dependency FastAPI.
 
 Chaves editaveis (ADR-043): whitelist estatica em
 `app.domain.schemas.configuracao.EDITABLE_KEYS`. Chaves novas precisam de
@@ -20,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_admin_user
+from app.access import access_required
 from app.db.models import ConfiguracaoSistema, Usuario
 from app.db.session import get_db
 from app.domain.schemas.configuracao import (
@@ -45,7 +50,7 @@ router = APIRouter()
 @router.get("/", response_model=ConfiguracaoListResponse)
 async def list_configuracoes(
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("configuracoes")),
 ) -> ConfiguracaoListResponse:
     """Lista todas as configuracoes do sistema (admin-only).
 
@@ -88,7 +93,7 @@ async def list_configuracoes(
 async def get_configuracao(
     chave: str,
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("configuracoes")),
 ) -> ConfiguracaoResponse:
     """Retorna uma configuracao especifica (admin-only).
 
@@ -147,7 +152,7 @@ async def update_configuracao(
     body: ConfiguracaoUpdateRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("configuracoes")),
 ) -> ConfiguracaoResponse:
     """Atualiza uma configuracao especifica (admin-only).
 

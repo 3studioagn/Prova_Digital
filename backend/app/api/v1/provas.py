@@ -52,7 +52,8 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_admin_user, get_current_user
+from app.access import access_required, scope_filter_for
+from app.api.deps import get_current_user
 from app.core.r2 import r2_delete
 from app.db.models import (
     AuditLog,  # noqa: F401
@@ -190,7 +191,7 @@ def parse_prova_id(
 async def create_upload_url(
     body: UploadUrlRequest,
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("provas.create")),
 ) -> UploadUrlResponse:
     """Gera uma URL pre-assinada para o frontend fazer PUT direto no R2.
 
@@ -369,7 +370,7 @@ async def create_prova(
     body: ProvaCreateRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("provas.create")),
 ) -> ProvaCreateResponse:
     """Cria uma prova digital apos upload confirmado no R2."""
     # (a) Unicidade do nro_requerimento — race window entre /upload-url e aqui.
@@ -660,20 +661,16 @@ def _escape_ilike(term: str) -> str:
 def _scoping_filter(user: Usuario):
     """Retorna a clausula WHERE base que restringe provas por setor.
 
-    Retorna `None` quando nao ha restricao (admin). Retorna uma clausula
-    `false` explicita para combinacoes nao suportadas (scoping defensivo).
+    Wave 1 v4.0: delega para `scope_filter_for("provas.list", user)` que le
+    a Matriz de Acesso unificada (shared/access-matrix.json) e devolve a
+    clausula correspondente ao escopo do perfil. Implementacao centralizada
+    em app/access/scopes.py — espelha as policies RLS 010/012.
+
+    Retorna `None` quando nao ha restricao (admin/full). Retorna uma
+    clausula `false` para combinacoes nao mapeadas (defensivo, garante 0
+    resultados).
     """
-    if user.is_admin:
-        return None
-    if user.setor == SetorEnum.VENDEDOR:
-        return ProvaDigital.vendedor_id == user.id
-    if user.setor == SetorEnum.MOTORISTA:
-        return ProvaDigital.status == StatusProvaEnum.COM_MOTORISTA
-    if user.setor == SetorEnum.CLICHERIA:
-        return ProvaDigital.status.in_(CLICHERIA_STATUSES)
-    # STUDIO sem is_admin — combinacao invalida pos-ADR-018.
-    # Retorna clausula false para garantir zero resultados.
-    return func.false()
+    return scope_filter_for("provas.list", user)
 
 
 @router.get("/", response_model=ProvaListResponse)
@@ -2031,7 +2028,7 @@ async def cancelar_prova(
     request: Request,
     prova_id: uuid.UUID = Depends(parse_prova_id),
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("provas.cancel")),
 ) -> TransicaoResponse:
     """RF-010 + RN-005: cancelamento com motivo obrigatorio, admin-only."""
     # (a) Carrega a prova com FOR UPDATE.
@@ -2156,7 +2153,7 @@ async def reiniciar_ciclo_prova(
     request: Request,
     prova_id: uuid.UUID = Depends(parse_prova_id),
     db: AsyncSession = Depends(get_db),
-    admin: Usuario = Depends(get_admin_user),
+    admin: Usuario = Depends(access_required("provas.restart")),
 ) -> TransicaoResponse:
     """RF-008 + RN-006: reinicio de ciclo admin-only, preserva historico."""
     # (a) Carrega a prova com FOR UPDATE.
