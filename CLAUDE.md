@@ -17,11 +17,13 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **4 — Dashboard + Atrasos** | ✅ **COMPLETA** + Auditoria Senior | Dashboard tempo real (RF-014, US-013) com layout Figma: 5 contadores (criadas hoje, com vendedor, aprovadas, na clicheria, atrasadas c/ breakdown por vendedor) + 2 atalhos rapidos. Query consolidada + cache TTL 5s (ADR-092). Calculo de atraso horas corridas (RN-008). Supabase Realtime (postgres_changes) + fallback polling 10s. Auditoria: 0 CRITICAL, 1 HIGH corrigido (click Na clicheria), 2 MEDIUM corrigidos (breakpoint mobile, GROUP BY), 2 LOW corrigidos (ValueError guard, CHANGELOG). ADR-094 | — |
 | **5 — Relatorios + Atalhos** | ✅ **COMPLETA** + Visual Refresh + 2 rounds de Auditoria Senior | Componente 16 (Relatorios) + Componente 17 (Atalhos). Endpoint UNICO discriminado por scope (geral/3studio/vendedores/clicheria) com cache TTL 60s + ETag SHA-256 + Realtime invalidation (4 camadas, ~20x reducao queries) + bypass `?_force=1` (ADR-107). Frontend `/relatorios` com 4 perspectivas alinhadas ao design Mario, graficos SVG inline interativos (DonutChart com toggle ADR-108 + BarChart + TimeSeriesChart + Sparkline + DeltaBadge). 5 filtros UI completos por construcao (RotaFilter + StatusFilter + VendedorFilter + DateRangeFilter + SearchInput — RF-013, ADR-106). CSV streaming UTF-8 BOM com 4 datasets enriquecidos (taxas + tempo medio por vendedor — L-A1 Round 2) + audit `REPORT_EXPORTED`. Atalhos globais por teclado (g+s, g+p, g+r admin, ?) + 3º card "Acessar Relatorios" no dashboard. **Round 2 de auditoria senior** (2026-04-29) corrigiu H-A1 (Q4 do `_aggregate_geral` agora aplica filtros via JOIN + `_aplicar_filtros_provas`), M-A1 (Q5 do `_aggregate_3studio` cancelamentos_top tambem), M-F1 (a11y modal sem `aria-hidden` no overlay), L-A1 (CSV summary expoe taxas) e L-F1 (`useMemo` em visibleShortcuts) — ADR-109. ADRs 095-109 (095-101 closeout + 102-105 visual refresh + 106-108 audit Round 1 + 109 audit Round 2). Migration 010 (recovery) + 011 (clarify descricao). **639 testes** (era 424); 0 regressao. | 5.0-5.6 + Visual Refresh + Audit R1 + Audit R2 |
 | **6 — Seguranca e Auditoria** | ✅ **COMPLETA** + UX iteration + Auditoria Senior | Componente 18 (Interface de Log de Auditoria) — RNF-005. 3 endpoints `/api/v1/audit-log` (listagem paginada com filtros, detalhe com `MovimentacaoSnapshot`, by-prova). Frontend `/auditoria` admin-only com filtros (busca, tipo_evento semantico, ator, periodo), drawer lateral com focus trap, atalho `g a`, badges coloridos por categoria (reprovacao/reinicio/cancelamento/criacao). RLS 008 (REVOKE INSERT/UPDATE/DELETE em `audit_logs` para `anon`/`authenticated` — defesa em profundidade RNF-005, terceira camada apos trigger e RLS deny-by-default). UX iteration pos-Gate 2: presets de data (Hoje/7d/30d/90d), tipo_evento (6 categorias semanticas), paginacao numerada com janela inteligente, sticky header, ordenacao clicavel, page size selector (whitelist + tiebreaker por id). Auditoria Senior (2026-04-29): 0 CRITICAL, 2 HIGH (focus trap + F401 unused), 4 MEDIUM (ruff I001 + Pydantic 422 + Pragma legacy + OUTERJOIN condicional), 4 LOW (shadowing id + magic number + label botao + catch silencioso) — todos corrigidos. ADRs 110-114. **724 testes** (era 633); 0 regressao. | — |
+| **v4.0 W1 — RBAC Matriz** | ✅ **COMPLETA** | Componente 05 (atualizacao v4.0) — Matriz de Acesso por Perfil em 3 camadas independentes. SSoT em `shared/access-matrix.json` (12 regras x 4 perfis = 48 celulas). Camada Python: `backend/app/access/` (matrix + enforce + scopes + guards) + 36 testes. Camada Frontend: `lib/access-matrix.ts` + `lib/hooks/use-authorization.ts` + `components/Restricted` + `components/AuthToast` + middleware reescrito com lookup de perfil + cache LRU 30s + cookie `auth-toast` em redirect. Camada RLS: 4 migrations (009-012) — helpers SECURITY DEFINER em schema `app_private` (resolve advisor `*_security_definer_function_executable`) + rebase das 12 policies + extensao de `pol_etiquetas_select` para Motorista/Clicheria (lacuna L-RLS-1). Refactor coordenado: substituicao de `Depends(get_admin_user)` por `Depends(access_required(rule_key))` em audit_log/reports/configuracoes/users/provas; `_scoping_filter` delega para `scope_filter_for`; `require_role` removido. Frontend: guards proativos em /auditoria, /relatorios (promovido de reativo), /usuarios, /configuracoes, /nova-prova; layout consulta Matriz para esconder itens; `useGlobalShortcuts` deriva da Matriz. Validado via `scripts/verify_rbac_equivalence.py` em producao (3 camadas batem: admin 16/16, vendedor 0, motorista 0, clicheria 2). **757 testes** (era 724 + 36 novos - 3 removidos). Decisao a confirmar: Clicheria PARCIAL com scope `status_clicheria` mantida (Matriz literal diz FULL — registrado follow-up). | — |
 
 **Estado atual do banco de producao:**
-- `alembic_version = 011` (migration 011 aplicada no closeout da Wave 5, 2026-04-27 — ADR-099 cosmetica). Wave 6 nao criou Alembic.
+- `alembic_version = 011` (migration 011 aplicada no closeout da Wave 5, 2026-04-27 — ADR-099 cosmetica). Wave 6 nao criou Alembic. Wave 1 v4.0 nao criou Alembic.
 - **6 tabelas de dominio** + `alembic_version` (todas com RLS habilitada)
-- **12 policies RLS** otimizadas com `(SELECT auth.uid())` (ADR-029 + ADR-082: +1 `pol_movimentacoes_insert` + `pol_movimentacoes_select` expandida para MOTORISTA/CLICHERIA). Wave 6 nao criou policy nova.
+- **Schema `app_private`** (Wave 1 v4.0, RLS 012): 3 funcoes helper SECURITY DEFINER `current_user_is_admin()` / `current_user_setor()` / `current_user_id()` referenciadas pelas 12 policies. Schema NAO listado em `db-schemas` do PostgREST (nao exposto via REST).
+- **12 policies RLS** reescritas na Wave 1 v4.0 usando os helpers. Cobertura semantica preservada vs RLS 005/006; `pol_etiquetas_select` estendida para incluir Motorista (status COM_MOTORISTA) e Clicheria (clicheria-states) — fecha lacuna L-RLS-1.
 - **`audit_logs` com 3 camadas de defesa** (RNF-005): trigger `trg_audit_logs_imutavel` (Wave 0) + RLS deny-by-default `pol_audit_select` admin-only (Wave 0/1/2) + REVOKE GRANT-level INSERT/UPDATE/DELETE para `anon`/`authenticated` (Wave 6, RLS 008 — ADR-112). `service_role` mantem GRANT.
 - **32 indexes** cobrindo filtros dos Componentes 07 + relatorios da Wave 5 (migration 010: +`idx_provas_vendedor_status` +`idx_movimentacoes_status_novo_created_at` — ADR-095). Wave 6 nao criou indice (4 indices em `audit_logs` ja cobrem; advisor `unused_index` deve cair conforme uso real).
 - **3 usuarios ativos**: 2 admins (`admin@3studio.com.br` + `ops@3studio.com.br`) + 1 vendedor FILIAL (`mariosouza@teste.com.br`)
@@ -358,3 +360,70 @@ para usuarios mouse-only:
 
 Esses 3 cards estao no `shortcutsCell` (col 1, row 3 do grid Figma do
 Dashboard — Wave 4 ADR-093 expandido pelo Componente 17 da Wave 5).
+
+---
+
+## RBAC: como adicionar uma nova pagina (Wave 1 v4.0 — Componente 05)
+
+A Matriz de Acesso vive em **`shared/access-matrix.json`** — fonte unica
+de verdade espelhada por TS/Python/RLS. Para adicionar uma nova pagina:
+
+1. **Editar `shared/access-matrix.json`** acrescentando 1 entrada em
+   `rules`. Campos obrigatorios:
+   - `key`: nome curto kebab-case (ex.: `relatorios.export-mensal`).
+   - `path`: caminho real do App Router (ex.: `/relatorios/exportacao`).
+   - `match`: `"exact"` | `"prefix"` | `"dynamic"` | `"action"`.
+   - `perfis`: objeto com decisao para os 4 perfis
+     (`studio_admin`, `vendedor`, `motorista`, `clicheria`). Cada
+     decisao tem `acesso` (`"full"`/`"parcial"`/`"negado"`) e, se
+     parcial, `scope` (um dos 3 kinds em `scope_kinds`).
+
+2. **Atualizar `EXPECTED_KEYS` em `backend/tests/access/test_matrix_structure.py`**
+   para incluir a nova chave. Se for chave cuja regra nao se encaixa nas
+   semanticas existentes (ex.: novo scope kind), atualizar tambem
+   `VALID_SCOPES` + adicionar branch no `scope_filter_for` em
+   `backend/app/access/scopes.py`.
+
+3. **No backend**, no endpoint correspondente:
+   ```python
+   from app.access import access_required, scope_filter_for
+
+   @router.get("/")
+   async def listar(user: Usuario = Depends(access_required("nova.chave"))):
+       scope = scope_filter_for("nova.chave", user)  # so para parcial
+       ...
+   ```
+
+4. **No frontend**, na pagina:
+   ```tsx
+   const auth = useAuthorization("nova.chave");
+   if (!auth.loading && !auth.hasAccess) {
+     return <Restricted ruleKey="nova.chave" profile={auth.profile} />;
+   }
+   ```
+
+5. **Se a pagina deve aparecer no menu** (`(dashboard)/layout.tsx`),
+   adicionar entrada em `MAIN_NAV` ou `SECONDARY_NAV` com o campo
+   `ruleKey` apontando para a nova chave. A filtragem
+   `isNavItemVisible` cuidara da visibilidade.
+
+6. **Se a tabela do banco precisa de proteção nova ou diferente**, criar
+   migration RLS em `backend/migrations/rls/` referenciando os helpers
+   `app_private.current_user_is_admin()` / `_setor()` / `_id()`. PR deve
+   incluir as 3 camadas no mesmo commit (regra do projeto — risco R-1
+   da analysis).
+
+7. **Validar via `scripts/verify_rbac_equivalence.py`** com
+   `DATABASE_URL` setado: o script insere 4 usuarios smoke, impersona
+   role authenticated via `set_config request.jwt.claims`, conta linhas
+   visiveis por perfil em `provas_digitais` e compara com o esperado da
+   Matriz. Cleanup automatico no final.
+
+**Importante:**
+- NUNCA criar `if user.is_admin` ou `Depends(get_admin_user)` em
+  endpoints novos. Use `access_required(rule_key)`.
+- NUNCA escrever filtragem por `setor` direto em queries SQLAlchemy.
+  Use `scope_filter_for(rule_key, user)`.
+- `get_admin_user` continua existindo mas e legacy — apenas para
+  invariantes de negocio que NAO sao celula da Matriz (ex.: RN-010 em
+  `users.py`).

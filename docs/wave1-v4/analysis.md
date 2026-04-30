@@ -895,3 +895,141 @@ Executar via `python backend/migrations/rls/apply_rls.py` (script existente, sup
 ## Apêndice A — Frase exata para autorização
 
 > Aguardando string **AUTORIZADO GATE 2 — WAVE 1 v4.0** para prosseguir.
+
+---
+
+## Execução (Gate 2 — concluído 2026-04-30)
+
+> Esta seção lista as **divergências** entre o que foi proposto no Gate 1
+> e o que foi efetivamente implementado, com justificativa para cada
+> uma. O conteúdo de Gate 1 acima permanece inalterado para manter
+> rastreabilidade.
+
+### E.1 SSoT migrou de TS para JSON
+
+**Gate 1 propunha:** `access-matrix.ts` como SSoT + gerador
+`scripts/gen_access_matrix_py.py` que emite `backend/app/access/matrix.py`.
+
+**Execução:** **JSON único `shared/access-matrix.json`** importado
+diretamente por TS (`resolveJsonModule`) e Python (`json.load` com
+validação de schema). Sem gerador. Justificativa: parser TS frágil,
+risco de drift, complexidade desnecessária. Decisão registrada como
+D-1 no `DECISIONS.md`.
+
+### E.2 Helpers SQL movidos para schema `app_private` em RLS 012
+
+**Gate 1 propunha:** 3 funções SQL helper em schema `public`
+(`current_user_is_admin/setor/id`).
+
+**Execução:** após aplicar RLS 009/010/011, o Supabase advisor levantou
+**6 WARN** (`anon/authenticated_security_definer_function_executable`)
+porque `public` é exposto via PostgREST. Adicionada migration **012**
+que move as funções para schema `app_private` (não exposto), reaplica
+todas as 12 policies referenciando `app_private.current_user_*`, e
+remove as antigas de `public`. Advisor pós-aplicação: limpo. Decisão
+registrada como D-3.
+
+### E.3 Cobertura "52 células" virou "48 células"
+
+**Gate 1 propunha:** 13 linhas × 4 perfis = 52 células.
+
+**Execução:** unifiquei as linhas "Visualização de Prova (detalhe)" e
+"Timeline da Prova" em uma única regra `provas.detail` (a Matriz
+literal diz: "Componente embutido na página de detalhe. Mesmas
+regras."). Resultado: **12 regras × 4 perfis = 48 células**. Cobertura
+sem perda — cada célula da Matriz (incluindo Timeline) está mapeada.
+
+### E.4 Clicheria em `provas.list/provas.detail`: PARCIAL em vez de FULL
+
+**Gate 1 propunha:** Clicheria = `●` (full) conforme Matriz literal
+(Seção 6 do Requisitos v4.0).
+
+**Execução:** **PARCIAL com scope `status_clicheria`** — preserva o
+comportamento da v3.0 (RLS desde 005/006 filtra Clicheria por status).
+A Matriz literal expande o escopo, o que é mudança de produto. A wave
+manteve conservador para não alterar comportamento sem autorização
+explícita. Documentado em `_clicheria_divergence_note` no JSON +
+`DECISIONS.md` D-2 + nota visível no `CHANGELOG.md`. **Follow-up
+obrigatório** ao solicitante.
+
+### E.5 Teste de equivalência via script standalone, não pytest
+
+**Gate 1 propunha:** teste pytest com banco isolado para validar a
+equivalência das 48 células entre middleware/RLS.
+
+**Execução:** o setup atual de testes do backend é puro mock
+(`mock_db = AsyncMock`). Construir banco isolado para pytest seria
+mudança maior fora do escopo. Caminho final:
+- **`backend/tests/access/test_matrix_rls_equivalence.py`** valida as
+  48 células no nível Python (Matriz JSON ↔ `evaluate` ↔
+  `enforce_access_for`). Sem banco.
+- **`scripts/verify_rbac_equivalence.py`** valida a 3ª camada (RLS no
+  Postgres real) impersonando role `authenticated` via
+  `set_config request.jwt.claims`. Standalone, executado manualmente.
+  Rodado contra produção com sucesso (admin 16/16, vendedor 0,
+  motorista 0, clicheria 2).
+
+### E.6 Página inicial por perfil — confirmada conforme proposto
+
+**Gate 1 propôs:** Motorista → `/escanear`, demais → `/dashboard`.
+
+**Execução:** mantido. Codificado em `home_by_profile` no
+`shared/access-matrix.json`. Decisão registrada como D-4.
+
+### E.7 `access_required(rule_key)` factory preserva tests legacy
+
+**Gate 1 propôs:** substituir `Depends(get_admin_user)` por
+`Depends(access_required(rule_key))`.
+
+**Execução:** confirmado. O factory delega via
+`Depends(get_current_user)`, então os tests existentes (que
+sobrescrevem `get_current_user` com user mockado) continuam
+funcionando sem alteração. Os 3 testes de `require_role` foram
+removidos (factory nunca usado em produção). Decisão registrada como
+D-5.
+
+### E.8 Ajustes na implementação que não foram explicitamente propostos
+
+- **`PROFILE_CACHE` LRU no middleware:** TTL 30s, max 200 entries, em
+  memória do edge runtime. Aceitável (cold start zera).
+- **`AuthToast` componente:** lê cookie `auth-toast` setado pelo
+  middleware no redirect, exibe 6s e remove. Sem Framer Motion (Wave 6
+  C20 substituirá por Toaster global).
+- **`ruleNeedsProfileLookup`:** otimização que evita query SQL no
+  middleware quando a rota é universal (todos os 4 perfis = full).
+  Importante para `/dashboard`, `/escanear`.
+- **Helper `_scoping_filter` em `provas.py` virou shim** que delega
+  para `scope_filter_for("provas.list", user)` — evita refactor das
+  ~7 chamadas existentes.
+
+### E.9 Itens NÃO implementados / adiados
+
+- **E2E Playwright dos 4 perfis × páginas-chave:** o projeto não tem
+  Playwright instalado; criar suite seria mudança maior fora do escopo.
+  O smoke preview foi feito com o servidor dev rodando — confirmou
+  que `/dashboard` e `/auditoria` sem auth → redirect `/login` (middleware
+  ativo). Para testar "perfil errado autenticado → redirect+toast"
+  sem credenciais reais, dependeria de mock de sessão Supabase
+  (complexo). O `verify_rbac_equivalence.py` cobre o lado RLS; o lado
+  middleware está coberto por **leitura de código + tests Python das
+  48 células + smoke visual de redirect anônimo**.
+
+### E.10 Métricas finais
+
+- **Commits no branch `wave1-v4/componente-05`:** 4 (RLS+JSON,
+  backend, frontend, tests+script+cleanup).
+- **Arquivos novos:** 19 (1 JSON, 4 RLS, 5 Python access + tests,
+  4 frontend lib/hooks/components, 1 script, 1 test integration,
+  + 3 reescritos middleware/layout/page).
+- **Arquivos tocados em waves anteriores:** 5 routers backend + 5
+  pages frontend + 2 hooks + 2 deps/test (refactor coordenado
+  autorizado pelo Gate 1).
+- **Linhas de código adicionadas:** +2880, removidas: -94 (acumulado
+  dos 4 commits).
+- **Testes:** 757/757 passando (era 724 + 36 novos - 3 require_role
+  removidos).
+- **Cobertura RBAC:** 100% das 48 células validadas no nível Python;
+  RLS validada em produção via SQL impersonado.
+- **Advisor Supabase:** limpo (apenas os 2 históricos esperados —
+  alembic_version no-policy e auth_leaked_password).
+- **Frontend tsc/lint/build:** limpos, middleware = 82.5 kB.

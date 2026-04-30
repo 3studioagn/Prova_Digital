@@ -4027,3 +4027,171 @@ const trapRef = useFocusTrap<HTMLElement>(open);
   - Padrao reforcado em ADR para futuras paginas com dialogs/drawers.
   - Auditorias futuras devem checar explicitamente: todo `role="dialog"`
     deve ter `ref={useFocusTrap(open)}`.
+
+
+---
+
+# Wave 1 (v4.0) — Componente 05 (Atualizacao v4.0)
+
+Decisoes registradas durante a implementacao da Matriz de Acesso RBAC
+em 3 camadas (JSON SSoT + Python + RLS Postgres). Todas em
+`wave1-v4/componente-05`, 2026-04-30.
+
+## D-1 — JSON como SSoT em vez de TS + gerador para Python
+
+**Contexto:** o Gate 1 propunha `access-matrix.ts` como fonte unica e
+um gerador `scripts/gen_access_matrix_py.py` para emitir
+`backend/app/access/matrix.py` em paralelo. O risco identificado: parser
+TS frágil (precisaria entender `as const`, type unions, etc).
+
+**Decisao:** **JSON unico em `shared/access-matrix.json`** lido por
+ambos os lados:
+  - TS importa via `import data from "../../../shared/access-matrix.json"`
+    com `resolveJsonModule: true` no tsconfig (Next 14 suporta).
+  - Python le via `pathlib.Path + json.load` em `app/access/matrix.py`,
+    com validacao de schema no startup (FAIL FAST se JSON inconsistente).
+
+**Alternativas avaliadas:**
+  - **TS + gerador:** rejeitada (parser fragil, manutencao chata).
+  - **YAML:** rejeitada (parser yaml em TS exige dependencia nova; JSON
+    e suficiente porque o conteudo nao precisa de comentarios complexos
+    — usamos campos `_*` como comentarios in-line).
+  - **Endpoint REST que retorna a matriz:** rejeitada (round-trip extra +
+    dependencia runtime entre frontend e backend).
+
+**Consequencias:**
+  - Zero gerador, zero drift entre TS e Python por construcao.
+  - Comentarios sobre semantica vivem no proprio JSON via campos
+    `_comment`/`_matrix_row`/`_clicheria_divergence_note`.
+  - Test `test_matrix_structure.py` carrega o mesmo JSON e valida
+    estrutura/invariantes.
+
+## D-2 — Clicheria em `provas.list`/`provas.detail`: PARCIAL em vez de FULL
+
+**Contexto:** a Secao 6 do `RequisitosProvasDigitais_v4_0.docx` lista
+Clicheria como `●` (FULL) em "Listagem de Provas" e "Visualizacao de
+Prova (detalhe)". A observacao explicita diz: "3Studio e Clicheria
+veem todas. Vendedor ve apenas provas em que e o vendedor responsavel.
+Motorista ve apenas provas em estados 'Em Transito'."
+
+Entretanto, o sistema em producao (v3.0) tem RLS `pol_provas_select`
+que filtra Clicheria por `status IN (ENVIADA_PARA_CLICHERIA,
+ENCAMINHADA_A_CLICHERIA, RECEBIDA_PELA_CLICHERIA)`. Manter a Matriz
+literal expandiria o escopo da Clicheria — mudanca de produto.
+
+**Decisao:** **Manter PARCIAL com scope `status_clicheria`** na Wave 1
+v4.0. Documentar a divergencia como follow-up obrigatorio para
+confirmar com o solicitante (Renan/Mario) na primeira oportunidade.
+
+**Alternativas avaliadas:**
+  - **Alinhar com Matriz literal (FULL):** rejeitada para esta wave.
+    Mudaria comportamento de produto sem autorizacao explicita; a wave
+    deve ser conservadora ("nao cria nem remove perfis", item explicito
+    do prompt).
+  - **Pausar e perguntar:** considerada. Optou-se por seguir
+    conservador + documentar no JSON e aqui — o solicitante pode
+    decidir na review do PR.
+
+**Consequencias:**
+  - `_clicheria_divergence_note` no `shared/access-matrix.json` registra
+    a divergencia textual.
+  - Teste `test_provas_list_partial_scopes_match_v3_behaviour` afirma
+    que Clicheria=PARCIAL com scope `status_clicheria` (NAO FULL).
+  - Se aprovado expandir, mudanca = (a) JSON: trocar `parcial` por `full`
+    para clicheria em provas.list e provas.detail; (b) RLS: remover o
+    filtro de status da clausula da policy `pol_provas_select` para
+    Clicheria (e na pol_movimentacoes_select e pol_etiquetas_select);
+    (c) frontend: nada (useAuthorization continua funcionando).
+
+## D-3 — Padrao SQL das policies: `EXISTS` contra `usuarios` em vez de `auth.jwt() ->> 'setor'`
+
+**Contexto:** o `DAT_RastreioProvasDigitais_v3_0.docx` Secao 7.2 sugere
+policies usando `auth.jwt() ->> 'setor'` para evitar JOIN extra. O JWT
+do Supabase Auth atual NAO tem o claim `setor` (validado via MCP:
+`raw_app_meta_data` apenas `{provider, providers}`, `raw_user_meta_data`
+apenas `{email_verified}`).
+
+Para colocar `setor` no JWT, seria necessario configurar Custom Access
+Token Hook na config do Supabase Auth — fora do escopo da Wave 1 v4.0
+(toca configuracao de Auth, nao codigo da app).
+
+**Decisao:** **Manter o padrao atual** (subquery `EXISTS` contra
+`public.usuarios`), encapsulado em 3 funcoes helper SECURITY DEFINER
+em schema `app_private`:
+  - `app_private.current_user_is_admin()` -> boolean
+  - `app_private.current_user_setor()` -> setor_enum
+  - `app_private.current_user_id()` -> uuid
+
+**Alternativas avaliadas:**
+  - **`auth.jwt() ->> 'setor'` literal:** rejeitada (JWT nao tem o claim).
+  - **Custom Access Token Hook + JWT enriquecido:** rejeitada para esta
+    wave (toca config Auth + e mais arriscado — JWT mal formado quebra
+    autenticacao).
+  - **Manter helpers em schema `public`:** rejeitada apos advisor levantar
+    6 WARN `*_security_definer_function_executable` (PostgREST expoe
+    via `/rest/v1/rpc/` mesmo com REVOKE). Movido para `app_private`
+    em RLS 012.
+
+**Consequencias:**
+  - Cada policy faz 1 lookup adicional contra `usuarios` (~5ms com
+    indice UNIQUE em auth_uid). Aceitavel para volumes do projeto.
+  - Funcoes STABLE permitem ao planner cachear resultado dentro de 1
+    query.
+  - Schema `app_private` nao listado em `db-schemas` do PostgREST
+    (default permanece apenas `public`).
+  - Follow-up futuro: avaliar Custom Access Token Hook se volume crescer.
+
+## D-4 — Pagina inicial por perfil: Motorista -> `/escanear`, demais -> `/dashboard`
+
+**Contexto:** o middleware antigo redirecionava qualquer authenticated
+em `/login` para `/usuarios` hardcoded. Isso e bug para vendedor/motorista/clicheria,
+que nao tem acesso a `/usuarios` (NEGADO na Matriz).
+
+A Wave 1 v4.0 precisa decidir a pagina inicial por perfil para usar nos
+redirects 302 quando acesso e negado.
+
+**Decisao:** `home_by_profile` em `shared/access-matrix.json`:
+  - **3Studio (admin)** -> `/dashboard` (visao consolidada).
+  - **Vendedor** -> `/dashboard` (contadores filtrados pelo seu escopo).
+  - **Motorista** -> `/escanear` (atividade primaria do motorista e
+    escanear QR; dashboard e secundario).
+  - **Clicheria** -> `/dashboard` (visao do que esta chegando).
+
+**Alternativas avaliadas:**
+  - `/dashboard` para todos: rejeitada — para Motorista o uso primario
+    e escanear, dashboard nao traz acao imediata.
+
+**Consequencias:**
+  - Apos login, cada perfil cai na pagina mais util para sua rotina.
+  - Em caso de redirect por acesso negado, o destino tambem respeita
+    essa preferencia.
+  - Se o solicitante preferir uniformizar em `/dashboard`, basta
+    alterar 1 entrada no `home_by_profile` do JSON.
+
+## D-5 — `access_required(rule_key)` factory mantem compat com tests legacy
+
+**Contexto:** ~30 endpoints existentes usavam `Depends(get_admin_user)`.
+Os tests sobrescrevem `app.dependency_overrides[get_admin_user] = lambda: admin`.
+Trocar `Depends` em massa quebraria todos os tests.
+
+**Decisao:** `access_required(rule_key)` factory devolve `Depends` que
+internamente chama `Depends(get_current_user)` + `enforce_access_for`.
+Como os tests SEMPRE override `get_current_user` tambem, eles
+funcionam sem alteracao — `access_required` recebe o user mockado e
+chama `enforce_access_for("rule_key", user)` que valida via Matriz.
+
+**Alternativas avaliadas:**
+  - **Refatorar tests em massa para overrider `access_required(...)`:**
+    rejeitada (cada chamada cria uma instancia diferente de Depends, override
+    por instancia e fragil; alem disso, mudaria 200+ testes).
+  - **Adicionar `enforce_access_for` no body do handler em vez de
+    Depends:** rejeitada (perde o beneficio de o gating acontecer ANTES
+    de qualquer outro Depends ser resolvido — ex.: `get_db`).
+
+**Consequencias:**
+  - Zero tests existentes alterados pelo refactor RBAC.
+  - 36 testes novos especificos para a camada `app/access/`.
+  - Padrao explicito: novos endpoints com chave da Matriz usam
+    `access_required(rule_key)`; endpoints com invariantes de negocio
+    nao mapeadas (RN-010 em users.py) continuam usando
+    `get_admin_user` direto.

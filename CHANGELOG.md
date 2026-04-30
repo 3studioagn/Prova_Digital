@@ -7957,3 +7957,147 @@ GoTrue exige campos internos que raw SQL nao popula corretamente.
 - Pooler do Supabase pode ja estar disponivel (re-testar)
 - Diretorio `backend/tests/` vazio — criar testes na Wave 1
 - Diretorios `backend/app/api/` e `backend/app/domain/` vazios — endpoints e modelos na Wave 1
+
+
+## v4.0 — Wave 1 — Componente 05 (Atualizacao v4.0)
+**Data:** 2026-04-30
+**Branch:** `wave1-v4/componente-05`
+**Escopo:** Implementacao da Matriz de Acesso (RBAC) v4.0 em 3 camadas
+independentes — JSON SSoT + middleware Next + RLS Postgres.
+
+### Adicionado
+- `shared/access-matrix.json` — fonte unica de verdade do RBAC (12
+  regras x 4 perfis = 48 celulas). Cobre as 13 linhas da Secao 6 do
+  `RequisitosProvasDigitais_v4_0.docx` (Visualizacao + Timeline
+  unificadas em `provas.detail`).
+- `backend/migrations/rls/009_helpers_v4.sql` — 3 funcoes
+  `current_user_*()` SECURITY DEFINER (substituidas pela 012).
+- `backend/migrations/rls/010_rebase_rls_v4.sql` — reescreve as 11
+  policies existentes (sem etiquetas) usando os helpers (NO-OP
+  funcional vs RLS 005/006).
+- `backend/migrations/rls/011_etiquetas_select_motorista_clicheria.sql`
+  — fecha lacuna L-RLS-1 (Motorista + Clicheria veem etiqueta no seu
+  escopo).
+- `backend/migrations/rls/012_move_helpers_to_app_private.sql` —
+  resolve 6 advisors WARN (`anon/authenticated_security_definer_function_executable`)
+  movendo os helpers para schema `app_private` nao exposto via PostgREST.
+- `backend/app/access/__init__.py` — modulo Python que le
+  `shared/access-matrix.json` e expoe API tipada.
+- `backend/app/access/matrix.py` — Profile/Acesso/AccessRule/PerfilDecision
+  + resolve_profile (admin > setor) + evaluate + get_rule_for_key +
+  home_for_profile.
+- `backend/app/access/enforce.py` — `enforce_access_for(rule_key, user)`.
+- `backend/app/access/scopes.py` — `scope_filter_for(rule_key, user)`
+  retornando ColumnElement SQLAlchemy.
+- `backend/app/access/guards.py` — factory `access_required(rule_key)`
+  para `Depends()` em endpoints (delega via `get_current_user`,
+  preserva compat com `dependency_overrides` dos tests).
+- `backend/tests/access/` — 36 testes novos:
+  - `test_matrix_structure.py` (16): invariantes do JSON +
+    semantica v4.0 (admin sempre full, paginas admin-only negam os 3
+    nao-admin, paginas universais full p/ todos).
+  - `test_resolve_profile.py` (7): admin > setor; STUDIO sem admin
+    retorna None.
+  - `test_enforce_access_for.py` (6): 48 celulas + edge cases.
+  - `test_scope_filter_for.py` (7): clausulas SQL geradas batem com a
+    Matriz para cada perfil.
+  - `test_matrix_rls_equivalence.py` (1): validacao integrada das
+    48 celulas no nivel Python.
+- `frontend/src/lib/access-matrix.ts` — espelha `app/access/matrix.py`
+  para o lado Next via `import` nativo do JSON (resolveJsonModule).
+- `frontend/src/lib/hooks/use-authorization.ts` — hook
+  `useAuthorization(ruleKey) -> { hasAccess, level, scope, profile, loading }`.
+- `frontend/src/components/Restricted.tsx` (+ `.module.css`) —
+  componente reutilizavel "Acesso restrito".
+- `frontend/src/components/AuthToast.tsx` (+ `.module.css`) — le cookie
+  `auth-toast` setado pelo middleware quando redireciona, exibe 6s.
+- `scripts/verify_rbac_equivalence.py` — script standalone que valida
+  as 3 camadas (JSON + Python + RLS) contra um Postgres real impersonando
+  role authenticated via `set_config request.jwt.claims`. Executado
+  contra producao com sucesso (admin 16/16, vendedor 0, motorista 0,
+  clicheria 2).
+
+### Modificado
+- `backend/app/api/deps.py`:
+  - `get_admin_user` mantido como helper legacy (usado em tests +
+    invariantes RN-010 em `users.py`).
+  - `require_role` removido (factory nunca usado em producao).
+  - Docstring atualizada explicando o novo padrao
+    `app.access.access_required(rule_key)`.
+- `backend/app/api/v1/audit_log.py` — 3 endpoints: substituido
+  `Depends(get_admin_user)` por `Depends(access_required("auditoria"))`.
+- `backend/app/api/v1/configuracoes.py` — 3 endpoints idem
+  (`access_required("configuracoes")`).
+- `backend/app/api/v1/reports.py` — 2 endpoints idem
+  (`access_required("relatorios")`).
+- `backend/app/api/v1/users.py` — 4 endpoints (POST/, GET/, PATCH/{id},
+  DELETE/{id}) usam `access_required("usuarios")`. GET /me e
+  GET /{id} mantem `get_current_user` por serem invariantes "self ou
+  admin", nao celula da Matriz.
+- `backend/app/api/v1/provas.py` — 4 endpoints admin-only
+  (POST /upload-url, POST /, POST /{id}/cancelar, POST /{id}/reiniciar-ciclo)
+  usam `access_required("provas.create" / "provas.cancel" / "provas.restart")`.
+  `_scoping_filter(user)` agora delega para
+  `scope_filter_for("provas.list", user)` (fonte centralizada).
+- `backend/tests/test_deps.py` — removidos 3 testes de `require_role`.
+- `frontend/src/middleware.ts` (via `lib/supabase/middleware.ts`) —
+  reescrito com RBAC: pass-through em PUBLIC_PATHS, redirect para
+  `homeForUser` em `/login` autenticado (corrige bug L-MIDDLE-1 que
+  mandava vendedor para `/usuarios`), lookup de perfil + cache LRU
+  30s para rotas restritivas, redirect 302 + cookie `auth-toast` em
+  caso de NEGADO, header `x-rbac-scope` em PARCIAL.
+- `frontend/src/hooks/useCurrentUser.ts` — `setor` tipado como union
+  literal `Setor` (era `string`).
+- `frontend/src/hooks/useGlobalShortcuts.ts` — `SHORTCUT_DEFS` carrega
+  `ruleKey`; visibleShortcuts deriva da Matriz via `evaluateRule`.
+  Interface mudou de `{ isAdmin: boolean }` para `{ user: UserLike | null }`.
+- `frontend/src/app/(dashboard)/layout.tsx` — MAIN_NAV/SECONDARY_NAV
+  carregam `ruleKey`; filtragem via `isNavItemVisible(item, user)`
+  consulta a Matriz. Adicionado `<AuthToast />` no fim do layout.
+- `frontend/src/app/(dashboard)/provas/[id]/AdminActions.tsx` —
+  `useAuthorization("provas.cancel")` + `useAuthorization("provas.restart")`
+  substituem `user.is_admin`.
+- `frontend/src/app/(dashboard)/auditoria/page.tsx` — guard ad-hoc
+  `me.is_admin` substituido por `useAuthorization("auditoria")` +
+  `<Restricted />`.
+- `frontend/src/app/(dashboard)/relatorios/page.tsx` — guard PROMOVIDO
+  de reativo (parsing de "administrad" no erro) para PROATIVO via
+  `useAuthorization("relatorios")` (vendedor que digita /relatorios
+  na URL ve `<Restricted />` imediatamente sem disparar fetch).
+- `frontend/src/app/(dashboard)/usuarios/page.tsx` — guard proativo
+  adicionado (antes vendedor via os controles e o erro vinha em modal).
+- `frontend/src/app/(dashboard)/configuracoes/page.tsx` — guard adicionado.
+- `frontend/src/app/(dashboard)/nova-prova/page.tsx` — guard adicionado.
+- `frontend/src/app/(dashboard)/provas/page.tsx` — `showVendedorFilter`
+  agora usa `useAuthorization("provas.list").level === "full"` (era
+  `me?.is_admin === true`).
+
+### Removido
+- `backend/app/api/deps.py::require_role` (factory nunca usado).
+- 3 testes de `require_role` em `backend/tests/test_deps.py`.
+
+### Migrations aplicadas em producao (Supabase rwxlpwmnkekzuurgthkr)
+- `rls_009_helpers_v4` (2026-04-30 — depois supersedida pela 012)
+- `rls_010_rebase_rls_v4` (2026-04-30 — depois supersedida pela 012)
+- `rls_011_etiquetas_select_motorista_clicheria` (2026-04-30 — depois
+  supersedida pela 012)
+- `rls_012_move_helpers_to_app_private` (2026-04-30 — estado final)
+
+Pos-aplicacao: advisors limpos (apenas os 2 historicos: alembic_version
+no-policy intencional + auth_leaked_password WONTFIX). Smoke RBAC com
+SQL impersonado validou as 4 perfis (incluindo motorista/clicheria
+fakes inseridos+removidos).
+
+### Decisao critica registrada (follow-up obrigatorio)
+- **Clicheria em provas.list/provas.detail:** Matriz literal (Secao 6
+  do Requisitos v4.0) diz Clicheria='●' (full). A Wave 1 v4.0 mantem
+  PARCIAL com scope `status_clicheria` para preservar comportamento da
+  v3.0. Marcado como `_clicheria_divergence_note` em
+  `shared/access-matrix.json`. Ver `DECISIONS.md` (Wave 1 v4.0 — D-2).
+
+### Testes
+- 757 testes backend passando (era 724 + 36 novos - 3 removidos).
+- 0 regressao.
+- `npx tsc --noEmit + next lint + next build` no frontend: limpos.
+- `scripts/verify_rbac_equivalence.py` em producao: SUCESSO (3 camadas
+  consistentes).
