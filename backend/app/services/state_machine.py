@@ -357,12 +357,22 @@ async def executar_transicao(
     )
 
     if aprovando:
-        # RN-007: rota determinada pela localizacao do vendedor no momento
-        # da aprovacao. `determinar_rota` levanta `RotaIndeterminavelError`
-        # se o executor nao for vendedor ou nao tiver localizacao — isso
-        # cobre o caso de admin STUDIO aprovando sem vendedor cadastrado
-        # (nao sabemos qual rota atribuir).
-        rota_depois = determinar_rota(usuario)
+        # Wave 2 v4.0 (Componente 06): a rota e IMUTAVEL apos a criacao
+        # (RN-002 v4.0). Provas v4.0 tem `rota` ja persistida desde o
+        # POST /api/v1/provas/ — preservamos. Apenas provas legadas v3.0
+        # com `rota = NULL` (criadas antes da Wave 2 v4.0) recebem rota
+        # derivada da localizacao do vendedor neste ponto, mantendo o
+        # comportamento v3.0 ate a Wave 7 (Componente 21) fazer o backfill.
+        #
+        # SEM esta condicional, o trigger `trg_provas_rota_imutavel`
+        # rejeitaria UPDATE da rota com SQLSTATE 22023 e a aprovacao
+        # falharia para toda prova v4.0.
+        if prova.rota is None:
+            # Prova legada v3.0 — derivar via localizacao (compat).
+            rota_depois = determinar_rota(usuario)
+        else:
+            # Prova v4.0 — preservar rota imutavel (RN-002 v4.0).
+            rota_depois = prova.rota
 
     if reiniciando_ciclo:
         # Gancho para C14 (Lote C). O Lote A implementa mecanicamente

@@ -48,12 +48,29 @@ class StatusProvaEnum(str, enum.Enum):
 
 
 class RotaEnum(str, enum.Enum):
-    """Rota de encaminhamento (RN-007).
+    """Rota de encaminhamento (RN-007 v4.0).
 
-    PADRAO: vendedor Matriz -> 3Studio -> Motorista -> Clicheria.
-    DIRETA: vendedor Filial -> Clicheria (sem Motorista intermediario).
+    Quatro valores na v4.0 (Wave 2 v4.0 — Componente 06):
+      MATRIZ      — vendedor Matriz, sem laminacao.
+      LAM_MATRIZ  — vendedor Matriz com etapa de laminacao na Clicheria.
+      FILIAL      — vendedor Filial, sem laminacao.
+      LAM_FILIAL  — vendedor Filial com etapa de laminacao na Clicheria.
+
+    Os valores PADRAO e DIRETA sao LEGACY da v3.0 e permanecem no enum
+    PostgreSQL ate a Wave 7 (Componente 21) fazer o backfill final
+    (PADRAO -> MATRIZ, DIRETA -> FILIAL). Sao expostos por
+    `ProvaResponse`/`ProvaListItem` para nao quebrar a renderizacao das
+    provas v3.0 ate la, mas SAO BLOQUEADOS na criacao via
+    `RotaCriacaoEnum` (em `domain/schemas/prova.py`).
     """
 
+    # v4.0 (Wave 2 v4.0 — Componente 06)
+    MATRIZ = "MATRIZ"
+    LAM_MATRIZ = "LAM_MATRIZ"
+    FILIAL = "FILIAL"
+    LAM_FILIAL = "LAM_FILIAL"
+
+    # Legacy v3.0 — backfill na Wave 7 (Componente 21)
     PADRAO = "PADRAO"
     DIRETA = "DIRETA"
 
@@ -96,11 +113,22 @@ class ProvaDigital(Base):
     """Prova digital (objeto central do sistema — RF-001, RN-001).
 
     Criada pelo perfil 3Studio com upload da arte (JPG/PNG ate 10MB) para R2.
-    `rota` permanece NULL na criacao — RN-007 define que a rota e determinada
-    no MOMENTO DA APROVACAO (Wave 3). Na criacao apenas validamos que o
-    vendedor tem localizacao cadastrada.
 
-    `qr_code_hash` e derivado via HMAC-SHA256 com QR_CODE_HMAC_SECRET (ADR-033).
+    Wave 2 v4.0 (Componente 06):
+      - `rota` e PERSISTIDA na criacao com a escolha do Administrador
+        entre as 4 opcoes da v4.0 (MATRIZ, LAM_MATRIZ, FILIAL, LAM_FILIAL).
+        Imutavel apos definicao (RN-002 v4.0) — bloqueado pelo trigger
+        `trg_provas_rota_imutavel` (BEFORE UPDATE) e pelo Pydantic.
+        Continua NULLABLE no banco APENAS para suportar provas v3.0
+        legadas (rota=NULL) ate a Wave 7 (Componente 21) fazer o backfill.
+      - `codigo_publico` (NOVO Wave 2 v4.0) e o identificador alfanumerico
+        humano-legivel (`PRV-AAAA-MM-NNNNNN`). UNIQUE. Embutido no QR Code
+        (DAT v3.0 §8.1: idempotencia camera↔digitacao manual). Usado pelo
+        Componente 19 (Wave 3 v4.0) como fallback de scanner.
+
+    `qr_code_hash` continua sendo HMAC-SHA256 opaco (ADR-033) — coexiste
+    com `codigo_publico`. Nao confundir: `qr_code_hash` valida autenticidade,
+    `codigo_publico` resolve identificacao humana.
     """
 
     __tablename__ = "provas_digitais"
@@ -116,6 +144,7 @@ class ProvaDigital(Base):
     )
     imagem_url: Mapped[str] = mapped_column(Text, nullable=False)
     qr_code_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    codigo_publico: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     status: Mapped[StatusProvaEnum] = mapped_column(
         Enum(StatusProvaEnum, name="status_prova_enum", create_type=False),
         nullable=False,

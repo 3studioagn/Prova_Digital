@@ -1,4 +1,5 @@
 """Schemas Pydantic v2 para o dominio de Provas Digitais (Componente 06)."""
+import enum
 import re
 from datetime import datetime
 from uuid import UUID
@@ -6,6 +7,25 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db.models import LocalizacaoEnum, RotaEnum, SetorEnum, StatusProvaEnum
+
+
+class RotaCriacaoEnum(str, enum.Enum):
+    """Sub-enum de `RotaEnum` aceito apenas no payload de criacao da prova.
+
+    Wave 2 v4.0 (Componente 06): admin escolhe manualmente entre as 4 rotas
+    da v4.0. Os valores legacy `PADRAO`/`DIRETA` (Wave 0/v3.0) NAO sao
+    aceitos aqui — ja existem provas com esses valores em producao mas
+    ninguem mais cria com eles. A Wave 7 (Componente 21) fara o backfill
+    final para os 4 novos valores.
+
+    `RotaEnum` (em `app/db/models.py`) continua tendo os 6 valores no
+    nivel ORM/banco para suportar leitura das provas legadas.
+    """
+
+    MATRIZ = "MATRIZ"
+    LAM_MATRIZ = "LAM_MATRIZ"
+    FILIAL = "FILIAL"
+    LAM_FILIAL = "LAM_FILIAL"
 
 # ─── MIME types aceitos na Wave 2 ─────────────────────────────────────────
 # RF-001: arquivo deve ser JPG ou PNG, maximo 10 MB.
@@ -89,12 +109,19 @@ class UploadUrlResponse(BaseModel):
 
 
 class ProvaCreateRequest(BaseModel):
-    """Payload enviado pelo frontend apos o PUT no R2 ter acontecido."""
+    """Payload enviado pelo frontend apos o PUT no R2 ter acontecido.
+
+    Wave 2 v4.0 (Componente 06): adiciona campo `rota` obrigatorio
+    (RotaCriacaoEnum — bloqueia legacy v3.0). Removeu `rota_projetada`
+    (era derivado da localizacao do vendedor — agora a rota e escolha
+    manual do admin).
+    """
 
     nome: str = Field(..., min_length=1, max_length=200)
     nro_requerimento: str = Field(..., min_length=1, max_length=50)
     cliente: str = Field(..., min_length=1, max_length=200)
     vendedor_id: UUID
+    rota: RotaCriacaoEnum  # Wave 2 v4.0 — obrigatorio, sem default
     object_key: str = Field(..., min_length=1, max_length=500)
 
     @field_validator("nome", "cliente")
@@ -128,10 +155,20 @@ class ProvaCreateRequest(BaseModel):
 class ProvaResponse(BaseModel):
     """Representacao publica de uma prova digital.
 
-    `rota_projetada` e Optional desde o Componente 08 (Wave 2): no POST
-    /provas/ ela sempre vem populada (o endpoint valida vendedor), mas no
-    GET /{id} pode ser None em edge cases — por exemplo, se o vendedor
-    original foi desativado ou mudou de setor depois da criacao da prova.
+    Wave 2 v4.0 (Componente 06):
+      - `codigo_publico` (NOVO): identificador alfanumerico humano-legivel
+        (`PRV-AAAA-MM-NNNNNN`). Sempre presente para provas criadas
+        v4.0 + provas v3.0 backfilled pela migration 012.
+      - `rota_projetada` REMOVIDO: nao faz mais sentido na v4.0 (a rota
+        e escolha manual do admin, nao mais derivada da localizacao do
+        vendedor). Frontend deve consumir `prova.rota` diretamente.
+      - `rota` continua Optional para suportar provas legadas v3.0 com
+        `rota = NULL` (sera backfilled pela Wave 7 / Componente 21).
+        Provas legadas tambem podem ter `rota = PADRAO` ou `DIRETA`
+        (5 provas em producao no momento da Wave 2 v4.0).
+
+    `vendedor_localizacao` continua sendo exposto como informacao
+    AUXILIAR (RN-009 v4.0: "informativa, nao restringe rota").
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -139,6 +176,7 @@ class ProvaResponse(BaseModel):
     id: UUID
     nome: str
     nro_requerimento: str
+    codigo_publico: str  # Wave 2 v4.0
     cliente: str
     vendedor_id: UUID
     vendedor_nome: str
@@ -147,7 +185,6 @@ class ProvaResponse(BaseModel):
     qr_code_hash: str
     status: StatusProvaEnum
     rota: RotaEnum | None
-    rota_projetada: RotaEnum | None
     ciclo_atual: int
     motivo_cancelamento: str | None
     created_at: datetime
@@ -168,10 +205,12 @@ class ProvaCreateResponse(BaseModel):
 class ProvaListItem(BaseModel):
     """Item slim da listagem paginada de provas.
 
-    NAO inclui `imagem_url`, `qr_code_hash`, `rota_projetada` nem
-    `motivo_cancelamento`. Esses campos ficam restritos a ProvaResponse
-    (detalhe, Componente 08) para reduzir payload e evitar vazamento de
-    storage keys em listas publicas.
+    NAO inclui `imagem_url`, `qr_code_hash` nem `motivo_cancelamento` —
+    ficam restritos a `ProvaResponse` (detalhe) para reduzir payload e
+    evitar vazamento de storage keys em listas publicas.
+
+    Wave 2 v4.0 (Componente 06): incluiu `codigo_publico` para permitir
+    busca rapida + display do codigo legivel direto na listagem.
 
     `vendedor_nome` vem via JOIN no endpoint — nao existe em ProvaDigital.
     """
@@ -181,6 +220,7 @@ class ProvaListItem(BaseModel):
     id: UUID
     nome: str
     nro_requerimento: str
+    codigo_publico: str  # Wave 2 v4.0
     cliente: str
     vendedor_id: UUID
     vendedor_nome: str

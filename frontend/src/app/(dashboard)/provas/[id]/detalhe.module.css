@@ -2,6 +2,14 @@
   display: none;
 }
 
+/* Wave 2 v4.0 (Componente 06): codigo_publico exibido em destaque
+   na lista de metadados (`PRV-AAAA-MM-NNNNNN`). */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
 .desktopOnly {
   display: contents;
 }

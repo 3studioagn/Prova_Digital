@@ -95,6 +95,7 @@ from app.domain.schemas.prova import (
 )
 from app.services import qrcode_service, r2_signed
 from app.services.audit_service import log_audit
+from app.services.codigo_publico_service import gerar_codigo_publico
 from app.services.etiqueta_service import TEMPLATE_PADRAO, gerar_pdf
 from app.services.state_machine import (
     TRANSICOES,
@@ -403,22 +404,23 @@ async def create_prova(
     # (e) Gera UUID da prova no backend para incluir no HMAC antes do INSERT.
     prova_id = uuid.uuid4()
 
-    # (f) Hash HMAC-SHA256 (ADR-033).
+    # (f) Wave 2 v4.0: codigo_publico legivel (`PRV-AAAA-MM-NNNNNN`).
+    # Determinismo do prefixo dado o created_at; sufixo via secrets CSPRNG.
+    # Unicidade enforced pelo UNIQUE INDEX `idx_provas_codigo_publico`.
+    # Gerado ANTES do INSERT para incluir no payload do QR (DAT v3.0 §8.1
+    # — idempotencia camera↔digitacao manual).
+    created_at = datetime.now(tz=timezone.utc)
+    codigo_publico = gerar_codigo_publico(created_at)
+
+    # (g) Hash HMAC-SHA256 (ADR-033).
     qr_hash = qrcode_service.gerar_hash(prova_id, body.nro_requerimento)
 
-    # (g) Payload escaneavel + PNG do QR Code.
-    qr_payload = qrcode_service.gerar_payload_qr(body.nro_requerimento, qr_hash)
+    # (h) Payload escaneavel: embute `codigo_publico` (v4.0) em vez do
+    # `nro_requerimento` (v3.0) — o Componente 19 (Wave 3 v4.0) faz lookup
+    # pelo `codigo_publico` digitado manualmente para resolver o mesmo
+    # registro do scanner por camera.
+    qr_payload = qrcode_service.gerar_payload_qr(codigo_publico, qr_hash)
     qr_image_bytes = qrcode_service.gerar_imagem_qr(qr_payload, size_px=200)
-
-    # (h) Rota projetada (Wave 2 NAO persiste — RN-007 + ADR-042).
-    try:
-        rota_projetada = determinar_rota(vendedor)
-    except RotaIndeterminavelError as exc:
-        await _cleanup_r2(body.object_key)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=str(exc),
-        )
 
     # (i) Carrega template e gera o PDF ANTES do commit.
     #
@@ -426,18 +428,21 @@ async def create_prova(
     #   - gerar_pdf pode lancar (caracteres fora da fonte, template invalido,
     #     fontes faltando no deploy). Fazer isso antes do commit garante que
     #     uma falha de rendering NAO deixa uma prova orfa no banco sem PDF.
-    #   - `created_at` renderizado no PDF (template "mostrar_data_criacao")
-    #     e gerado no backend via datetime.now(UTC) e depois tambem usado no
-    #     response — consistente com o `now()` que o banco vai escrever,
-    #     dentro do proprio segundo.
+    #   - `created_at` ja foi gerado acima (passo f) e e reutilizado no
+    #     PDF + INSERT — consistente com o `now()` que o banco vai
+    #     escrever, dentro do proprio segundo.
+    #   - Wave 2 v4.0: passa `codigo_publico` e `rota` (RotaCriacaoEnum
+    #     -> RotaEnum via .value) para o gerador renderizar o codigo
+    #     legivel abaixo do QR + badge da rota no rodape.
     try:
         template = await _carregar_template_etiqueta(db)
-        created_at = datetime.now(tz=timezone.utc)
         pdf_bytes = gerar_pdf(
             nome_prova=body.nome,
             nro_requerimento=body.nro_requerimento,
             vendedor_nome=vendedor.nome,
             qr_image_bytes=qr_image_bytes,
+            codigo_publico=codigo_publico,
+            rota=RotaEnum(body.rota.value),
             template=template,
             created_at=created_at,
         )
@@ -462,16 +467,21 @@ async def create_prova(
     # `etiquetas_prova_id_fkey`. Fix: dois flushes explicitos dentro da mesma
     # transacao — primeiro a prova, depois etiqueta + audit_log. A transacao
     # inteira ainda e atomica (commit/rollback no final).
+    # Wave 2 v4.0 (Componente 06): rota e PERSISTIDA na criacao com a
+    # escolha do admin (RN-007 v4.0). Imutavel apos definicao (RN-002 v4.0)
+    # — bloqueado pelo trigger `trg_provas_rota_imutavel`. `codigo_publico`
+    # foi gerado no passo (f) e e UNIQUE.
     nova_prova = ProvaDigital(
         id=prova_id,
         nome=body.nome,
         nro_requerimento=body.nro_requerimento,
+        codigo_publico=codigo_publico,
         cliente=body.cliente,
         vendedor_id=vendedor.id,
         imagem_url=body.object_key,
         qr_code_hash=qr_hash,
         status=StatusProvaEnum.CRIADA,
-        rota=None,  # ADR-042: rota so e definida na aprovacao (Wave 3)
+        rota=RotaEnum(body.rota.value),
         ciclo_atual=1,
     )
 
@@ -498,8 +508,9 @@ async def create_prova(
                 "vendedor_id": str(vendedor.id),
                 "vendedor_nome": vendedor.nome,
                 "nro_requerimento": body.nro_requerimento,
+                "codigo_publico": codigo_publico,
                 "cliente": body.cliente,
-                "rota_projetada": rota_projetada.value,
+                "rota": body.rota.value,
                 "object_key": body.object_key,
             },
             request=request,
@@ -574,20 +585,23 @@ async def create_prova(
     pdf_base64 = base64.b64encode(pdf_bytes).decode("ascii")
 
     logger.info(
-        "Prova criada: id=%s nro_req=%s vendedor=%s rota_projetada=%s admin=%s",
+        "Prova criada: id=%s nro_req=%s codigo=%s vendedor=%s rota=%s admin=%s",
         nova_prova.id,
         nova_prova.nro_requerimento,
+        codigo_publico,
         vendedor.id,
-        rota_projetada.value,
+        body.rota.value,
         admin.id,
     )
 
-    # Monta o response com vendedor_nome e rota_projetada (nao estao no
-    # model ORM, vem do contexto).
+    # Monta o response com vendedor_nome (nao esta no model ORM, vem do
+    # JOIN no caller). `rota_projetada` foi REMOVIDO (Wave 2 v4.0):
+    # `prova.rota` ja vem persistido com a escolha do admin.
     prova_response = ProvaResponse(
         id=nova_prova.id,
         nome=nova_prova.nome,
         nro_requerimento=nova_prova.nro_requerimento,
+        codigo_publico=nova_prova.codigo_publico,
         cliente=nova_prova.cliente,
         vendedor_id=nova_prova.vendedor_id,
         vendedor_nome=vendedor.nome,
@@ -596,7 +610,6 @@ async def create_prova(
         qr_code_hash=nova_prova.qr_code_hash,
         status=nova_prova.status,
         rota=nova_prova.rota,
-        rota_projetada=rota_projetada,
         ciclo_atual=nova_prova.ciclo_atual,
         motivo_cancelamento=nova_prova.motivo_cancelamento,
         created_at=created_at_response,
@@ -838,6 +851,7 @@ async def list_provas(
             id=prova.id,
             nome=prova.nome,
             nro_requerimento=prova.nro_requerimento,
+            codigo_publico=prova.codigo_publico,
             cliente=prova.cliente,
             vendedor_id=prova.vendedor_id,
             vendedor_nome=vendedor_nome,
@@ -927,47 +941,30 @@ async def _carregar_prova_com_scoping(
     return prova, vendedor_nome, vendedor_localizacao, vendedor_setor
 
 
-def _determinar_rota_projetada(
-    vendedor_setor: SetorEnum, vendedor_localizacao: LocalizacaoEnum | None
-) -> RotaEnum | None:
-    """Calcula `rota_projetada` a partir do setor e localizacao do vendedor.
-
-    Retorna None em edge cases onde a rota nao pode ser determinada (setor
-    != VENDEDOR, localizacao ausente). O frontend trata None exibindo
-    apenas `prova.rota` ou placeholder.
-
-    F05 (auditoria externa Wave 2): esta funcao substitui a chamada
-    `determinar_rota(vendedor)` que exigia um Usuario completo — agora
-    aceita os 2 campos escalares que ja vem no JOIN de
-    `_carregar_prova_com_scoping`.
-    """
-    if vendedor_setor != SetorEnum.VENDEDOR:
-        return None
-    if vendedor_localizacao is None:
-        return None
-    if vendedor_localizacao == LocalizacaoEnum.MATRIZ:
-        return RotaEnum.PADRAO
-    if vendedor_localizacao == LocalizacaoEnum.FILIAL:
-        return RotaEnum.DIRETA
-    return None
-
-
 def _build_prova_response(
     prova: ProvaDigital,
     vendedor_nome: str,
     vendedor_localizacao: LocalizacaoEnum | None,
-    vendedor_setor: SetorEnum,
+    vendedor_setor: SetorEnum,  # noqa: ARG001
 ) -> ProvaResponse:
-    """Monta o ProvaResponse calculando `rota_projetada` quando possivel.
+    """Monta o ProvaResponse a partir da prova + dados do vendedor.
 
-    `rota_projetada` e None em edge cases onde o vendedor nao pode ter rota
-    calculada (ex: mudou de setor apos a criacao da prova). O frontend trata
-    None exibindo apenas `prova.rota` ou placeholder.
+    Wave 2 v4.0 (Componente 06):
+      - Inclui `codigo_publico` (sempre presente — coluna NOT NULL apos
+        migration 012).
+      - REMOVIDO `rota_projetada`: nao faz mais sentido na v4.0 (a rota
+        e escolha manual do admin, persistida desde a criacao). Frontend
+        consome `prova.rota` diretamente.
+      - `vendedor_setor` permanece na assinatura por compatibilidade
+        com os 5 callers existentes que ja passam o valor (vem do JOIN
+        em `_carregar_prova_com_scoping`), mas nao e mais usado no
+        corpo. Marca `# noqa: ARG001` para silenciar o ruff.
     """
     return ProvaResponse(
         id=prova.id,
         nome=prova.nome,
         nro_requerimento=prova.nro_requerimento,
+        codigo_publico=prova.codigo_publico,
         cliente=prova.cliente,
         vendedor_id=prova.vendedor_id,
         vendedor_nome=vendedor_nome,
@@ -976,7 +973,6 @@ def _build_prova_response(
         qr_code_hash=prova.qr_code_hash,
         status=prova.status,
         rota=prova.rota,
-        rota_projetada=_determinar_rota_projetada(vendedor_setor, vendedor_localizacao),
         ciclo_atual=prova.ciclo_atual,
         motivo_cancelamento=prova.motivo_cancelamento,
         created_at=prova.created_at,

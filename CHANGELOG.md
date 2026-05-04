@@ -2,6 +2,196 @@
 
 ---
 
+## [2026-05-04 — Wave 2 v4.0 — Componente 06 (atualizacao v4.0)]
+
+Reformulacao completa do cadastro de prova digital para suportar o
+modelo de 4 rotas explicitas da v4.0 + identificador alfanumerico
+humano-legivel + redesign da tela de criacao seguindo o print do design.
+
+### Adicionado
+
+- **Coluna `provas_digitais.codigo_publico` VARCHAR(20) NOT NULL UNIQUE**
+  — formato `PRV-AAAA-MM-NNNNNN` (DAT v3.0 §8.3). Backfilled para as 16
+  provas existentes na propria migration.
+- **4 novos valores em `rota_enum`**: `MATRIZ`, `LAM_MATRIZ`, `FILIAL`,
+  `LAM_FILIAL`. Os valores legacy `PADRAO`/`DIRETA` (Wave 0/v3.0)
+  permanecem ate a Wave 7 (Componente 21) fazer o backfill — drop dos
+  legacy nao e suportado pelo Postgres em transacao.
+- **Trigger `trg_provas_rota_imutavel` (BEFORE UPDATE)** + funcao
+  `fn_bloquear_alteracao_rota()` com `search_path=''` (consistente com
+  ADR-024). Permite `NULL → valor` (Wave 7 backfill); bloqueia
+  `valor → outro_valor` e `valor → NULL` com SQLSTATE 22023 e mensagem
+  explicita "Coluna rota e imutavel apos definicao (RN-002 v4.0)".
+- **UNIQUE INDEX `idx_provas_codigo_publico`** + INDEX `idx_provas_rota`
+  (suporta filtro do Componente 07 — RF-014).
+- **`backend/app/services/codigo_publico_service.py`**:
+  `gerar_codigo_publico(criado_em)` (CSPRNG via `secrets.choice`,
+  alfabeto 31 chars `ABCDEFGHJKMNPQRSTUVWXYZ23456789` — sem
+  ambiguos 0/O, 1/I/L) + `validar_formato_codigo_publico(codigo)`.
+  20 testes unitarios cobrindo formato, alfabeto, determinismo do
+  prefixo, nao-determinismo do sufixo, round-trip gera->valida.
+- **`RotaCriacaoEnum`** em `domain/schemas/prova.py` — sub-enum aceito
+  apenas no payload de criacao. Bloqueia legacy v3.0 antes do INSERT
+  (defesa em profundidade vs trigger SQL).
+- **`ROTA_BADGE_LABELS`** em `etiqueta_service.py` — labels visuais para
+  o badge do PDF (`MATRIZ`, `LAM. MATRIZ`, `FILIAL`, `LAM. FILIAL` +
+  legacy com sufixo "(legada)").
+- **Migration `012_add_codigo_publico_and_rotas_v4_to_provas`**
+  (Alembic + apply_migration MCP em 3 chunks: ADD VALUE -> ADD COLUMN
+  + backfill -> SET NOT NULL + indexes + trigger). `alembic_version=012`.
+- **Testes:**
+  - `tests/test_codigo_publico_service.py` (20 testes).
+  - `tests/test_provas_api_v4.py` (14 testes — 6 schema Pydantic +
+    8 state_machine cirurgico).
+- **Frontend — campo `codigo_publico` em `ProvaResponse` +
+  `ProvaListItem`**, exibido no detalhe da prova com fonte monoespacada.
+- **Frontend — `RotaCriacao` type** (apenas 4 valores v4.0) em
+  `lib/types/prova.ts`.
+
+### Modificado
+
+- **Schema PostgreSQL `rota_enum`**: 2 valores (PADRAO, DIRETA) → 6
+  valores. Os 4 novos sao a unica entrada aceita na criacao de provas
+  v4.0 em diante. Legacy permanecem para compatibilidade temporal.
+- **`ProvaCreateRequest.rota`**: campo NOVO obrigatorio (RN-007 v4.0).
+- **`ProvaResponse`**: REMOVIDO `rota_projetada` — substituido por
+  `prova.rota` ja persistido. Adicionado `codigo_publico`.
+- **`ProvaListItem`**: adicionado `codigo_publico`.
+- **`qrcode_service.gerar_payload_qr`**: parametro renomeado de
+  `nro_requerimento` para `identificador`. Wave 2 v4.0 passa
+  `codigo_publico` (DAT v3.0 §8.1 — idempotencia camera↔digitacao
+  manual via Componente 19 da Wave 3 v4.0).
+- **`etiqueta_service.gerar_pdf`**: aceita 2 novos parametros opcionais
+  `codigo_publico: str | None` e `rota: RotaEnum | None`. Renderiza:
+  (a) codigo publico em destaque (~9.5pt bold) abaixo do QR Code;
+  (b) badge preto filled com label da rota no rodape esquerdo. QR
+  reduzido de 29mm para 26mm para abrir espaco do codigo. Provas
+  legadas (rota=NULL) renderizam sem o bloco.
+- **`state_machine.executar_transicao` (modificacao cirurgica
+  autorizada pelo Mario):** ao aprovar prova
+  (`RETIRADA → APROVADA_PELO_VENDEDOR`), preserva `prova.rota` se ja
+  preenchida (RN-002 v4.0 — imutabilidade). Apenas provas legadas v3.0
+  com `rota=None` ainda derivam via `determinar_rota(usuario)`. Sem
+  esta correcao, o trigger PostgreSQL bloquearia toda aprovacao de
+  prova v4.0 com SQLSTATE 22023.
+- **Handler `POST /api/v1/provas/`**: removeu `determinar_rota(vendedor)`
+  + `rota_projetada` do response; persiste `body.rota` desde a criacao
+  e gera + persiste `codigo_publico`. Audit log `criar_prova` agora
+  inclui `rota` e `codigo_publico` em `detalhes_json`.
+- **Frontend — `nova-prova/page.tsx` REWRITE COMPLETO** seguindo o
+  print do design entregue pelo Mario:
+  - Canvas com background ambient (grid de pontos + blob amarelo
+    borrado + linha ondulada SVG com 2 pontos de origem/destino).
+  - Topbar: pill com timestamp `dd/MM, HH:mm` (esquerda, atualizada
+    a cada minuto) + 2 botoes `Salvar rascunho` (placeholder
+    disabled — follow-up futuro) + `Cadastrar prova` (submit).
+  - Box branco esquerdo (ficha): header "FICHA DE CADASTRO / Nova
+    prova digital", inputs Nome / Requerimento / Cliente · Vendedor.
+  - **Rota representada como 2 controles** (decisao de UX do print):
+    segment "Matriz / Filial" (radio button styled como dois botoes)
+    + switch "Laminacao" (sim/nao). As 4 rotas v4.0 sao DERIVADAS
+    no submit (`MATRIZ + lam=ON → LAM_MATRIZ`, etc). Mais intuitivo
+    que 4 radios.
+  - Texto auxiliar "A rota escolhida e imutavel apos o cadastro" —
+    mitigacao do risco "Confusao operacional" do Backlog v4.0 §6.
+    Modal de confirmacao dupla descartado em favor dos 2 toggles
+    explicitos do design.
+  - Dropzone de anexo + footer da ficha com `ORIGEM` (refletindo o
+    toggle) e `STATUS` (decorativo "Ativa").
+  - Cards laterais direita: "UNIDADE SELECIONADA" (titulo + endereco
+    hardcoded por unidade — Wave 2 v4.0; futuro: configuracao) +
+    "cole imagem" (atalho ⌘V real implementado via paste handler).
+- **Frontend — `useCreateProva`**: aceita `rota: RotaCriacao` no input
+  e envia no payload do POST.
+- **Frontend — `lib/types/prova.ts`**: `Rota` agora e union de 6
+  valores (4 v4.0 + 2 legacy); `ROTA_LABELS` ganhou os 6 + sufixo
+  "(legada)" para PADRAO/DIRETA; `ROTA_OPTIONS` lista os 6 (filtro
+  Componente 07); novo `ROTA_CRIACAO_OPTIONS` lista apenas os 4.
+- **Frontend — detalhe da prova (`provas/[id]/page.tsx`)**: substituida
+  funcao `formatRota(rota, rotaProjetada)` por `formatRota(rota)`
+  (rota_projetada removido). Linha "Codigo: PRV-..." adicionada acima
+  da rota com classe `.mono` no CSS module.
+
+### Decisoes importantes (registradas em DECISIONS.md)
+
+- ADR-115: enum em UPPERCASE para consistencia com os outros enums do
+  projeto (DAT/Backlog usam lowercase — divergencia documentada).
+- ADR-116: `codigo_publico` e coluna NOVA, nao reaproveita
+  `qr_code_hash` (HMAC opaco vs humano-legivel).
+- ADR-117: trigger imutabilidade permite NULL→valor para suportar
+  Wave 7 / Componente 21 backfill.
+- ADR-118: 2 toggles (origem + laminacao) em vez de 4 radios — UX do
+  design entregue pelo Mario.
+- ADR-119: modificacao cirurgica em `executar_transicao` para honrar
+  RN-002 (rota imutavel) sem reescrever a state machine inteira
+  (Wave 3 v4.0 — Componente 11).
+
+### Migrations aplicadas em producao (via MCP apply_migration)
+
+- `012a_alter_type_rota_enum_add_v4_values`
+- `012b_add_column_codigo_publico_nullable`
+- `012c_codigo_publico_not_null_indexes_trigger` (+ UPDATE
+  `alembic_version='012'`)
+
+### Validacao
+
+- **Backend pytest**: **795 passed**, 1 warning (pre-existente
+  `test_jwt InsecureKeyLengthWarning`). Era 781 antes; 14 testes novos
+  da Wave 2 v4.0 adicionados. **Zero regressao** — Wave 1 v4.0 + 0..6
+  todas verdes.
+- **Backend ruff**: limpo (apenas warnings de ARG001 silenciados via
+  `# noqa` em `_build_prova_response`).
+- **Frontend `npx tsc --noEmit`**: exit 0.
+- **Frontend `npx next build`**: 13/13 paginas estaticas geradas.
+  `/nova-prova`: 6.34 kB / 169 kB First Load (era 5.3 kB / 167 kB
+  na v3.0 — incremento de ~1 kB pelo novo layout). Middleware
+  82.9 kB (sem regressao).
+- **MCP advisors security**: 1 INFO `rls_enabled_no_policy` em
+  `alembic_version` (intencional, ADR-025) + 1 WARN
+  `auth_leaked_password_protection` (WONTFIX, ADR-027). Nenhum
+  novo alerta.
+- **MCP advisors performance**: 12 INFOs `unused_index` (1 novo:
+  `idx_provas_codigo_publico` — esperado pre-Wave 3 que vai usa-lo
+  no Componente 19 fallback de digitacao manual).
+
+### Arquivos novos/alterados
+
+**Backend (12 arquivos):**
+- `backend/migrations/versions/012_add_codigo_publico_and_rotas_v4_to_provas.py` (novo)
+- `backend/app/db/models.py` (RotaEnum + 4 valores + ProvaDigital.codigo_publico)
+- `backend/app/services/codigo_publico_service.py` (novo)
+- `backend/app/services/qrcode_service.py` (parametro renomeado)
+- `backend/app/services/etiqueta_service.py` (codigo + badge + ROTA_BADGE_LABELS)
+- `backend/app/services/state_machine.py` (modificacao cirurgica linhas 358-373)
+- `backend/app/domain/schemas/prova.py` (RotaCriacaoEnum + rota obrigatorio +
+   codigo_publico em ProvaResponse + ProvaListItem; rota_projetada removido)
+- `backend/app/api/v1/provas.py` (handler create_prova reescrito + remove
+   `_determinar_rota_projetada` + `_build_prova_response` simplificado)
+- `backend/tests/test_codigo_publico_service.py` (novo, 20 testes)
+- `backend/tests/test_provas_api_v4.py` (novo, 14 testes)
+- `backend/tests/test_provas_api.py` (rota injetada nos 16 payloads + asserts
+   atualizados + 2 testes de detail renomeados/repropositados)
+- `backend/tests/test_schemas.py` (rota="MATRIZ" no test_create_normalizes_nro_req)
+
+**Frontend (5 arquivos):**
+- `frontend/src/lib/types/prova.ts` (Rota com 6 valores + RotaCriacao + ROTA_LABELS
+   + ROTA_OPTIONS + ROTA_CRIACAO_OPTIONS + buildQrPayload)
+- `frontend/src/hooks/useCreateProva.ts` (rota no input + no body)
+- `frontend/src/app/(dashboard)/nova-prova/page.tsx` (REWRITE seguindo print)
+- `frontend/src/app/(dashboard)/nova-prova/nova-prova.module.css` (REWRITE total)
+- `frontend/src/app/(dashboard)/provas/[id]/page.tsx` (formatRota sem
+   rota_projetada + linha codigo_publico)
+- `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css` (.mono)
+
+**Documentacao (4 arquivos):**
+- `CHANGELOG.md` (esta entrada)
+- `DECISIONS.md` (ADRs 115-119)
+- `CLAUDE.md` (Como adicionar valor ao rota_enum + tabela de waves
+   atualizada com Wave 2 v4.0)
+- `docs/wave2-v4/analysis.md` (anexo "Execucao" com diff vs proposta)
+
+---
+
 ## [2026-04-29 — Wave 6 Auditoria Senior] — H-01 + H-02 + M-01..M-04 + L-01..L-04
 
 Auditoria senior read-only da Wave 6 executada apos a entrega do

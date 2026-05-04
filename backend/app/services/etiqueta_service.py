@@ -1,5 +1,16 @@
 """Geracao do PDF da etiqueta imprimivel (RF-003, RN-011, ADR-035).
 
+Wave 2 v4.0 (Componente 06): adiciona dois elementos novos ao layout:
+  - `codigo_publico` em destaque ABAIXO do QR Code (DAT v3.0 §8.3 +
+    RF-003 v4.0 — fallback para escaneamento manual).
+  - Badge da rota (`MATRIZ`/`LAM. MATRIZ`/`FILIAL`/`LAM. FILIAL`) no
+    rodape esquerdo (RN-011 v4.0).
+
+Ambos os parametros sao Optional para suportar provas legadas v3.0
+sem rota persistida e/ou sem codigo_publico (estas ultimas serao
+backfilled pela migration 012; PROVAS LEGADAS COM `rota=NULL`
+continuam ate a Wave 7).
+
 Usa `fpdf2` — zero dependencias nativas, suficiente para o layout "padrao".
 O template vem de `configuracoes_sistema.template_etiqueta` (ADR-036), que
 apos a migration 009 e um objeto JSONB:
@@ -51,6 +62,8 @@ from pathlib import Path
 
 from fpdf import FPDF
 
+from app.db.models import RotaEnum
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +72,20 @@ TEMPLATE_PADRAO = {
     "formato": "A4",  # legacy, nao usado mais — etiqueta sempre 90x57mm
     "logo_enabled": True,
     "mostrar_data_criacao": False,
+}
+
+
+# Wave 2 v4.0 (Componente 06): texto exibido no badge de rota da etiqueta.
+# Inclui valores legacy (PADRAO/DIRETA) com sufixo "(legada)" para o caso
+# de regerar etiqueta de prova v3.0 antes do backfill da Wave 7.
+ROTA_BADGE_LABELS: dict[RotaEnum, str] = {
+    RotaEnum.MATRIZ: "MATRIZ",
+    RotaEnum.LAM_MATRIZ: "LAM. MATRIZ",
+    RotaEnum.FILIAL: "FILIAL",
+    RotaEnum.LAM_FILIAL: "LAM. FILIAL",
+    # Legacy v3.0 — substituidos no backfill da Wave 7 (Componente 21).
+    RotaEnum.PADRAO: "MATRIZ (legada)",
+    RotaEnum.DIRETA: "FILIAL (legada)",
 }
 
 
@@ -133,6 +160,8 @@ def gerar_pdf(
     nro_requerimento: str,
     vendedor_nome: str,
     qr_image_bytes: bytes,
+    codigo_publico: str | None = None,
+    rota: RotaEnum | None = None,
     template: dict | None = None,
     created_at: datetime | None = None,
 ) -> bytes:
@@ -146,6 +175,11 @@ def gerar_pdf(
         nro_requerimento: Numero do requerimento.
         vendedor_nome: Nome completo do vendedor responsavel.
         qr_image_bytes: PNG do QR Code (de qrcode_service.gerar_imagem_qr).
+        codigo_publico: Codigo legivel `PRV-AAAA-MM-NNNNNN` (Wave 2 v4.0).
+                        Se None, omite o bloco do codigo (provas v3.0
+                        pre-migration 012). Renderizado abaixo do QR.
+        rota: RotaEnum (Wave 2 v4.0). Se None, omite o badge (provas v3.0
+              com `rota = NULL`). Renderizado no rodape esquerdo.
         template: Dict com as chaves do template_etiqueta. Se None, usa TEMPLATE_PADRAO.
                   Campos respeitados: `logo_enabled`, `mostrar_data_criacao`.
         created_at: Usado para extrair o ano (rodape) e a data completa
@@ -269,7 +303,8 @@ def gerar_pdf(
     # caiba em uma linha so com fonte 7.5pt.
     qr_box_x = 58
     qr_box_y = 15
-    qr_box_size = 29
+    qr_box_size = 26  # Wave 2 v4.0: reduzido de 29 para abrir 3mm para
+                       # o codigo_publico abaixo (RF-003 v4.0).
     pdf.set_line_width(0.4)
     pdf.set_draw_color(0, 0, 0)
     # `round_corners=True` exige fpdf2 >= 2.7 (ja temos 2.8.7)
@@ -294,12 +329,38 @@ def gerar_pdf(
         h=qr_size,
     )
 
-    # ─── Rodape: ano (esquerda) + texto (direita) ────────────────────────
+    # ─── Codigo publico abaixo do QR (Wave 2 v4.0 — RF-003 v4.0) ─────────
+    # Texto monospace centralizado no espaco do QR, em destaque para
+    # permitir digitacao manual em caso de falha do scanner.
+    if codigo_publico:
+        pdf.set_font(_FONT_FAMILY, "B", 8.5)
+        pdf.set_xy(qr_box_x - 1, qr_box_y + qr_box_size + 0.5)
+        pdf.cell(qr_box_size + 2, 3.5, codigo_publico, align="C")
+
+    # ─── Rodape: badge da rota (Wave 2 v4.0) + ano + texto direita ───────
     rodape_y = 49
     pdf.set_font(_FONT_FAMILY, "", 8.5)
     ano = _fmt_year(created_at) if created_at is not None else ""
-    pdf.set_xy(3, rodape_y)
-    pdf.cell(40, 4, ano, align="L")
+
+    if rota is not None:
+        # Badge preto filled com texto branco — destaca a rota da prova
+        # (Lam. Matriz, Filial, etc.).
+        badge_text = ROTA_BADGE_LABELS.get(rota, rota.value)
+        pdf.set_font(_FONT_FAMILY, "B", 6.5)
+        badge_w = pdf.get_string_width(badge_text) + 3.5
+        pdf.set_fill_color(0, 0, 0)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_xy(3, rodape_y)
+        pdf.cell(badge_w, 4, badge_text, align="C", fill=True)
+        # Restaura cor padrao para o ano.
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font(_FONT_FAMILY, "", 8.5)
+        pdf.set_xy(3 + badge_w + 1.5, rodape_y)
+        pdf.cell(15, 4, ano, align="L")
+    else:
+        # Provas legadas v3.0 com rota=NULL: so o ano (comportamento v3.0).
+        pdf.set_xy(3, rodape_y)
+        pdf.cell(40, 4, ano, align="L")
 
     pdf.set_xy(ETIQUETA_W - 50, rodape_y)
     pdf.cell(47, 4, "Etiqueta de rastreio", align="R")
