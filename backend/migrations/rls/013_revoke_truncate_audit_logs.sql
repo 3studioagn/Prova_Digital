@@ -1,0 +1,44 @@
+-- =============================================================================
+-- 013_revoke_truncate_audit_logs.sql
+-- Wave 1 v4.0 — Audit Round 2 — AUD-W1V4-101
+--
+-- Defesa em profundidade RNF-005 (imutabilidade do log de auditoria):
+-- 4a camada de protecao contra mutacao de audit_logs por clientes
+-- nao-privilegiados.
+--
+-- Antes desta migration, audit_logs estava protegida em 3 camadas:
+--   1. Trigger trg_audit_logs_imutavel (BEFORE UPDATE OR DELETE) —
+--      bloqueia mutacoes inclusive via service_role. Migration Alembic 001.
+--   2. RLS deny-by-default (ausencia de policy INSERT/UPDATE/DELETE) —
+--      clientes nao-bypassrls (anon, authenticated) recebem "policy not
+--      found". Migration RLS 001.
+--   3. REVOKE INSERT/UPDATE/DELETE para anon/authenticated em RLS 008
+--      (Wave 6).
+--
+-- Lacuna fechada por AUD-W1V4-101: TRUNCATE TABLE em PostgreSQL bypassa
+-- RLS E nao dispara o trigger BEFORE UPDATE/DELETE (TRUNCATE e ate
+-- atomico independente de policies). Logo, um cliente authenticated com
+-- privilegio TRUNCATE poderia apagar todo o log sem trace.
+--
+-- Validacao via MCP execute_sql (2026-05-04 antes desta migration):
+--   role_table_grants para anon/authenticated em audit_logs incluiu
+--   TRUNCATE alem de SELECT/REFERENCES/TRIGGER. Esta migration revoga
+--   TRUNCATE.
+--
+-- IMPORTANTE: service_role MANTEM TRUNCATE — backend nao usa, mas para
+--   nao restringir operacoes de manutencao (DROP/RECREATE em rollback
+--   alembic, por ex.). Producao NAO tem path operacional que TRUNCATE
+--   audit_logs.
+--
+-- Idempotente: REVOKE de privilegio ja ausente e no-op silencioso.
+-- =============================================================================
+
+REVOKE TRUNCATE ON public.audit_logs FROM anon, authenticated;
+
+-- Validacao pos-aplicacao:
+--   1. SELECT has_table_privilege('authenticated','public.audit_logs','TRUNCATE');
+--      deve retornar false.
+--   2. SELECT has_table_privilege('service_role','public.audit_logs','TRUNCATE');
+--      deve retornar true (preservado).
+--   3. SELECT has_table_privilege('authenticated','public.audit_logs','SELECT');
+--      deve retornar true (preservado — RLS pol_audit_select filtra para admin).
