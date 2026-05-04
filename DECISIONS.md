@@ -4286,3 +4286,213 @@ if (pathname.length > 1 && pathname.endsWith("/")) {
     ambos -> redirect `/login`. Comportamento identico.
   - Camada inferior (RLS) ja era invariante a trailing slash (so olha
     para queries SQL), entao paridade preservada.
+
+
+# Wave 1 (v4.0) — Audit Round 2 (correcoes pos-auditoria senior)
+
+Decisoes registradas durante a sessao de correcao do `audit-report.md`
+(commit `09eaf78`). Branch `wave1-v4/fixes/execution`, 2026-05-04.
+Cobre os 17 achados (0 CRITICO · 0 ALTO · 6 MEDIUM · 7 BAIXO · 4 INFO).
+
+## D-8 — `_scoping_filter` mantido como shim (status formal de L-2)
+
+**Adicionada na sessao de Audit Round 2 Fixes (2026-05-04).**
+
+**Contexto:** AUD-W1V4-106 confirma o que ja estava registrado como
+follow-up L-2 nos audit fixes anteriores: `_scoping_filter(user)` em
+`backend/app/api/v1/provas.py:661` virou shim de 1 linha que delega
+para `scope_filter_for("provas.list", user)` apos o refactor da Wave
+1 v4.0. As ~7 chamadas internas em `provas.py` continuam usando o
+shim em vez de chamar a API canonica diretamente.
+
+A sessao revisitou esse status na corrida de correcoes pos-auditoria
+e decidiu **MANTER o shim** conscientemente.
+
+**Decisao:** registrar formalmente que `_scoping_filter` segue como
+shim aceito ate uma wave futura ou quando outro motivo legitimo (ex.:
+necessidade de refator de toda a camada de provas) justificar inline
+das chamadas.
+
+**Alternativas avaliadas:**
+  - **Inline as 7 chamadas para `scope_filter_for("provas.list", user)`:**
+    rejeitada nesta sessao — refator de codigo de Wave 2 fora do
+    escopo "puro RBAC pos-auditoria". A Wave 1 v4.0 autorizou tocar
+    Waves 0-6 estritamente para fins de RBAC; inlining e tech debt
+    cleanup, nao RBAC.
+  - **Renomear o shim para `_scope_provas_list(user)` (nome mais
+    explicito):** rejeitada — mudaria o blame de 7 sites sem ganho
+    pratico; o comentario novo no shim ja deixa explicito que ele e
+    um shim que delega para `provas.list`.
+  - **Eliminar o shim e quebrar callsites em pares:** rejeitada — o
+    AUD-W1V4-105 ja criou `_scoping_filter_for_detail` (caminho de
+    detalhe). Eliminar o shim de listagem aqui criaria 2 helpers
+    inconsistentes (um inlinable, outro nao).
+
+**Consequencias:**
+  - Codigo continua identico ao pos-Audit Fixes (ac3be70).
+  - Comentario no shim ja documenta o status (`USAR APENAS NO CAMINHO
+    DE LISTAGEM` — adicionado pelo AUD-105).
+  - Tech debt L-2 segue como follow-up tecnico explicito; uma wave
+    futura pode revisitar quando o codigo de provas for refatorado
+    por outro motivo.
+
+## D-9 — Invariante: `dashboard` deve permanecer FULL para os 4 perfis
+
+**Adicionada na sessao de Audit Round 2 Fixes (2026-05-04).**
+
+**Contexto:** AUD-W1V4-201 (INFO) levantou a possibilidade de redirect
+loop se algum dos 4 perfis tivesse `dashboard=negado` na Matriz —
+porque `home_by_profile` para 3 dos 4 perfis e `/dashboard` (Motorista
+e `/escanear`). Se `dashboard=negado` para vendedor (ex.), middleware
+redirecionaria vendedor de qualquer rota para `homeForProfile(vendedor)
+=/dashboard`, que tambem seria negado, gerando loop.
+
+Hoje os 4 perfis tem `dashboard=full` no JSON SSoT — invariante
+implicita.
+
+**Decisao:** registrar como **invariante** que toda mudanca futura na
+Matriz que altere `dashboard` para algo diferente de `full` precisa,
+no mesmo PR, atualizar `home_by_profile` para nao apontar para
+`/dashboard` no perfil afetado.
+
+**Alternativas avaliadas:**
+  - **Validacao automatica** (ex.: teste pytest que verifica essa
+    invariante): boa ideia mas fora do escopo desta sessao. Registrado
+    como follow-up tecnico.
+  - **Trocar `home_by_profile` para path universal** (ex.: `/login` em
+    vez de `/dashboard`): rejeitada — degrada UX em troca de
+    invariante teorica.
+
+**Consequencias:**
+  - Sem mudanca de codigo. Invariante documentada.
+  - Em PRs futuros que tocam a Matriz, revisor pode citar D-9.
+
+## D-10 — "Registro orfao invisivel" aceito como improvavel
+
+**Adicionada na sessao de Audit Round 2 Fixes (2026-05-04).**
+
+**Contexto:** AUD-W1V4-202 (INFO) registrou que cenarios "registro com
+FK para usuario deletado mas linha preservada por trigger de
+imutabilidade" nao foram exaustivamente verificados em producao.
+
+Cenario-alvo: uma `movimentacao` com `usuario_id` apontando para um
+`usuarios.id` que ja foi excluido. Como `movimentacoes` tem trigger
+de imutabilidade (BEFORE UPDATE OR DELETE), a linha persistiria. Como
+`usuarios` tem FK enforcement (RESTRICT), o DELETE de usuario com
+movimentacao referenciada e bloqueado pelo banco — entao o cenario
+e **arquiteturalmente impossivel** sob as constraints atuais.
+
+**Decisao:** aceitar a improbabilidade do cenario com base nas FKs
+ON DELETE RESTRICT e triggers de imutabilidade. Nao verificar
+exaustivamente nesta sessao.
+
+**Alternativas avaliadas:**
+  - **Auditoria periodica** (cron que conta orfaos): seria informativa
+    mas o sinal positivo (zero orfaos) e o estado por construcao;
+    sinal negativo seria red flag e merece investigacao manual.
+  - **Trigger AFTER DELETE em usuarios** que verifica orfaos: rejeitada
+    — duplica garantia ja dada por FK RESTRICT.
+
+**Consequencias:**
+  - Sem mudanca de codigo. Premissa documentada para revisores
+    futuros.
+
+## D-11 — Mudancas de RLS rastreadas via supabase_migrations + Git
+
+**Adicionada na sessao de Audit Round 2 Fixes (2026-05-04).**
+
+**Contexto:** AUD-W1V4-203 (INFO) sugeriu considerar geracao de
+entrada em `audit_logs` para mudancas de RLS (controle de mudanca).
+
+`audit_logs` e o log de DOMINIO da aplicacao (movimentacoes de provas,
+mudancas de usuarios, eventos de transicao). Registrar mudancas de
+SCHEMA/RLS la mistura concerns: domain audit vs DDL audit.
+
+**Decisao:** mudancas de RLS sao rastreadas pelas duas fontes existentes:
+  1. Tabela `supabase_migrations` (versionada pelo Supabase).
+  2. Commits Git em `backend/migrations/rls/*.sql` (RLS 001 a 013).
+
+Ambas as fontes sao audit-trails completas. Nao adicionar log
+duplicado em `audit_logs`.
+
+**Alternativas avaliadas:**
+  - **Trigger `on_event_trigger ddl_command_end` para registrar
+    mudancas de policy/role:** seria possivel, mas nao tem demanda
+    declarada. Considerar se aparecer requisito de compliance no
+    futuro.
+
+**Consequencias:**
+  - Sem mudanca de codigo. Premissa documentada.
+
+## D-12 — Extracts dos `.docx` removidos pos-Gate 1 (AUD-W1V4-204)
+
+**Adicionada na sessao de Audit Round 2 Fixes (2026-05-04).**
+
+**Contexto:** AUD-W1V4-204 (INFO) registrou que os extracts em
+`docs/wave1-v4/_extracted/*.md` foram removidos no closeout do Gate 2
+da Wave 1 v4.0, e isso reduz a reprodutibilidade de auditorias
+futuras (a auditoria atual teve que confiar em citacoes textuais e
+em estruturas codificadas).
+
+**Decisao:** **manter os extracts removidos**. A reprodutibilidade da
+auditoria e garantida pelas seguintes fontes:
+  - **Citacoes textuais da Secao 6 do Requisitos v4.0** em
+    `docs/wave1-v4/analysis.md` Secao 3.
+  - **Estrutura codificada** em `backend/tests/access/test_matrix_structure.py`
+    (`EXPECTED_KEYS`).
+  - **Notas de divergencia** em `shared/access-matrix.json`
+    (`_clicheria_divergence_note`).
+  - **Documentos canonicos** (`.docx`) em `Desktop/Rastreio Prova
+    Digital/` no maquina do operador.
+
+Restaurar os extracts seria duplicar conteudo em local nao-canonico
+no repo. Rejeitado.
+
+**Alternativas avaliadas:**
+  - **Restaurar extracts em `docs/wave1-v4/_extracted/`:** rejeitada
+    — duplicacao e drift potencial entre extracts e .docx.
+  - **Mover .docx para o repo:** rejeitada — binario versionado,
+    mantenedor (Renan) gerencia .docx fora do Claude Code.
+
+**Consequencias:**
+  - Auditorias futuras podem usar fontes acima.
+  - Se um auditor demandar acesso aos .docx, pedir ao Mario/Renan.
+
+## D-13 — Vitest minimo para o middleware (AUD-W1V4-005, Opção A)
+
+**Adicionada na sessao de Audit Round 2 Fixes (2026-05-04).**
+
+**Contexto:** AUD-W1V4-005 (MEDIUM) exigiu teste do middleware. O
+frontend nao tinha test runner — `package.json` so declarava
+`dev/build/start/lint`. Tres caminhos foram avaliados (vide
+`docs/wave1-v4/fix-plan.md` §3.5):
+  - **A.** Vitest minimo (preferida).
+  - **B.** `node:test` built-in (cobertura parcial).
+  - **C.** Deferred com justificativa (mantem L-1 follow-up).
+
+O solicitante escolheu **A** na autorizacao do Gate 2.
+
+**Decisao:** instalar Vitest 2.1.9 como devDependency unica + criar
+`vitest.config.ts` minimo (env node, sem jsdom/coverage) + script
+`"test": "vitest run"` + suite `frontend/src/lib/supabase/__tests__/middleware.test.ts`
+com 15 testes. Nao instalar `@testing-library/react` nem `jsdom`
+nesta sessao — superficie de dependencia minima.
+
+**Alternativas avaliadas:**
+  - **Vitest + Testing Library (cobertura de componentes):** rejeitada
+    nesta sessao — escopo era apenas middleware. Pode ser adicionado
+    em sessao futura se houver demanda.
+  - **Jest + jsdom:** rejeitada — Vitest tem melhor integracao com
+    Vite/Next 14 e Vitest 2.x e estavel.
+  - **`node:test` built-in:** rejeitada apos avaliacao no Gate 1 —
+    cobertura parcial nao satisfaz o achado promovido para MEDIUM.
+
+**Consequencias:**
+  - 1 nova devDependency (`vitest@^2.1.9`).
+  - 2 novos arquivos: `vitest.config.ts` (~25 linhas) e `middleware.test.ts`
+    (~250 linhas, 15 testes).
+  - 2 novos scripts: `test`, `test:watch`.
+  - `npm test` passa em ~400ms (transform 46ms + collect 79ms + tests 9ms).
+  - `npm run lint` + `tsc --noEmit` + `next build` permanecem limpos.
+  - Bundle do middleware nao muda (82.9 kB, identico ao pre-fix).
+  - L-1 follow-up dos audit fixes anteriores cumprido.
