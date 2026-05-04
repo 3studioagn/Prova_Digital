@@ -1,14 +1,23 @@
-"""Equivalencia entre as 3 camadas da Matriz de Acesso (Wave 1 v4.0 C05).
+"""Equivalencia entre Matriz JSON (camada 1) e backend Python (camada 2).
 
-Camadas:
-  1. Matriz declarativa  -> shared/access-matrix.json
-  2. Backend (Python)    -> app/access (matrix.py + enforce.py + scopes.py)
-  3. Banco (SQL)         -> backend/migrations/rls/012_*.sql
+Wave 1 v4.0 C05.
 
-Este arquivo cobre a equivalencia entre 1 e 2 (Python). A equivalencia
-entre 1+2 e 3 (SQL/RLS) e validada por scripts/verify_rbac_equivalence.py
-(standalone, executado contra um Postgres real impersonando role
-authenticated via set_config request.jwt.claims).
+AUD-W1V4-004 (audit Round 2): renomeado de `test_matrix_rls_equivalence.py`
+para `test_matrix_python_equivalence.py` — o nome antigo era enganoso
+porque sugeria que a camada RLS estava coberta por pytest. Ela NAO esta:
+e validada apenas pelo script standalone scripts/verify_rbac_equivalence.py
+contra um Postgres real impersonando role authenticated via
+set_config request.jwt.claims.
+
+Camadas da Matriz de Acesso:
+  1. Declarativa  -> shared/access-matrix.json
+  2. Python       -> app/access (matrix.py + enforce.py + scopes.py)
+  3. RLS          -> backend/migrations/rls/012_*.sql
+                     (validada via scripts/verify_rbac_equivalence.py
+                     etapas [3/4] e [4/4] executadas contra um banco
+                     real, fora da suite pytest)
+
+Este arquivo cobre APENAS a equivalencia entre 1 e 2 (Python <-> JSON).
 
 Objetivo: garantir que NENHUMA celula da Matriz pode divergir entre o
 JSON SSoT e a logica do backend que consulta esse JSON. Mitiga o risco
