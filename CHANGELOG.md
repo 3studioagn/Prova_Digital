@@ -8212,3 +8212,172 @@ follow-up registrado.
   env var `ACCESS_MATRIX_JSON_PATH` em wave futura.
 - **L-8** — `enforce_access_for` log de denial perde `setor` quando
   `profile is None`.
+
+
+## v4.0 — Wave 1 — Componente 05 — Audit Round 2 Fixes (pos-auditoria senior)
+**Data:** 2026-05-04
+**Branch:** `wave1-v4/fixes/execution`
+**Insumo:** `docs/wave1-v4/audit-report.md` (commit `09eaf78`).
+**Escopo:** correcao integral dos 17 achados da auditoria senior
+pos-Wave 1 v4.0: **0 CRITICAL · 0 ALTO · 6 MEDIUM · 7 BAIXO · 4 INFO**.
+13 commits atomicos por achado (2 agrupamentos justificados:
+AUD-001+006 por identidade; AUD-201..204 INFOs por natureza
+documental).
+
+### Modificado / Adicionado por achado
+
+#### MEDIUM (6)
+
+- **AUD-W1V4-001 + AUD-W1V4-006** — `CLAUDE.md:400-403` (commit `7a678a9`):
+  snippet do passo 4 da secao "RBAC: como adicionar uma nova pagina"
+  trocado para o padrao pos-M-1 (`if (auth.loading) return null;` antes
+  do guard). Adicionada nota explicita citando que inverter a ordem
+  reintroduz o flash de UI corrigido em M-1.
+
+- **AUD-W1V4-004** — `backend/tests/access/` (commit `11ac53a`):
+  `test_matrix_rls_equivalence.py` renomeado para
+  `test_matrix_python_equivalence.py` via `git mv` (preserva historico
+  77% similarity). Docstring atualizada deixando explicito que cobre
+  apenas Matriz JSON <-> Python; equivalencia com RLS e validada
+  apenas pelo script standalone.
+
+- **AUD-W1V4-002** — `scripts/verify_rbac_equivalence.py` (commit `566e71f`):
+  cobertura RLS estendida de 1 (provas_digitais) para 6 tabelas
+  (movimentacoes, etiquetas, audit_logs, configuracoes_sistema,
+  usuarios). Etapa [3/4] mostra matriz `visto/esperado` por (perfil,
+  tabela) — 24 counts. Adicionada `expected_counts_for_smoke_users()`
+  que espelha as clausulas das policies em RLS 010/011/012.
+
+- **AUD-W1V4-003** — `scripts/verify_rbac_equivalence.py` (commit `155edf7`):
+  etapa [4/4] reescrita para validar `(rule, profile, table)` triple.
+  Mapping `rule_governs_table`: provas.list, provas.detail, auditoria,
+  configuracoes — 6 (rule, table) pairs × 4 perfis = 24 cells
+  governadas. Para FULL valida count==total; PARCIAL valida
+  count==expected; NEGADO valida count==0. Smoke positivo (SUCESSO em
+  producao) + smoke negativo (divergencia sintetica detectada com
+  mensagem clara, exit 1) confirmaram comportamento.
+
+- **AUD-W1V4-005** — Vitest minimo (Opção A) (commit `1226de6`):
+  `frontend/package.json` ganha `vitest@^2.1.9` em devDependencies +
+  scripts `test`/`test:watch`. `frontend/vitest.config.ts` minimo (env
+  node, sem jsdom/coverage). Suite `src/lib/supabase/__tests__/middleware.test.ts`
+  com **15 testes passando** cobrindo: getRuleForPath (trailing slash,
+  dynamic, prefix, null defensivo), evaluateRule (vendedor NEGADO/PARCIAL),
+  updateSession (anonimo, admin pass-through, vendedor /auditoria
+  302+cookie, vendedor /provas pass+x-rbac-scope), defesa H-1
+  (ativo=false -> /login), defesa H-2 (cookie Secure por NODE_ENV),
+  cache LRU 30s.
+
+#### BAIXO (7)
+
+- **AUD-W1V4-101** — `backend/migrations/rls/013_revoke_truncate_audit_logs.sql`
+  (commit `bcf1ea4`): nova migration RLS 013 espelhando template do
+  RLS 008. `REVOKE TRUNCATE ON public.audit_logs FROM anon, authenticated;`.
+  4a camada de defesa em profundidade RNF-005 (TRUNCATE bypassa RLS e
+  nao dispara trigger BEFORE UPDATE/DELETE). Aplicada via MCP
+  `apply_migration` em producao (2026-05-04). Pre/post `has_table_privilege`
+  via MCP confirmou: authenticated/anon TRUNCATE: true -> false;
+  service_role: true -> true (preservado); authenticated SELECT:
+  true (preservado).
+
+- **AUD-W1V4-105** — `backend/app/api/v1/provas.py` (commit `4a9af14`):
+  criada `_scoping_filter_for_detail(user)` que delega para
+  `scope_filter_for("provas.detail", user)`. Chamada em
+  `_carregar_prova_com_scoping` (linha 913) trocada de `_scoping_filter`
+  para `_scoping_filter_for_detail`. Semantica identica hoje (ver
+  test_provas_detail_inherits_provas_list_scopes), mas convencao
+  reflete que estamos no caminho de detalhe.
+
+- **AUD-W1V4-104** — `frontend/src/hooks/useCurrentUser.ts` (commit `f4bcda1`):
+  adicionado `VALID_SETORES` (set canonico) + type guard
+  `isValidUserInfo(payload)`. Payload de `/api/v1/users/me` validado em
+  runtime; campos errados ou setor fora do conjunto -> `console.warn`
+  + `setState({user:null})` (deny seguro).
+
+- **AUD-W1V4-102** — `CLAUDE.md` (commit `a70f1c2`): bloco AVISO
+  adicionado ao passo 1 da secao RBAC explicando que `getRuleForPath = null`
+  produz pass-through silencioso e que toda nova rota EXIGE entrada na
+  Matriz, mesmo full-para-todos. Lint CI fica como follow-up tecnico.
+
+- **AUD-W1V4-103** — `CLAUDE.md` (commit `005c972`): nota adicionada ao
+  final da secao RBAC explicitando latencia de ate ~30s do
+  `PROFILE_CACHE` apos PATCH/DELETE em `/api/v1/users/{id}`. Defesa em
+  profundidade preserva (backend `get_current_user` valida `ativo`
+  por request; RLS lê fresh). Invalidacao ativa fica como follow-up.
+
+- **AUD-W1V4-107** — `scripts/verify_rbac_equivalence.py` (commit `c069dce`,
+  via `155edf7` do AUD-003): comentario "M-5: asserça de verdade"
+  substituido organicamente pela reescrita do AUD-003. Bloco novo cita
+  AUD-W1V4-107 e descreve cobertura real ((rule, profile, table)
+  triple). Grep `asser.a de verdade` no script: 0 hits.
+
+- **AUD-W1V4-106** — `DECISIONS.md` (commit `f2fffb2`): apendice
+  **D-8 — `_scoping_filter` mantido como shim** registrado.
+  Justificativas: refator de 7 chamadas e fora do escopo "puro RBAC";
+  comentario in-code ja documenta o carater de shim; AUD-105 criou
+  `_scoping_filter_for_detail` e eliminar o shim de listagem agora
+  criaria 2 helpers inconsistentes.
+
+#### INFO (4)
+
+- **AUD-W1V4-201** — `DECISIONS.md` D-9 (commits `f2fffb2` + `6196325`):
+  invariante registrada — `dashboard` deve permanecer FULL para os 4
+  perfis. Toda mudanca futura na Matriz que altere `dashboard` para
+  `negado` precisa, no mesmo PR, atualizar `home_by_profile`.
+
+- **AUD-W1V4-202** — `DECISIONS.md` D-10 (commits `f2fffb2` + `6196325`):
+  cenario "registro orfao invisivel" aceito como improvavel. FK
+  ON DELETE RESTRICT + triggers de imutabilidade tornam o cenario
+  arquiteturalmente impossivel.
+
+- **AUD-W1V4-203** — `DECISIONS.md` D-11 (commits `f2fffb2` + `6196325`):
+  mudancas de RLS sao rastreadas via tabela `supabase_migrations`
+  (Supabase) + commits Git em `backend/migrations/rls/*.sql`. Sem
+  duplicacao em `audit_logs` (que e log de dominio).
+
+- **AUD-W1V4-204** — `DECISIONS.md` D-12 (commits `f2fffb2` + `6196325`):
+  extracts dos `.docx` em `docs/wave1-v4/_extracted/` mantidos
+  removidos. Reprodutibilidade garantida por citacoes textuais em
+  analysis.md, EXPECTED_KEYS em testes, _clicheria_divergence_note
+  no JSON e .docx originais em Desktop/.
+
+### Decisao arquitetural registrada (alem das ja citadas)
+
+- **D-13** (commit `f2fffb2`): Vitest minimo como test runner do
+  frontend (Opção A do fix-plan). 1 devDep (`vitest@^2.1.9`), 0
+  alteracao em codigo de producao. Suite cobre middleware (camada
+  superior da defesa em profundidade).
+
+### Validacao em producao
+
+- **MCP Supabase** (read-only durante o trabalho):
+  - 12 policies em `public.*` continuam referenciando
+    `app_private.current_user_*`. Nenhuma alteracao na camada RLS
+    fora do RLS 013 aplicado.
+  - Advisor security: 1 INFO + 1 WARN historicos. **Nenhum novo
+    alerta atribuivel a esta sessao.**
+  - Advisor performance: 12 INFOs `unused_index` historicos.
+- **Script `verify_rbac_equivalence.py` em producao**:
+  - Smoke positivo: SUCESSO. 24 cells governadas + 32 cells sanity
+    validadas. Cobertura: admin 16/16/16/74/2/8, vendedor 0/0/0/0/0/1,
+    motorista 0/0/0/0/0/1, clicheria 2/8/2/0/0/1.
+  - Smoke negativo (divergencia sintetica): FALHA com exit 1 e
+    mensagem clara `[vendedor][audit_logs] RLS viu 0, esperado 99`.
+- **Backend pytest**: 176/176 passing nos modulos tocados (test_provas_api +
+  tests/access/test_scope_filter_for + tests/access/test_matrix_python_equivalence).
+- **Frontend**: `vitest run` 15/15 passing; `npx tsc --noEmit` limpo;
+  `npm run lint` limpo; `npm run build` limpo (middleware bundle
+  82.9 kB, identico ao pos-Audit Fixes anterior).
+
+### Itens NAO incluidos (fora do escopo desta sessao)
+
+Os seguintes itens permanecem como follow-up tecnico explicito (vide
+`audit-report.md` §"Itens de backlog tecnico"):
+
+- Regra de CI que falhe se houver `app/(dashboard)/<x>/page.tsx` sem
+  entrada na Matriz (item 6 — mitiga AUD-W1V4-102 alem da
+  documentacao).
+- Invalidacao ativa do cache LRU do middleware via Realtime quando
+  admin e desativado/promovido (item 7 — mitiga AUD-W1V4-103).
+- L-3..L-8 dos audit fixes anteriores (CHANGELOG linhas 8204-8214)
+  continuam como follow-up.

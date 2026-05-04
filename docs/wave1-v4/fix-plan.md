@@ -504,3 +504,91 @@ Esta sessão **não regride** nenhum desses itens; apenas reafirma o status quo.
 - **Opção C:** manter como deferred, registrar D-13 em `DECISIONS.md` com justificativa formal.
 
 **Aguardando string `AUTORIZADO GATE 2 — CORREÇÃO WAVE 1 v4.0` para prosseguir** (acompanhada da escolha A/B/C para AUD-W1V4-005).
+
+---
+
+## 10. Resultado da Execução (Gate 2 — concluído 2026-05-04)
+
+**Branch de execução:** `wave1-v4/fixes/execution`
+**Autorização recebida:** "AUTORIZADO GATE 2 — CORREÇÃO WAVE 1 v4.0" + Opção **A** para AUD-W1V4-005.
+**Commits aplicados:** 13 commits atômicos cobrindo 17/17 achados (2 agrupamentos justificados: AUD-001+006 por identidade; AUD-201..204 INFOs por natureza documental).
+
+### 10.1 Diff entre o planejado e o realizado
+
+| Aspecto | Planejado | Realizado | Comentário |
+|---|---|---|---|
+| Total de commits | 13 | 13 | conforme planejado |
+| Posições MEDIUM (1-5) | 5 | 5 | sem desvio |
+| Posições BAIXO (6-12) | 7 | 7 | sem desvio |
+| Posições INFO (13) | 1 (agrupado) | 1 | sem desvio |
+| Smoke positivo + negativo do verify script | obrigatório | executados | smoke negativo confirmou exit 1 com mensagem clara |
+| Migration RLS 013 aplicada em produção | obrigatório | aplicada via MCP | `has_table_privilege` pre/post confirmou efeito |
+| Vitest mínimo (Opção A) | dependente de autorização | aplicada | 15 testes passando, bundle middleware inalterado (82.9 kB) |
+| Atomicidade rigorosa por achado | objetivo | **parcialmente desviado** em 1 commit | f2fffb2 (AUD-106) materializou D-8..D-13 simultaneamente em DECISIONS.md por eficiência. Justificado e documentado. |
+
+### 10.2 Desvio de atomicidade — explicação transparente
+
+Em **1 commit dos 13** (`f2fffb2`, AUD-W1V4-106) houve consolidação não-prevista:
+
+- **O que foi feito:** o commit `f2fffb2` (AUD-106) adicionou **D-8 (do AUD-106) + D-9..D-12 (dos AUD-201..204) + D-13 (do AUD-005)** simultaneamente em `DECISIONS.md`.
+- **Razão:** todos são apêndices acumulativos do mesmo arquivo (`DECISIONS.md`); separar em 5 commits, cada um adicionando uma seção ao "fim" do arquivo, produziria histórico ruidoso para entries que são todas documentais e relacionadas.
+- **Mitigação aplicada:** o commit subsequente `6196325` (AUD-201..204) atualizou apenas o status no `audit-report.md` (sem reabrir DECISIONS), preservando rastreabilidade por ID. O commit message do AUD-201..204 explicita o agrupamento.
+- **Impacto na rastreabilidade:** baixo. Cada achado tem critério objetivo de "resolvido" verificável separadamente; o apêndice "Status final por achado" do `audit-report.md` lista commit principal de cada achado.
+
+Esta é a única violação de atomicidade na sessão, registrada honestamente em vez de mascarada com revert+refazer (que custaria ~10 minutos e produziria histórico cosmético).
+
+### 10.3 Saída completa do smoke check final em produção
+
+**`scripts/verify_rbac_equivalence.py` (matriz atual, smoke positivo):**
+```
+[1/4] Carregando matriz: 12 regras x 4 perfis = 48 celulas
+[2/4] Seeding 4 usuarios smoke: OK
+[3/4] Validando RLS via SQL impersonado (4 perfis x 6 tabelas):
+                  provas_digitais  movimentacoes  etiquetas  audit_logs  configuracoes_sistema  usuarios
+  studio_admin    16/16            16/16          16/16      74/74       2/2                    8/8
+  vendedor        0/0              0/0            0/0        0/0         0/0                    1/1
+  motorista       0/0              0/0            0/0        0/0         0/0                    1/1
+  clicheria       2/2              8/8            2/2        0/0         0/0                    1/1
+[4/4] OK — 24 cells governadas (rule x profile x table) + 32 cells sanity validadas
+[cleanup]: OK
+SUCESSO: todas as camadas batem.
+```
+
+**Smoke negativo (divergência sintética introduzida e revertida):**
+```
+[3/4] vendedor audit_logs: 0/99
+[FAIL] [vendedor][audit_logs] RLS viu 0, esperado 99
+exit code 1
+```
+Reversão validou retorno a SUCESSO (exit 0).
+
+### 10.4 Mapeamento ID → commit SHA
+
+| ID | Commit |
+|---|---|
+| AUD-W1V4-001 + AUD-W1V4-006 | `7a678a9` |
+| AUD-W1V4-004 | `11ac53a` |
+| AUD-W1V4-002 | `566e71f` |
+| AUD-W1V4-003 | `155edf7` |
+| AUD-W1V4-005 | `1226de6` |
+| AUD-W1V4-101 | `bcf1ea4` |
+| AUD-W1V4-105 | `4a9af14` |
+| AUD-W1V4-104 | `f4bcda1` |
+| AUD-W1V4-102 | `a70f1c2` |
+| AUD-W1V4-103 | `005c972` |
+| AUD-W1V4-107 | `c069dce` (via AUD-003 `155edf7`) |
+| AUD-W1V4-106 | `f2fffb2` (D-8) |
+| AUD-W1V4-201..204 | `f2fffb2` (D-9..D-12) + `6196325` (status) |
+
+### 10.5 Estado das suítes pós-execução
+
+- **Backend pytest** (`backend/tests/test_provas_api + tests/access/test_scope_filter_for + tests/access/test_matrix_python_equivalence`): 176/176 passing.
+- **Frontend Vitest**: 15/15 passing (`middleware.test.ts`).
+- **Frontend lint** (`next lint`): No ESLint warnings or errors.
+- **Frontend typecheck** (`tsc --noEmit`): clean.
+- **Frontend build** (`next build`): clean. Middleware bundle: 82.9 kB (idêntico ao pré-fix).
+- **Verify script** (`verify_rbac_equivalence.py`): SUCESSO em produção.
+- **MCP `has_table_privilege` audit_logs TRUNCATE**: authenticated=false, anon=false (revogados); service_role=true (preservado); SELECT preservado.
+- **MCP advisor security**: 1 INFO + 1 WARN históricos. Nenhum novo alerta.
+
+Sem regressão funcional.
