@@ -64,12 +64,12 @@ function deriveRota(origem: Origem, laminacao: boolean): RotaCriacao {
   return origem;
 }
 
-// Rotulos da unidade — Wave 2 v4.0. Endereco removido a pedido do
-// Mario (nao faz sentido no card "Unidade Selecionada" — a informacao
-// e apenas qual unidade foi selecionada, nao o endereco fisico).
-const UNIDADES_INFO: Record<Origem, { titulo: string; cidade: string }> = {
-  MATRIZ: { titulo: "Matriz", cidade: "São Paulo" },
-  FILIAL: { titulo: "Filial", cidade: "Campinas" },
+// Rotulos da unidade — Wave 2 v4.0. Endereco e cidade removidos a
+// pedido do Mario (a informacao e apenas qual UNIDADE foi selecionada
+// — o sistema nao distingue cidade especifica).
+const UNIDADES_INFO: Record<Origem, { titulo: string }> = {
+  MATRIZ: { titulo: "Matriz" },
+  FILIAL: { titulo: "Filial" },
 };
 
 
@@ -99,9 +99,7 @@ function RotaVisualization({ origem, laminacao }: RotaVizProps) {
   const dest = origem === "MATRIZ" ? VIZ_NODES.MATRIZ : VIZ_NODES.FILIAL;
   const altr = origem === "MATRIZ" ? VIZ_NODES.FILIAL : VIZ_NODES.MATRIZ;
   const altrLabel = origem === "MATRIZ" ? "Filial" : "Matriz";
-  const altrCidade = origem === "MATRIZ" ? "Campinas" : "São Paulo";
   const destLabel = UNIDADES_INFO[origem].titulo;
-  const destCidade = UNIDADES_INFO[origem].cidade;
 
   // SVG path da curva ORIGEM -> (LAMI se ativo) -> destino. Coordenadas
   // em viewBox 0..100; preserveAspectRatio "none" estica horizontal e
@@ -175,7 +173,6 @@ function RotaVisualization({ origem, laminacao }: RotaVizProps) {
         <span className={`${styles.vizDot} ${styles.vizDotActive}`} />
         <span className={styles.vizBadgeDest}>
           <strong>{destLabel}</strong>
-          <span className={styles.vizBadgeSub}>{destCidade}</span>
         </span>
       </div>
 
@@ -187,7 +184,6 @@ function RotaVisualization({ origem, laminacao }: RotaVizProps) {
         <span className={`${styles.vizDot} ${styles.vizDotOutline}`} />
         <span className={styles.vizBadgeAlt}>
           <strong>{altrLabel}</strong>
-          <span className={styles.vizBadgeSub}>{altrCidade}</span>
         </span>
       </div>
 
@@ -548,7 +544,6 @@ export default function NovaProvaPage() {
 
   // ─── Layout de criacao (Wave 2 v4.0 — segue o print do Mario) ────────
   const unidade = UNIDADES_INFO[form.origem];
-  const unidadeFull = `${unidade.titulo} · ${unidade.cidade}`;
 
   return (
     <>
@@ -828,7 +823,7 @@ export default function NovaProvaPage() {
                 <span className={styles.cardDot} aria-hidden="true" />
                 UNIDADE SELECIONADA
               </p>
-              <h3 className={styles.cardTitle}>{unidadeFull}</h3>
+              <h3 className={styles.cardTitle}>{unidade.titulo}</h3>
             </div>
 
             <div className={styles.card}>

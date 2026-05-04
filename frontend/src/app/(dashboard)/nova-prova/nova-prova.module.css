@@ -40,7 +40,7 @@
 
 .canvas {
   position: relative;
-  min-height: calc(100vh - 64px);
+  height: calc(100vh - 64px);
   padding: 24px 32px 32px;
   background: #fafaf7;
   overflow: hidden;
@@ -127,9 +127,20 @@
 
 .layout {
   display: grid;
-  grid-template-columns: 360px 1fr 320px;
-  gap: 32px;
-  align-items: stretch;
+  /* Colunas laterais encolhem em viewports estreitas (~1440 com sidebar
+     ~250 = ~893 disponiveis) para preservar a coluna central com tamanho
+     util. ficha minmax(280, 340) + aside minmax(220, 280) + 1fr no centro
+     + gap 20 da: pior caso ~290px de center; melhor caso ~290px tambem
+     (ficha/aside chegam ao max). Em viewports muito largas, ficha e aside
+     param de crescer e o center absorve o restante. */
+  grid-template-columns: 320px 1fr 240px;
+  /* CRITICO: 1fr na linha implicita — sem isso, a linha tem altura `auto`
+     (= conteudo) e align-items: stretch nao tem altura para esticar.
+     Resultado: a ficha terminava onde o conteudo termina, deixando espaco
+     vazio no fundo do canvas. Com 1fr, a linha estica para a altura do
+     container .layout (que tem flex:1 dentro do canvas). */
+  grid-template-rows: 1fr;
+  gap: 20px;
   flex: 1;
   min-height: 0;
 }
@@ -139,7 +150,7 @@
 .center {
   grid-column: 2;
   position: relative;
-  min-height: 480px;
+  height: 100%;
   display: flex;
 }
 
@@ -251,15 +262,13 @@
   text-transform: uppercase;
 }
 
-/* Badge do destino selecionado (preto, texto branco, com cidade) */
+/* Badge do destino selecionado (preto, texto branco) */
 .vizBadgeDest {
   display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
+  align-items: center;
   background: #1a1a1a;
   color: #ffffff;
-  padding: 7px 11px;
+  padding: 7px 12px;
   border-radius: 8px;
   white-space: nowrap;
 }
@@ -270,22 +279,13 @@
   letter-spacing: 0;
 }
 
-.vizBadgeSub {
-  font-size: 10px;
-  font-weight: 400;
-  color: rgba(255, 255, 255, 0.6);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
 /* Badge da alternativa (outline, fundo claro) */
 .vizBadgeAlt {
   display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
+  align-items: center;
   background: #ffffff;
   color: #1a1a1a;
-  padding: 7px 11px;
+  padding: 7px 12px;
   border-radius: 8px;
   border: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -295,10 +295,6 @@
 .vizBadgeAlt strong {
   font-size: 12px;
   font-weight: 600;
-}
-
-.vizBadgeAlt .vizBadgeSub {
-  color: #8a8a8a;
 }
 
 /* Badge da Laminacao no meio do caminho */
