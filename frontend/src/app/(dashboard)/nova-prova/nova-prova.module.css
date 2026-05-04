@@ -41,12 +41,18 @@
 .canvas {
   position: relative;
   height: calc(100vh - 64px);
-  padding: 24px 32px 32px;
+  /* Wave 2 v4.0 — feedback Mario 2: o conteudo deve preencher 100% do
+     box branco SEM moldura interna vazia. Antes era 24/32/32 — criava
+     uma faixa vazia visivel ao redor de toda a area de conteudo (top,
+     lados e bottom). Agora 12/12/12 deixa apenas o respiro minimo para
+     nao grudar absolutamente nas bordas (acessibilidade visual). */
+  padding: 12px;
   background: #fafaf7;
   overflow: hidden;
   isolation: isolate;
   display: flex;
   flex-direction: column;
+  gap: 12px;
 }
 
 /* ─── Topbar (timestamp + acoes) ─────────────────────────────────────────── */
