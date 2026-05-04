@@ -26,7 +26,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 - **6 tabelas de dominio** + `alembic_version` (todas com RLS habilitada)
 - **Schema `app_private`** (Wave 1 v4.0, RLS 012): 3 funcoes helper SECURITY DEFINER `current_user_is_admin()` / `current_user_setor()` / `current_user_id()` referenciadas pelas 12 policies. Schema NAO listado em `db-schemas` do PostgREST (nao exposto via REST).
 - **12 policies RLS** reescritas na Wave 1 v4.0 usando os helpers. Cobertura semantica preservada vs RLS 005/006; `pol_etiquetas_select` estendida para incluir Motorista (status COM_MOTORISTA) e Clicheria (clicheria-states) — fecha lacuna L-RLS-1.
-- **`audit_logs` com 3 camadas de defesa** (RNF-005): trigger `trg_audit_logs_imutavel` (Wave 0) + RLS deny-by-default `pol_audit_select` admin-only (Wave 0/1/2) + REVOKE GRANT-level INSERT/UPDATE/DELETE para `anon`/`authenticated` (Wave 6, RLS 008 — ADR-112). `service_role` mantem GRANT.
+- **`audit_logs` com 4 camadas de defesa** (RNF-005): (1) trigger `trg_audit_logs_imutavel` (Wave 0); (2) RLS deny-by-default `pol_audit_select` admin-only (Wave 0/1/2); (3) REVOKE GRANT-level INSERT/UPDATE/DELETE para `anon`/`authenticated` (Wave 6, RLS 008 — ADR-112); (4) REVOKE TRUNCATE para `anon`/`authenticated` (Wave 1 v4.0 Audit Round 2, RLS 013 — AUD-W1V4-101 — fecha lacuna onde TRUNCATE bypassa RLS e nao dispara trigger BEFORE UPDATE/DELETE). `service_role` mantem GRANT em todas as camadas (preserva flexibilidade operacional).
 - **32 indexes** cobrindo filtros dos Componentes 07 + relatorios da Wave 5 (migration 010: +`idx_provas_vendedor_status` +`idx_movimentacoes_status_novo_created_at` — ADR-095). Wave 6 nao criou indice (4 indices em `audit_logs` ja cobrem; advisor `unused_index` deve cair conforme uso real).
 - **3 usuarios ativos**: 2 admins (`admin@3studio.com.br` + `ops@3studio.com.br`) + 1 vendedor FILIAL (`mariosouza@teste.com.br`)
 - **Advisor Supabase limpo** exceto: 1 INFO `rls_enabled_no_policy` em `alembic_version` (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection` (WONTFIX plano pago, ADR-027)
@@ -169,6 +169,12 @@ provaDigital/
 │   │       ├── 005_initplan_optimization.sql  # ADR-029 — (SELECT auth.uid()) em 11 policies
 │   │       ├── 006_movimentacoes_insert_and_expand_select.sql  # ADR-082 — INSERT admin + SELECT c/ MOTORISTA/CLICHERIA
 │   │       ├── 007_enable_realtime_provas.sql                 # Wave 4 — provas_digitais na publicacao supabase_realtime
+│   │       ├── 008_revoke_audit_logs_mutation.sql             # Wave 6 — defesa em profundidade RNF-005 (3a camada — INSERT/UPDATE/DELETE)
+│   │       ├── 009_helpers_v4.sql                             # Wave 1 v4.0 — superseded por 012
+│   │       ├── 010_rebase_rls_v4.sql                          # Wave 1 v4.0 — superseded por 012
+│   │       ├── 011_etiquetas_select_motorista_clicheria.sql   # Wave 1 v4.0 — superseded por 012
+│   │       ├── 012_move_helpers_to_app_private.sql            # Wave 1 v4.0 — estado final dos helpers SECURITY DEFINER em schema app_private
+│   │       ├── 013_revoke_truncate_audit_logs.sql             # Wave 1 v4.0 Audit Round 2 — AUD-W1V4-101 (4a camada RNF-005)
 │   │       └── apply_rls.py
 │   └── tests/
 │       ├── conftest.py          # Fixtures: make_user, admin_user, mock_db, vendedor_matriz/filial
