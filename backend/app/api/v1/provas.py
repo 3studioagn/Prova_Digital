@@ -669,8 +669,32 @@ def _scoping_filter(user: Usuario):
     Retorna `None` quando nao ha restricao (admin/full). Retorna uma
     clausula `false` para combinacoes nao mapeadas (defensivo, garante 0
     resultados).
+
+    USAR APENAS NO CAMINHO DE LISTAGEM. Para endpoints de detalhe
+    (`GET /{id}/...`), usar `_scoping_filter_for_detail` para que a chave
+    da Matriz consultada seja `provas.detail` em vez de `provas.list`
+    (vide AUD-W1V4-105).
     """
     return scope_filter_for("provas.list", user)
+
+
+def _scoping_filter_for_detail(user: Usuario):
+    """Versao de `_scoping_filter` para o caminho de detalhe.
+
+    AUD-W1V4-105 (audit Round 2): a Matriz separa `provas.list`
+    (listagem) de `provas.detail` (pagina de detalhe + endpoints
+    derivados — imagem-url, movimentacoes, etiqueta.pdf, qr-code.png).
+    A semantica e IDENTICA hoje (mesmas decisoes em
+    `shared/access-matrix.json`); o teste
+    `test_provas_detail_inherits_provas_list_scopes` garante essa
+    paridade. Mas o uso da chave correta importa porque:
+      1. Se algum dia a Matriz divergir provas.list vs provas.detail
+         (ex.: Clicheria FULL no detalhe e PARCIAL na lista), o backend
+         passara a respeitar a divergencia automaticamente.
+      2. Documentacao e log/audit mais precisos sobre qual regra esta
+         sendo enforcada.
+    """
+    return scope_filter_for("provas.detail", user)
 
 
 @router.get("/", response_model=ProvaListResponse)
@@ -882,7 +906,11 @@ async def _carregar_prova_com_scoping(
         .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
         .where(ProvaDigital.id == prova_id)
     )
-    base = _scoping_filter(user)
+    # AUD-W1V4-105: usar chave `provas.detail` (nao `provas.list`) — a
+    # semantica e identica hoje, mas convencao reflete que estamos no
+    # caminho de detalhe, nao no de listagem. Se a Matriz divergir
+    # provas.list vs provas.detail no futuro, o backend respeita.
+    base = _scoping_filter_for_detail(user)
     if base is not None:
         stmt = stmt.where(base)
 
