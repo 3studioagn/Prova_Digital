@@ -45,58 +45,8 @@
   background: #fafaf7;
   overflow: hidden;
   isolation: isolate;
-}
-
-/* Grid de pontos ambient */
-.gridDots {
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(
-    circle at center,
-    rgba(0, 0, 0, 0.08) 1px,
-    transparent 1.5px
-  );
-  background-size: 16px 16px;
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* Blob amarelo borrado, posicionado um pouco a esquerda do centro */
-.blob {
-  position: absolute;
-  top: 28%;
-  left: 36%;
-  width: 380px;
-  height: 380px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(248, 209, 38, 0.55) 0%,
-    rgba(248, 209, 38, 0.25) 35%,
-    rgba(248, 209, 38, 0) 70%
-  );
-  filter: blur(18px);
-  pointer-events: none;
-  z-index: 1;
-}
-
-/* Linha de onda + 2 pontos (rota visual ambient) */
-.wave {
-  position: absolute;
-  bottom: 12%;
-  left: 0;
-  right: 0;
-  width: 100%;
-  height: 200px;
-  pointer-events: none;
-  z-index: 1;
-}
-
-/* Topbar e layout ficam ACIMA do canvas */
-.topbar,
-.layout {
-  position: relative;
-  z-index: 2;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ─── Topbar (timestamp + acoes) ─────────────────────────────────────────── */
@@ -179,7 +129,215 @@
   display: grid;
   grid-template-columns: 360px 1fr 320px;
   gap: 32px;
-  align-items: start;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Coluna central: visualizacao da rota ocupa 100% da altura disponivel
+   entre topbar e o final do canvas (Wave 2 v4.0 — feedback Mario). */
+.center {
+  grid-column: 2;
+  position: relative;
+  min-height: 480px;
+  display: flex;
+}
+
+/* ─── Visualizacao da rota (Wave 2 v4.0 — print do Mario) ──────────────── */
+
+.rotaViz {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.vizDots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at center,
+    rgba(0, 0, 0, 0.07) 1px,
+    transparent 1.5px
+  );
+  background-size: 16px 16px;
+  pointer-events: none;
+}
+
+.vizSvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Halo amarelo radial em volta do destino selecionado — usa a cor
+   primaria do projeto (#f8d126). */
+.vizHalo {
+  position: absolute;
+  width: 380px;
+  height: 380px;
+  margin-left: -190px;
+  margin-top: -190px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(248, 209, 38, 0.55) 0%,
+    rgba(248, 209, 38, 0.18) 38%,
+    rgba(248, 209, 38, 0) 70%
+  );
+  filter: blur(20px);
+  pointer-events: none;
+  transition: left 0.3s ease, top 0.3s ease;
+}
+
+/* Container generico de no posicionado em x/y % do .rotaViz */
+.vizNode {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  transition: left 0.3s ease, top 0.3s ease;
+}
+
+/* Quando o destino e ativo, label fica abaixo do ponto */
+.vizNodeDest {
+  flex-direction: column-reverse;
+}
+
+/* Pontos circulares dos nos */
+.vizDot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #1a1a1a;
+}
+
+.vizDotOrigem {
+  background: #1a1a1a;
+}
+
+.vizDotActive {
+  width: 16px;
+  height: 16px;
+  background: #f8d126;
+  box-shadow:
+    0 0 0 4px rgba(248, 209, 38, 0.25),
+    0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.vizDotOutline {
+  background: #ffffff;
+  border: 1.5px solid rgba(0, 0, 0, 0.35);
+  width: 12px;
+  height: 12px;
+}
+
+/* Badge ORIGEM (preto, texto branco) */
+.vizBadgeOrigem {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: #ffffff;
+  background: #1a1a1a;
+  padding: 4px 9px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+/* Badge do destino selecionado (preto, texto branco, com cidade) */
+.vizBadgeDest {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  background: #1a1a1a;
+  color: #ffffff;
+  padding: 7px 11px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.vizBadgeDest strong {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.vizBadgeSub {
+  font-size: 10px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Badge da alternativa (outline, fundo claro) */
+.vizBadgeAlt {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  background: #ffffff;
+  color: #1a1a1a;
+  padding: 7px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  white-space: nowrap;
+}
+
+.vizBadgeAlt strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.vizBadgeAlt .vizBadgeSub {
+  color: #8a8a8a;
+}
+
+/* Badge da Laminacao no meio do caminho */
+.vizBadgeLam {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #8a8a8a;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  white-space: nowrap;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.vizBadgeLamOn {
+  background: #1a1a1a;
+  color: #ffffff;
+  border-color: #1a1a1a;
+}
+
+.vizLamIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 9px;
+  color: inherit;
+}
+
+.vizBadgeLamOn .vizLamIcon {
+  background: #f8d126;
+  color: #1a1a1a;
 }
 
 /* ─── Ficha (box branco) ────────────────────────────────────────────────── */
@@ -748,12 +906,18 @@
     grid-template-columns: 1fr;
   }
   .ficha,
-  .aside {
+  .aside,
+  .center {
     grid-column: 1;
+  }
+  .center {
+    min-height: 360px;
+    order: 2;
   }
   .aside {
     flex-direction: row;
     flex-wrap: wrap;
+    order: 3;
   }
   .aside .card {
     flex: 1 1 240px;

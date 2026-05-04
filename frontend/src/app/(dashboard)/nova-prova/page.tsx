@@ -64,18 +64,150 @@ function deriveRota(origem: Origem, laminacao: boolean): RotaCriacao {
   return origem;
 }
 
-// Endereco institucional da unidade — Wave 2 v4.0 hardcoded; futura
-// iteracao pode mover para `configuracoes_sistema` via chave dedicada.
-const UNIDADES_INFO: Record<Origem, { titulo: string; endereco: string }> = {
-  MATRIZ: {
-    titulo: "Matriz · São Paulo",
-    endereco: "Av. Paulista, 1000 — Bela Vista, São Paulo · SP",
-  },
-  FILIAL: {
-    titulo: "Filial · Campinas",
-    endereco: "Av. Norte-Sul, 450 — Cambuí, Campinas · SP",
-  },
+// Rotulos da unidade — Wave 2 v4.0. Endereco removido a pedido do
+// Mario (nao faz sentido no card "Unidade Selecionada" — a informacao
+// e apenas qual unidade foi selecionada, nao o endereco fisico).
+const UNIDADES_INFO: Record<Origem, { titulo: string; cidade: string }> = {
+  MATRIZ: { titulo: "Matriz", cidade: "São Paulo" },
+  FILIAL: { titulo: "Filial", cidade: "Campinas" },
 };
+
+
+// ─── Visualizacao da rota (Wave 2 v4.0 — print Mario) ────────────────────
+//
+// Ocupa a coluna central do layout. Mostra origem (3Studio), destino
+// selecionado (Matriz ou Filial — ativo) e alternativa (outline). Nó
+// "Laminacao" aparece no meio do caminho — preenchido quando ativo,
+// outline quando off.
+//
+// Coordenadas em % do container (responsivo). Curvas SVG geradas com
+// Bezier cubico. Cores do projeto: preto (#1a1a1a), amarelo (#f8d126).
+
+interface RotaVizProps {
+  origem: Origem;
+  laminacao: boolean;
+}
+
+const VIZ_NODES = {
+  ORIGEM: { x: 12, y: 22 },     // %: topo-esquerda
+  MATRIZ: { x: 78, y: 22 },     // %: topo-direita
+  FILIAL: { x: 80, y: 78 },     // %: baixo-direita
+  LAMI: { x: 46, y: 50 },       // %: meio
+} as const;
+
+function RotaVisualization({ origem, laminacao }: RotaVizProps) {
+  const dest = origem === "MATRIZ" ? VIZ_NODES.MATRIZ : VIZ_NODES.FILIAL;
+  const altr = origem === "MATRIZ" ? VIZ_NODES.FILIAL : VIZ_NODES.MATRIZ;
+  const altrLabel = origem === "MATRIZ" ? "Filial" : "Matriz";
+  const altrCidade = origem === "MATRIZ" ? "Campinas" : "São Paulo";
+  const destLabel = UNIDADES_INFO[origem].titulo;
+  const destCidade = UNIDADES_INFO[origem].cidade;
+
+  // SVG path da curva ORIGEM -> (LAMI se ativo) -> destino. Coordenadas
+  // em viewBox 0..100; preserveAspectRatio "none" estica horizontal e
+  // vertical (linha visualmente desproporcional aceita — o objetivo e
+  // representar fluxo, nao mapa fisico).
+  const O = VIZ_NODES.ORIGEM;
+  const D = dest;
+  const L = VIZ_NODES.LAMI;
+  const path = laminacao
+    ? `M ${O.x} ${O.y} ` +
+      `C ${O.x + 18} ${O.y + 12}, ${L.x - 14} ${L.y - 6}, ${L.x} ${L.y} ` +
+      `S ${D.x - 14} ${D.y - 6}, ${D.x} ${D.y}`
+    : `M ${O.x} ${O.y} ` +
+      `C ${O.x + 26} ${O.y + (D === VIZ_NODES.FILIAL ? 14 : 0)}, ` +
+      `${D.x - 26} ${D.y - (D === VIZ_NODES.FILIAL ? 14 : 0)}, ` +
+      `${D.x} ${D.y}`;
+
+  // Ponto decorativo intermediario (visual da Image 2: pequena bolinha
+  // no meio da curva). Posicao: meio entre ORIGEM e destino.
+  const midDot = laminacao
+    ? { x: (O.x + L.x) / 2, y: (O.y + L.y) / 2 + 2 }
+    : { x: (O.x + D.x) / 2, y: (O.y + D.y) / 2 + 2 };
+
+  return (
+    <div className={styles.rotaViz} aria-hidden="true">
+      {/* Grid de pontos ambient como pano de fundo da visualizacao */}
+      <div className={styles.vizDots} />
+
+      {/* Curva SVG */}
+      <svg
+        className={styles.vizSvg}
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+      >
+        <path
+          d={path}
+          fill="none"
+          stroke="#1a1a1a"
+          strokeOpacity="0.18"
+          strokeWidth="0.35"
+          strokeLinecap="round"
+        />
+        <circle
+          cx={midDot.x}
+          cy={midDot.y}
+          r="0.6"
+          fill="#f8d126"
+        />
+      </svg>
+
+      {/* Halo amarelo radial em volta do destino — cor do projeto */}
+      <div
+        className={styles.vizHalo}
+        style={{ left: `${dest.x}%`, top: `${dest.y}%` }}
+      />
+
+      {/* Pontos: ORIGEM */}
+      <div
+        className={styles.vizNode}
+        style={{ left: `${O.x}%`, top: `${O.y}%` }}
+      >
+        <span className={`${styles.vizDot} ${styles.vizDotOrigem}`} />
+        <span className={styles.vizBadgeOrigem}>ORIGEM</span>
+      </div>
+
+      {/* Destino selecionado (preenchido) */}
+      <div
+        className={`${styles.vizNode} ${styles.vizNodeDest}`}
+        style={{ left: `${D.x}%`, top: `${D.y}%` }}
+      >
+        <span className={`${styles.vizDot} ${styles.vizDotActive}`} />
+        <span className={styles.vizBadgeDest}>
+          <strong>{destLabel}</strong>
+          <span className={styles.vizBadgeSub}>{destCidade}</span>
+        </span>
+      </div>
+
+      {/* Alternativa (outline, nao selecionada) */}
+      <div
+        className={styles.vizNode}
+        style={{ left: `${altr.x}%`, top: `${altr.y}%` }}
+      >
+        <span className={`${styles.vizDot} ${styles.vizDotOutline}`} />
+        <span className={styles.vizBadgeAlt}>
+          <strong>{altrLabel}</strong>
+          <span className={styles.vizBadgeSub}>{altrCidade}</span>
+        </span>
+      </div>
+
+      {/* Laminacao no meio */}
+      <div
+        className={styles.vizNode}
+        style={{ left: `${L.x}%`, top: `${L.y}%` }}
+      >
+        <span
+          className={`${styles.vizBadgeLam} ${
+            laminacao ? styles.vizBadgeLamOn : ""
+          }`}
+        >
+          <span className={styles.vizLamIcon} aria-hidden="true">▥</span>
+          Laminação
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -416,6 +548,7 @@ export default function NovaProvaPage() {
 
   // ─── Layout de criacao (Wave 2 v4.0 — segue o print do Mario) ────────
   const unidade = UNIDADES_INFO[form.origem];
+  const unidadeFull = `${unidade.titulo} · ${unidade.cidade}`;
 
   return (
     <>
@@ -423,36 +556,12 @@ export default function NovaProvaPage() {
         <p>Para acessar esse recurso, acesse a versao desktop.</p>
       </div>
 
-      {/* Canvas com background ambient (grid de pontos + blob amarelo + onda) */}
       <form
         id="nova-prova-form"
         className={styles.canvas}
         onSubmit={handleSubmit}
         noValidate
       >
-        {/* Camadas decorativas do canvas (atras do conteudo) */}
-        <div className={styles.gridDots} aria-hidden="true" />
-        <div className={styles.blob} aria-hidden="true" />
-        <svg
-          className={styles.wave}
-          viewBox="0 0 1200 200"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M0,140 C200,80 400,160 600,120 C800,80 1000,140 1200,100 L1200,200 L0,200 Z"
-            fill="rgba(0,0,0,0.04)"
-          />
-          <path
-            d="M0,140 C200,80 400,160 600,120 C800,80 1000,140 1200,100"
-            fill="none"
-            stroke="rgba(0,0,0,0.18)"
-            strokeWidth="1"
-          />
-          <circle cx="442" cy="138" r="6" fill="#1a1a1a" />
-          <circle cx="585" cy="125" r="3" fill="#1a1a1a" />
-        </svg>
-
         {/* Topo — pill com timestamp + botoes a direita */}
         <header className={styles.topbar}>
           <span className={styles.timestamp}>{timestamp || "—/—, —:—"}</span>
@@ -706,6 +815,12 @@ export default function NovaProvaPage() {
             {error && <div className={styles.errorBox}>{error}</div>}
           </section>
 
+          {/* ── Centro: visualizacao da rota (substitui o canvas
+              decorativo da v1 — ocupa 100% da area entre ficha e cards). */}
+          <div className={styles.center}>
+            <RotaVisualization origem={form.origem} laminacao={form.laminacao} />
+          </div>
+
           {/* ── Cards a direita ───────────────────────────────────────── */}
           <aside className={styles.aside}>
             <div className={styles.card}>
@@ -713,13 +828,12 @@ export default function NovaProvaPage() {
                 <span className={styles.cardDot} aria-hidden="true" />
                 UNIDADE SELECIONADA
               </p>
-              <h3 className={styles.cardTitle}>{unidade.titulo}</h3>
-              <p className={styles.cardBody}>{unidade.endereco}</p>
+              <h3 className={styles.cardTitle}>{unidadeFull}</h3>
             </div>
 
             <div className={styles.card}>
               <p className={styles.cardLabel}>
-                <kbd className={styles.kbd}>⌘V</kbd> cole imagem
+                <kbd className={styles.kbd}>⌘V</kbd> COLE IMAGEM
               </p>
               <p className={styles.cardBody}>
                 Você também pode arrastar direto no anexo da ficha à esquerda.
