@@ -753,3 +753,18 @@ Lista completa de commits da branch (entre `1e086b3` e `3fb6e93`):
 ---
 
 **Fim do relatório.**
+
+---
+
+## Apêndice — Status final por achado (preenchido pela sessão de correção 2026-05-04)
+
+> Esta seção é apêndice gerado pela sessão `wave1-v4/fixes/execution`
+> (Audit Round 2 Fixes). O corpo do relatório acima permanece intacto.
+> Ver `docs/wave1-v4/fix-plan.md` para o plano de correção e
+> `docs/wave1-v4/fix-validation.md` (criado ao final do Gate 2) para o
+> relatório de validação consolidado.
+
+| ID | Status | Commit | Critério verificado |
+|---|---|---|---|
+| AUD-W1V4-001 | RESOLVIDO | _pending_ | Snippet do passo 4 em `CLAUDE.md` agora usa `if (auth.loading) return null;` antes do guard. |
+| AUD-W1V4-006 | RESOLVIDO | _pending_ (junto com 001) | Mesmo critério de AUD-W1V4-001 — agrupados por identidade. |

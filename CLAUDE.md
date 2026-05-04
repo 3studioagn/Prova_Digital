@@ -398,10 +398,16 @@ de verdade espelhada por TS/Python/RLS. Para adicionar uma nova pagina:
 4. **No frontend**, na pagina:
    ```tsx
    const auth = useAuthorization("nova.chave");
-   if (!auth.loading && !auth.hasAccess) {
+   if (auth.loading) return null; // M-1: evita flash de UI proibida antes do guard
+   if (!auth.hasAccess) {
      return <Restricted ruleKey="nova.chave" profile={auth.profile} />;
    }
    ```
+   **Importante**: `if (auth.loading) return null` precisa vir ANTES do guard
+   (`!auth.hasAccess`). Inverter a ordem reintroduz o bug M-1 (~50-200ms de
+   flash de controles admin para vendedor enquanto `useCurrentUser` resolve
+   `/users/me`). Ver CHANGELOG (Wave 1 v4.0 Audit Fixes — M-1) e auditoria
+   Round 2 (AUD-W1V4-001/006).
 
 5. **Se a pagina deve aparecer no menu** (`(dashboard)/layout.tsx`),
    adicionar entrada em `MAIN_NAV` ou `SECONDARY_NAV` com o campo
