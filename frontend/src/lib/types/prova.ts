@@ -15,7 +15,30 @@ export type StatusProva =
   | "REPROVADA_PELO_VENDEDOR"
   | "CANCELADA";
 
-export type Rota = "PADRAO" | "DIRETA";
+/**
+ * Rota de encaminhamento (Wave 2 v4.0 — Componente 06).
+ *
+ * Os 4 valores v4.0 (MATRIZ, LAM_MATRIZ, FILIAL, LAM_FILIAL) sao
+ * escolhidos manualmente pelo Administrador na criacao da prova.
+ * Os 2 valores legacy (PADRAO, DIRETA) permanecem ate a Wave 7
+ * (Componente 21) fazer o backfill final — provas v3.0 ja em producao
+ * continuam sendo lidas com esses valores. NUNCA enviar PADRAO/DIRETA
+ * em payload de criacao (backend rejeita com 422 via RotaCriacaoEnum).
+ */
+export type Rota =
+  | "MATRIZ"
+  | "LAM_MATRIZ"
+  | "FILIAL"
+  | "LAM_FILIAL"
+  // Legacy v3.0 — backfill na Wave 7
+  | "PADRAO"
+  | "DIRETA";
+
+/**
+ * Sub-tipo aceito apenas no payload de criacao (Wave 2 v4.0). Espelha
+ * `RotaCriacaoEnum` do backend. Bloqueia legacy.
+ */
+export type RotaCriacao = "MATRIZ" | "LAM_MATRIZ" | "FILIAL" | "LAM_FILIAL";
 
 export type Localizacao = "MATRIZ" | "FILIAL";
 
@@ -27,27 +50,34 @@ export interface UploadUrlResponse {
   max_bytes: number;
 }
 
-/** Payload de POST /api/v1/provas/ */
+/** Payload de POST /api/v1/provas/ (Wave 2 v4.0).
+ *
+ * `rota` e obrigatorio (RN-007 v4.0) — apenas RotaCriacao (4 valores
+ * v4.0) e aceita; legacy (PADRAO/DIRETA) e bloqueado pelo backend.
+ */
 export interface ProvaCreateRequest {
   nome: string;
   nro_requerimento: string;
   cliente: string;
   vendedor_id: string;
+  rota: RotaCriacao;
   object_key: string;
 }
 
 /** Representacao publica de uma prova digital.
  *
- * `rota_projetada` pode ser `null` quando o vendedor original perde a
- * capacidade de ter rota calculada (ex: desativado, mudou de setor). No
- * POST /provas/ sempre vem populado porque o endpoint valida o vendedor
- * no momento da criacao — a tipagem aceita null para ser consistente com
- * o detail (GET /{id}) e evitar discriminacao entre os dois responses.
+ * Wave 2 v4.0 (Componente 06):
+ *   - `codigo_publico` (NOVO) sempre presente — formato PRV-AAAA-MM-NNNNNN.
+ *   - `rota_projetada` REMOVIDO — `rota` ja vem persistido com a escolha
+ *     do admin desde a criacao.
+ *   - `rota` continua nullable para suportar provas legadas v3.0 com
+ *     `rota=NULL` (Wave 7 / Componente 21 fara o backfill).
  */
 export interface ProvaResponse {
   id: string;
   nome: string;
   nro_requerimento: string;
+  codigo_publico: string;
   cliente: string;
   vendedor_id: string;
   vendedor_nome: string;
@@ -56,7 +86,6 @@ export interface ProvaResponse {
   qr_code_hash: string;
   status: StatusProva;
   rota: Rota | null;
-  rota_projetada: Rota | null;
   ciclo_atual: number;
   motivo_cancelamento: string | null;
   created_at: string;
@@ -76,11 +105,16 @@ export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 
 // ─── Listagem (Componente 07) ─────────────────────────────────────────
 
-/** Item slim retornado por GET /api/v1/provas/ — espelho de ProvaListItem. */
+/** Item slim retornado por GET /api/v1/provas/ — espelho de ProvaListItem.
+ *
+ * Wave 2 v4.0 (Componente 06): incluiu `codigo_publico` para permitir
+ * busca/exibicao direto na listagem.
+ */
 export interface ProvaListItem {
   id: string;
   nome: string;
   nro_requerimento: string;
+  codigo_publico: string;
   cliente: string;
   vendedor_id: string;
   vendedor_nome: string;
@@ -130,11 +164,29 @@ export const STATUS_LABELS_SHORT: Record<StatusProva, string> = {
   CANCELADA: "Cancelada",
 };
 
-/** Labels pt-BR para as rotas. */
+/** Labels pt-BR para as rotas (Wave 2 v4.0).
+ *
+ * Os 4 valores v4.0 tem labels human-readable claros. Legacy (PADRAO/
+ * DIRETA) recebem sufixo "(legada)" para nao confundir o admin com
+ * provas v3.0 ainda nao backfilled (Wave 7 / Componente 21).
+ */
 export const ROTA_LABELS: Record<Rota, string> = {
-  PADRAO: "Rota padrao",
-  DIRETA: "Rota direta",
+  MATRIZ: "Matriz",
+  LAM_MATRIZ: "Lam. Matriz",
+  FILIAL: "Filial",
+  LAM_FILIAL: "Lam. Filial",
+  PADRAO: "Matriz (legada v3.0)",
+  DIRETA: "Filial (legada v3.0)",
 };
+
+/** Apenas as 4 rotas v4.0, na ordem do design (Mario): linha 1 = Matriz/Filial,
+ * linha 2 = Lam. Matriz / Lam. Filial. */
+export const ROTA_CRIACAO_OPTIONS: readonly RotaCriacao[] = [
+  "MATRIZ",
+  "FILIAL",
+  "LAM_MATRIZ",
+  "LAM_FILIAL",
+] as const;
 
 /** Ordem canonica dos status para exibicao em selects. */
 export const STATUS_OPTIONS: readonly StatusProva[] = [
@@ -150,7 +202,19 @@ export const STATUS_OPTIONS: readonly StatusProva[] = [
   "CANCELADA",
 ] as const;
 
-export const ROTA_OPTIONS: readonly Rota[] = ["PADRAO", "DIRETA"] as const;
+/** Opcoes do filtro de rota na listagem (Componente 07).
+ *
+ * Wave 2 v4.0: 4 rotas novas + 2 legacy (Componente 07 continua
+ * filtrando provas v3.0 ainda nao backfilled — Wave 7).
+ */
+export const ROTA_OPTIONS: readonly Rota[] = [
+  "MATRIZ",
+  "LAM_MATRIZ",
+  "FILIAL",
+  "LAM_FILIAL",
+  "PADRAO",
+  "DIRETA",
+] as const;
 
 // ─── Detalhe (Componente 08) ──────────────────────────────────────────
 
@@ -290,12 +354,16 @@ export interface DashboardResponse {
 
 /** Monta o payload escaneavel do QR Code a partir dos dados da prova.
  *
- * Formato: "3SD|{nro_requerimento}|{hash[:16]}"
+ * Wave 2 v4.0: o segundo campo passa a ser `codigo_publico`
+ * (PRV-AAAA-MM-NNNNNN) em vez de `nro_requerimento` — DAT v3.0 §8.1
+ * exige idempotencia entre camera e digitacao manual (Componente 19,
+ * Wave 3 v4.0). Formato: "3SD|{codigo_publico}|{hash[:16]}".
+ *
  * Espelho de `qrcode_service.gerar_payload_qr` no backend.
  */
 export function buildQrPayload(
-  nroRequerimento: string,
+  identificador: string,
   qrCodeHash: string,
 ): string {
-  return `3SD|${nroRequerimento}|${qrCodeHash.substring(0, 16)}`;
+  return `3SD|${identificador}|${qrCodeHash.substring(0, 16)}`;
 }

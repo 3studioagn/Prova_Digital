@@ -25,9 +25,12 @@ function formatDate(iso: string): string {
   }
 }
 
-function formatRota(rota: Rota | null, rotaProjetada: Rota | null): string {
+function formatRota(rota: Rota | null): string {
+  // Wave 2 v4.0 (Componente 06): `rota_projetada` foi removido — `prova.rota`
+  // ja vem persistido com a escolha do admin desde a criacao. Provas
+  // legadas v3.0 com rota=NULL exibem "—" ate a Wave 7 (Componente 21)
+  // fazer o backfill final.
   if (rota) return ROTA_LABELS[rota];
-  if (rotaProjetada) return `${ROTA_LABELS[rotaProjetada]} (projetada)`;
   return "—";
 }
 
@@ -178,8 +181,11 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                       <strong>Vendedor:</strong> {prova.vendedor_nome}
                     </p>
                     <p className={styles.metadataItem}>
-                      <strong>Rota:</strong>{" "}
-                      {formatRota(prova.rota, prova.rota_projetada)}
+                      <strong>Código:</strong>{" "}
+                      <span className={styles.mono}>{prova.codigo_publico}</span>
+                    </p>
+                    <p className={styles.metadataItem}>
+                      <strong>Rota:</strong> {formatRota(prova.rota)}
                     </p>
                     <p className={styles.metadataItem}>
                       <strong>Ciclo Atual:</strong> {prova.ciclo_atual}

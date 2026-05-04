@@ -6,6 +6,7 @@ import {
   ALLOWED_IMAGE_TYPES,
   MAX_UPLOAD_BYTES,
   type ProvaCreateResponse,
+  type RotaCriacao,
   type UploadUrlResponse,
 } from "@/lib/types/prova";
 
@@ -14,6 +15,9 @@ interface CreateProvaInput {
   nro_requerimento: string;
   cliente: string;
   vendedor_id: string;
+  /** Wave 2 v4.0: rota e obrigatoria — escolhida manualmente pelo
+   * admin entre as 4 opcoes (RN-007 v4.0). */
+  rota: RotaCriacao;
   arquivo: File;
 }
 
@@ -134,6 +138,7 @@ export function useCreateProva(getToken: () => Promise<string | null>) {
             nro_requerimento: input.nro_requerimento,
             cliente: input.cliente,
             vendedor_id: input.vendedor_id,
+            rota: input.rota,
             object_key: uploadData.object_key,
           }),
         });

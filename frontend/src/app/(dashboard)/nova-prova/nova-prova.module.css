@@ -1,376 +1,761 @@
 /*
- * Pagina Nova Prova — conteudo dentro do .card do dashboard.
+ * Wave 2 v4.0 (Componente 06) — Cadastro de Prova Digital
  *
- * Design alinhado ao Figma (Sessao 15): header com titulo grande +
- * botao "Criar prova" amarelo pill no canto direito, grid 2x2 de
- * inputs pill, dropzone cinza claro grande com icone "+" centralizado.
+ * Layout segue fielmente o print do design entregue pelo Mario:
+ *   - Canvas com background ambient (grid de pontos + blob amarelo + onda)
+ *   - Topbar com timestamp pill (esquerda) + 2 botoes (direita)
+ *   - Layout grid: ficha branca (esquerda) + 2 cards (direita)
+ *   - Ficha tem segment "Matriz / Filial" + switch "Laminacao"
+ *   - Footer da ficha mostra ORIGEM e STATUS
  *
- * Mobile: esconde o form e exibe aviso (mesmo padrao de /usuarios e
- * /provas).
+ * As 4 rotas v4.0 sao derivadas das 2 toggles (origem + laminacao) no submit.
+ *
+ * Tela de sucesso (apos criar) preserva layout v3.0 com pequenos ajustes
+ * para mostrar codigo_publico em destaque.
  */
 
-/* ── Mobile-only notice / desktop wrapper ─────────────────────────────── */
+/* ─── Aviso mobile / desktop only ───────────────────────────────────────── */
 
 .mobileNotice {
   display: none;
+  padding: 24px;
+  text-align: center;
 }
 
 .desktopOnly {
-  display: contents;
+  display: block;
 }
 
-/* ── Header: titulo + botao Criar prova a direita ─────────────────────── */
+@media (max-width: 768px) {
+  .mobileNotice {
+    display: block;
+  }
+  .desktopOnly,
+  .canvas {
+    display: none;
+  }
+}
 
-.pageHeader {
+/* ─── Canvas (raiz do layout de criacao) ────────────────────────────────── */
+
+.canvas {
+  position: relative;
+  min-height: calc(100vh - 64px);
+  padding: 24px 32px 32px;
+  background: #fafaf7;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Grid de pontos ambient */
+.gridDots {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at center,
+    rgba(0, 0, 0, 0.08) 1px,
+    transparent 1.5px
+  );
+  background-size: 16px 16px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Blob amarelo borrado, posicionado um pouco a esquerda do centro */
+.blob {
+  position: absolute;
+  top: 28%;
+  left: 36%;
+  width: 380px;
+  height: 380px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(248, 209, 38, 0.55) 0%,
+    rgba(248, 209, 38, 0.25) 35%,
+    rgba(248, 209, 38, 0) 70%
+  );
+  filter: blur(18px);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Linha de onda + 2 pontos (rota visual ambient) */
+.wave {
+  position: absolute;
+  bottom: 12%;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 200px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Topbar e layout ficam ACIMA do canvas */
+.topbar,
+.layout {
+  position: relative;
+  z-index: 2;
+}
+
+/* ─── Topbar (timestamp + acoes) ─────────────────────────────────────────── */
+
+.topbar {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 3.5rem;
-  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 32px;
 }
 
-.title {
-  font-size: clamp(2.5rem, 5vw, 4rem);
+.timestamp {
+  display: inline-block;
+  background: #ffffff;
+  color: #5b5b5b;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 1.05;
-  color: var(--color-card-text);
-  letter-spacing: -0.02em;
+  letter-spacing: 0.02em;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  font-variant-numeric: tabular-nums;
 }
 
-.h2 {
-  font-size: var(--fs-h2);
-  font-weight: 500;
-  color: var(--color-card-text);
-  margin-bottom: 1rem;
+.topActions {
+  display: flex;
+  gap: 12px;
 }
 
-/* ── Form ─────────────────────────────────────────────────────────────── */
+.btnGhost,
+.btnSubmit {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 22px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.05s;
+}
 
-.form {
+.btnGhost {
+  background: #ffffff;
+  color: #2c2c2c;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.btnGhost:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.btnSubmit {
+  background: #f8d126;
+  color: #1a1a1a;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 6px rgba(248, 209, 38, 0.4);
+}
+
+.btnSubmit:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btnSubmit:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btnSubmit:disabled {
+  background: #ddd6b6;
+  color: #8a8a8a;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ─── Layout principal (ficha esquerda + cards direita) ─────────────────── */
+
+.layout {
+  display: grid;
+  grid-template-columns: 360px 1fr 320px;
+  gap: 32px;
+  align-items: start;
+}
+
+/* ─── Ficha (box branco) ────────────────────────────────────────────────── */
+
+.ficha {
+  grid-column: 1;
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
+  padding: 22px 22px 16px;
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 14px;
 }
 
-.formGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 2rem 2.5rem;
-  margin-bottom: 0.5rem;
+.fichaEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: #8a8a8a;
+  margin: 0;
+  text-transform: uppercase;
 }
+
+.checkIcon {
+  font-size: 11px;
+  color: #5b5b5b;
+}
+
+.fichaTitle {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #1a1a1a;
+}
+
+/* ─── Campos do form ────────────────────────────────────────────────────── */
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  min-width: 0;
+  gap: 6px;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
 .label {
-  font-size: var(--fs-base);
-  font-weight: 400;
-  color: var(--color-card-text);
-  letter-spacing: 0;
-  text-transform: none;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: #8a8a8a;
+  text-transform: uppercase;
+  margin: 0;
 }
 
-.input,
-.select {
-  width: 100%;
-  height: 56px;
-  padding: 0 1.5rem;
-  background: var(--color-card-surface);
-  border: none;
-  border-radius: var(--radius-pill);
+.input {
   font-family: inherit;
-  font-size: var(--fs-base);
-  color: var(--color-card-text);
-  transition: box-shadow 0.15s ease;
+  font-size: 14px;
+  color: #1a1a1a;
+  background: #f6f6f3;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 8px;
+  padding: 10px 12px;
+  width: 100%;
+  transition: border-color 0.15s, background 0.15s;
 }
 
 .input::placeholder {
-  color: var(--color-card-text-muted);
+  color: #b0b0b0;
 }
 
-.input:focus,
-.select:focus {
+.input:focus {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-accent);
+  border-color: #1a1a1a;
+  background: #ffffff;
 }
 
-.input:disabled,
-.select:disabled {
-  opacity: 0.55;
+.input:disabled {
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
-.select {
-  appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9' fill='none'><path d='M1 1l6 6 6-6' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 1.5rem center;
-  padding-right: 3rem;
-  cursor: pointer;
-}
-
 .inlineError {
-  font-size: var(--fs-xs);
-  color: var(--color-danger);
+  font-size: 12px;
+  color: #b32424;
 }
 
-/* ── Dropzone ─────────────────────────────────────────────────────────── *
- * Retangulo grande cinza claro SEM border dashed — o Figma usa um card
- * arredondado simples com icone "+" grande no centro. Hover e drag-over
- * iluminam sutilmente com o acento amarelo.
- */
+/* ─── Segment "Matriz / Filial" ──────────────────────────────────────────── */
+
+.segment {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  background: #f6f6f3;
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.segmentBtn {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: transparent;
+  color: #5b5b5b;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.segmentBtn:hover:not(:disabled):not(.segmentBtnActive) {
+  color: #1a1a1a;
+}
+
+.segmentBtnActive {
+  background: #1a1a1a;
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.segmentBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.segmentIcon {
+  font-size: 14px;
+  display: inline-block;
+}
+
+/* ─── Toggle row "Laminação" ─────────────────────────────────────────────── */
+
+.toggleRow {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  background: #f6f6f3;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.toggleIcon {
+  font-size: 16px;
+  color: #5b5b5b;
+}
+
+.toggleText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.toggleTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.toggleSub {
+  font-size: 11px;
+  color: #8a8a8a;
+}
+
+.switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  background: #d4d4d0;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s;
+}
+
+.switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.switchOn {
+  background: #1a1a1a;
+}
+
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: transform 0.2s;
+}
+
+.switchOn .switchKnob {
+  transform: translateX(16px);
+}
+
+.hint {
+  font-size: 11px;
+  color: #8a8a8a;
+  margin: -4px 0 0;
+  line-height: 1.4;
+}
+
+/* ─── Anexo / dropzone ───────────────────────────────────────────────────── */
+
+.anexoHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.anexoMeta {
+  font-size: 10px;
+  color: #b0b0b0;
+  letter-spacing: 0.06em;
+}
 
 .dropzone {
-  display: block;
-  min-height: 360px;
-  padding: 2rem;
-  background: var(--color-card-surface);
-  border: 2px solid transparent;
-  border-radius: var(--radius-card-lg);
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
   position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(0, 0, 0, 0.18);
+  border-radius: 10px;
+  padding: 18px;
+  background: #fafaf7;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  min-height: 70px;
 }
 
 .dropzone:hover {
-  border-color: var(--color-accent);
+  border-color: #1a1a1a;
 }
 
 .dropzoneActive {
-  border-color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 12%, var(--color-card-surface));
+  border-color: #1a1a1a;
+  background: #ffffff;
 }
 
 .dropzoneFilled {
-  border-color: var(--color-card-border);
+  padding: 10px;
 }
 
 .fileInput {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  inset: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .dropzoneEmpty {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  min-height: 316px;
-  color: var(--color-card-text);
-  text-align: center;
-}
-
-.dropzoneTitle {
-  font-size: var(--fs-xl);
-  font-weight: 400;
-  color: var(--color-card-text);
-}
-
-.dropzoneHint {
-  font-size: var(--fs-base);
-  color: var(--color-card-text-muted);
-  margin-bottom: 1.5rem;
+  gap: 4px;
+  pointer-events: none;
 }
 
 .dropzoneIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-card-text);
-  margin-top: 0.5rem;
+  font-size: 18px;
+  color: #5b5b5b;
+}
+
+.dropzoneTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+
+.dropzoneHint {
+  font-size: 11px;
+  color: #8a8a8a;
 }
 
 .previewContainer {
   display: flex;
-  gap: 2rem;
   align-items: center;
-  justify-content: center;
-  padding: 1rem 0;
+  gap: 12px;
+  width: 100%;
 }
 
 .previewImg {
-  width: 260px;
-  height: 260px;
+  width: 48px;
+  height: 48px;
   object-fit: cover;
-  border-radius: var(--radius-card-lg);
-  background: var(--color-bg);
+  border-radius: 6px;
+  background: #ffffff;
 }
 
 .previewInfo {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  color: var(--color-card-text);
-  font-size: var(--fs-base);
+  gap: 2px;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.previewInfo strong {
+  font-weight: 500;
+  color: #1a1a1a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .previewInfo span {
-  color: var(--color-card-text-muted);
-  font-size: var(--fs-sm);
+  color: #8a8a8a;
 }
 
-/* ── Botao Criar prova (no header, nao mais no footer) ────────────────── */
+/* ─── Footer da ficha ────────────────────────────────────────────────────── */
 
-.btnPrimary {
+.fichaFooter {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.fichaFooter > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fichaFooterValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #1a1a1a;
+  font-weight: 500;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f8d126;
+  box-shadow: 0 0 0 3px rgba(248, 209, 38, 0.18);
+}
+
+/* ─── Cards laterais (direita) ──────────────────────────────────────────── */
+
+.aside {
+  grid-column: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cardLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: #8a8a8a;
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.cardDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f8d126;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.cardBody {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #5b5b5b;
+}
+
+.kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.9rem 3rem;
-  background: var(--color-accent);
-  color: var(--color-card-text);
-  border: none;
-  border-radius: var(--radius-pill);
-  font-family: inherit;
-  font-size: 1.0625rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
   font-weight: 500;
+  padding: 1px 5px;
+  background: #f6f6f3;
+  border-radius: 3px;
+  color: #5b5b5b;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* ─── Erro global do form ────────────────────────────────────────────────── */
+
+.errorBox {
+  background: #fff4f4;
+  color: #b32424;
+  border: 1px solid #f0c8c8;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+/* ─── Tela de sucesso ────────────────────────────────────────────────────── */
+
+.successHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding: 24px 32px 0;
+}
+
+.successTitle {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0;
+}
+
+.btnPrimary {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: #f8d126;
+  color: #1a1a1a;
+  border: 1px solid rgba(0, 0, 0, 0.06);
   cursor: pointer;
-  transition: background 0.15s ease;
-  white-space: nowrap;
-}
-
-.btnPrimary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-
-.btnPrimary:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+  box-shadow: 0 2px 6px rgba(248, 209, 38, 0.4);
 }
 
 .btnSecondary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.75rem 1.75rem;
-  background: var(--color-bg-input);
-  color: var(--color-text-primary);
-  border: none;
-  border-radius: var(--radius-pill);
   font-family: inherit;
-  font-size: var(--fs-sm);
+  font-size: 13px;
   font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: #f6f6f3;
+  color: #1a1a1a;
+  border: 1px solid rgba(0, 0, 0, 0.08);
   cursor: pointer;
-  transition: opacity 0.15s ease;
 }
 
 .btnSecondary:hover {
-  opacity: 0.85;
+  background: #ebebe6;
 }
-
-/* ── Erro ─────────────────────────────────────────────────────────────── */
-
-.errorBox {
-  padding: 1rem 1.25rem;
-  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
-  border: 1px solid var(--color-danger);
-  border-radius: var(--radius-card-lg);
-  color: var(--color-card-text);
-  font-size: var(--fs-base);
-}
-
-/* ── Tela de sucesso (pos-criacao — fora do escopo do Figma) ──────────── */
 
 .successGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-  gap: 2rem;
-  align-items: start;
+  grid-template-columns: 360px 1fr;
+  gap: 24px;
+  padding: 0 32px 32px;
 }
 
 .infoCard {
-  padding: 1.75rem 2rem;
-  background: #fff;
-  border-radius: var(--radius-card-lg);
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 20px;
+}
 
+.h2 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a1a;
 }
 
 .dl {
   display: grid;
-  grid-template-columns: max-content 1fr;
-  column-gap: 1.5rem;
-  row-gap: 0.75rem;
-  margin-bottom: 1.5rem;
+  grid-template-columns: 110px 1fr;
+  gap: 8px 12px;
+  margin: 0 0 20px;
+  font-size: 13px;
 }
 
 .dl dt {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--color-card-text-muted);
+  color: #8a8a8a;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  letter-spacing: 0.em;
-  align-self: start;
+  align-self: center;
 }
 
 .dl dd {
-  font-size: var(--fs-base);
-  color: var(--color-card-text);
   margin: 0;
+  color: #1a1a1a;
+}
+
+.codigoPublico {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  font-size: 14px;
+  color: #1a1a1a;
 }
 
 .actions {
   display: flex;
-  gap: 0.75rem;
+  gap: 8px;
   flex-wrap: wrap;
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-card-border);
 }
 
 .pdfPreview {
-  padding: 1.75rem 2rem;
-  background: #fff;
-  border-radius: var(--radius-card-lg);
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  min-height: 600px;
+  background: #ffffff;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 20px;
 }
 
 .pdfFrame {
-  flex: 1;
   width: 100%;
-  min-height: 540px;
+  height: 600px;
   border: none;
-  border-radius: calc(var(--radius-card-lg) - 4px);
-  background: #fff;
+  border-radius: 6px;
+  background: #fafaf7;
 }
 
-/* ── Mobile ───────────────────────────────────────────────────────────── */
+/* ─── Responsivo (tablet) ────────────────────────────────────────────────── */
 
-@media (max-width: 768px) {
-  .desktopOnly {
-    display: none;
-  }
-
-  .mobileNotice {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 60vh;
-    text-align: center;
-  }
-
-  .mobileNotice p {
-    font-size: var(--fs-lg);
-    color: var(--color-card-text-muted);
-    max-width: 320px;
-    line-height: 1.4;
-  }
-}
-
-@media (max-width: 1080px) {
-  .formGrid {
+@media (max-width: 1100px) {
+  .layout {
     grid-template-columns: 1fr;
   }
-  .successGrid {
-    grid-template-columns: 1fr;
+  .ficha,
+  .aside {
+    grid-column: 1;
+  }
+  .aside {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .aside .card {
+    flex: 1 1 240px;
   }
 }

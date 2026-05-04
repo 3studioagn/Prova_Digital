@@ -7,19 +7,22 @@ tamanho do campo `provas_digitais.qr_code_hash VARCHAR(64) UNIQUE`.
 Caracteristicas:
   - Deterministico: mesmo (prova_id, nro_req) produz sempre o mesmo hash.
   - Nao-reversivel: extrair o prova_id a partir do hash exige a secret.
-  - Validavel no scanner da Wave 3 sem ida ao banco: basta recomputar e
-    comparar com o hash armazenado.
+  - Validavel no scanner sem ida ao banco: basta recomputar e comparar
+    com o hash armazenado.
 
 ADR-034: imagem PNG gerada via `qrcode[pil]` — lib padrao do ecossistema
 Python. Pillow vem de sub-dependencia.
 
-Formato do payload do QR escaneavel (decisao interna):
+Formato do payload do QR escaneavel:
+  Wave 2 v4.0 (Componente 06):
+    3SD|{codigo_publico}|{hash[:16]}    # novo formato
+  Wave 0/v3.0 (legado, ainda suportado para validacao):
     3SD|{nro_requerimento}|{hash[:16]}
 
-Curto o suficiente para caber num QR Code pequeno, prefixo `3SD` facilita
-distinguir de outros QR Codes que o scanner possa encontrar. O hash truncado
-(16 chars) e validado comparando com o hash completo armazenado — 64 bits
-de entropia sao mais que suficientes para evitar colisao no volume esperado.
+A v4.0 embute o `codigo_publico` (DAT v3.0 §8.1 — idempotencia entre
+camera e digitacao manual). Provas legadas v3.0 que ainda tem QRs com
+`nro_requerimento` continuam validas via `validar_payload_qr` flexivel
+ate a Wave 7 / Componente 21 (regerar etiquetas no backfill).
 """
 import hashlib
 import hmac
@@ -42,27 +45,39 @@ def gerar_hash(prova_id: UUID, nro_requerimento: str) -> str:
     return hmac.new(key, message, hashlib.sha256).hexdigest()
 
 
-def gerar_payload_qr(nro_requerimento: str, hash_hex: str) -> str:
-    """Payload que vira o conteudo escaneavel do QR Code."""
+def gerar_payload_qr(identificador: str, hash_hex: str) -> str:
+    """Payload que vira o conteudo escaneavel do QR Code.
+
+    Wave 2 v4.0 (Componente 06): `identificador` deve ser o
+    `codigo_publico` (`PRV-AAAA-MM-NNNNNN`) para garantir idempotencia
+    entre camera e digitacao manual (DAT v3.0 §8.1). O parametro foi
+    renomeado de `nro_requerimento` para `identificador` para refletir
+    essa mudanca semantica — o caller passa o que for adequado.
+    """
     if len(hash_hex) < HASH_TRUNCADO_LEN:
         raise ValueError(
             f"Hash muito curto: esperado >= {HASH_TRUNCADO_LEN} chars, recebi {len(hash_hex)}"
         )
     return QR_PAYLOAD_SEPARATOR.join(
-        [QR_PAYLOAD_PREFIX, nro_requerimento, hash_hex[:HASH_TRUNCADO_LEN]]
+        [QR_PAYLOAD_PREFIX, identificador, hash_hex[:HASH_TRUNCADO_LEN]]
     )
 
 
 def validar_payload_qr(payload: str, hash_hex_completo: str) -> bool:
     """Verifica se um payload escaneado corresponde ao hash armazenado.
 
-    Usado pela Wave 3 no endpoint de scan. Rejeita prefixo errado, formato
-    invalido e hash que nao bate com o esperado.
+    Aceita tanto formato v4.0 (`codigo_publico` no segundo campo) quanto
+    formato legacy v3.0 (`nro_requerimento` no segundo campo) — a
+    validacao usa apenas o hash truncado, nao o segundo campo. Wave 3
+    v4.0 (Componente 19) faz o lookup pelo segundo campo decidindo se e
+    `codigo_publico` (formato `PRV-...`) ou `nro_requerimento` (livre).
+
+    Rejeita prefixo errado, formato invalido e hash que nao bate.
     """
     parts = payload.split(QR_PAYLOAD_SEPARATOR)
     if len(parts) != 3:
         return False
-    prefix, _nro_req, hash_truncado = parts
+    prefix, _identificador, hash_truncado = parts
     if prefix != QR_PAYLOAD_PREFIX:
         return False
     if len(hash_truncado) != HASH_TRUNCADO_LEN:

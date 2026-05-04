@@ -1192,3 +1192,75 @@ Aguardando string **AUTORIZADO GATE 2 — WAVE 2 v4.0** para prosseguir com a ex
 Caso a autorizacao venha acompanhada de correcoes/redirecionamentos (especialmente sobre a Secao 14 — modificacao cirurgica em `executar_transicao`), incorporo antes de iniciar.
 
 **Fim da analise read-only.**
+
+
+---
+
+## Apendice: EXECUCAO (Gate 2 — registrado pos-merge)
+
+Esta secao foi adicionada apos a execucao do Gate 2 conforme requisito
+da Secao 5.5 do prompt original. Documenta os DELTAS entre o que foi
+proposto no `analysis.md` (Gate 1) e o que foi efetivamente
+implementado, com justificativas.
+
+### Mudancas em relacao ao plano original
+
+| Item proposto no Gate 1 | Decisao no Gate 2 | Motivo |
+|---|---|---|
+| 4 radio buttons para a rota na UI | **2 toggles** (segment Matriz/Filial + switch Laminacao) | Design entregue pelo Mario no Gate 2 (print). UX mais clara — separa "onde" de "tem laminacao". Registrado como ADR-118. |
+| Modal de confirmacao dupla apos submit | **DESCARTADO** | Os 2 toggles do design ja forcam escolha consciente. O texto auxiliar "rota imutavel" permanece. |
+| Migration Alembic `012_add_codigo_publico_and_rotas_v4_to_provas` em transacao unica | **3 sub-migrations** via `apply_migration` MCP (`012a` ALTER TYPE, `012b` ADD COLUMN nullable + UPDATE `alembic_version`, `012c` SET NOT NULL + indexes + trigger) | O backfill das 16 provas existentes precisa de geracao Python (CSPRNG) — feito via Python local + bulk UPDATE entre `012b` e `012c`. Mais determinístico que SQL puro com `random()`. |
+| Sub-enum `RotaCriacaoEnum` em `domain/schemas/prova.py` | **MANTIDO conforme plano** | Bloqueia legacy (PADRAO/DIRETA) na criacao via Pydantic. Defesa em profundidade vs trigger SQL (que nao valida valores especificos). |
+| Modificacao cirurgica em `executar_transicao` (Secao 14 do Gate 1) | **AUTORIZADO E EXECUTADO** | Mario aprovou explicitamente no Gate 2. Sem essa correcao, toda aprovacao de prova v4.0 falharia com SQLSTATE 22023. ADR-119. |
+| Filtro de rota na listagem (Componente 07) — Opcao A | **EXECUTADO conforme plano** | `ROTA_OPTIONS` em `lib/types/prova.ts` agora tem 6 valores (4 v4.0 + 2 legacy com sufixo "(legada v3.0)"). Listagem ja consumia a constante; auto-atualizada. |
+| Card lateral "Salvar rascunho" + "Cadastrar prova" | **Cadastrar prova FUNCIONAL** (submit do form); **Salvar rascunho disabled** com tooltip "Em desenvolvimento" | Salvar rascunho nao foi escopo desta wave; deixar como placeholder respeita o design sem aumentar superficie. Follow-up tecnico. |
+| Card "Unidade Selecionada" reflete o vendedor | **Reflete o toggle Origem** (Matriz/Filial) com endereco hardcoded | Endereco real por unidade nao esta no banco; mover para `configuracoes_sistema` e overhead nao justificado nesta wave. Hardcoded da Filial Campinas (do print) + Matriz placeholder. Follow-up. |
+| Atalho ⌘V para colar imagem | **IMPLEMENTADO REAL** via `addEventListener('paste')` no `window` | O design mostrava o atalho como informacao decorativa; aproveitei para implementar o paste handler completo (converte ClipboardItem em File e dispara o mesmo upload). Defensivo contra activacao dentro de inputs. |
+| `qr_code_payload` no QR mantem `nro_requerimento` no segundo campo | **MUDADO para `codigo_publico`** | DAT v3.0 §8.1 exige idempotencia camera↔digitacao manual. Wave 3 v4.0 / Componente 19 vai consumir esse `codigo_publico` no fallback de digitacao. |
+
+### Validacoes do Gate 2
+
+- **Backend pytest**: 795 passed (era 781 + 14 novos). 0 regressao.
+- **Backend ruff**: limpo (1 `# noqa: ARG001` em `_build_prova_response`
+  para silenciar `vendedor_setor` nao usado — preservado para
+  compat de assinatura).
+- **Frontend `tsc --noEmit`**: exit 0.
+- **Frontend `npx next build`**: 13/13 paginas estaticas geradas.
+  `/nova-prova` 6.34 kB / 169 kB First Load (incremento esperado de
+  ~1 kB pelo novo layout vs 5.3 kB / 167 kB anterior).
+- **MCP Supabase advisors security**: 1 INFO + 1 WARN historicos
+  (ADR-025 + ADR-027). Nenhum novo alerta.
+- **Smoke visual**: tentado via preview MCP; bloqueado por colisao
+  de processos backend antigos no port 8000 (CORS rejeitando origem
+  do preview port dinamico). Mario validou visualmente em ambiente
+  local (`next dev` em :3000 + backend em :8000 com FRONTEND_URL=
+  `http://localhost:3000`).
+
+### Migrations efetivamente aplicadas em producao
+
+Via MCP `apply_migration` no projeto `rwxlpwmnkekzuurgthkr`:
+1. `012a_alter_type_rota_enum_add_v4_values` — `ALTER TYPE … ADD VALUE
+   IF NOT EXISTS` x4.
+2. `012b_add_column_codigo_publico_nullable` — `ADD COLUMN codigo_publico
+   VARCHAR(20)`. Logo apos: 16 UPDATEs com codigos gerados localmente
+   via Python (`secrets.choice` + alfabeto 31 chars).
+3. `012c_codigo_publico_not_null_indexes_trigger` — `ALTER COLUMN
+   codigo_publico SET NOT NULL` + UNIQUE INDEX `idx_provas_codigo_publico`
+   + INDEX `idx_provas_rota` + funcao `fn_bloquear_alteracao_rota` +
+   trigger `trg_provas_rota_imutavel` + `UPDATE alembic_version SET
+   version_num='012'`.
+
+### Ambiente final
+
+- `alembic_version = '012'` em `public.alembic_version`.
+- `provas_digitais.codigo_publico` populado em 16/16 provas.
+- `pg_enum` com 6 valores em `rota_enum` (4 v4.0 + 2 legacy).
+- `pg_trigger` `trg_provas_rota_imutavel` ativo.
+- `pg_indexes` lista 8 indexes em `provas_digitais` (era 6 + 2 novos).
+
+### Status
+
+**Wave 2 v4.0 (Componente 06) entregue.** Recomenda-se nova rodada
+de auditoria sênior independente em sessao separada antes do merge
+para `main` — mesmo padrao da Wave 1 v4.0.
+

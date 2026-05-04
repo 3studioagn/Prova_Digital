@@ -4496,3 +4496,172 @@ nesta sessao — superficie de dependencia minima.
   - `npm run lint` + `tsc --noEmit` + `next build` permanecem limpos.
   - Bundle do middleware nao muda (82.9 kB, identico ao pre-fix).
   - L-1 follow-up dos audit fixes anteriores cumprido.
+
+
+---
+
+## ADR-115 — Enum `rota_enum` em UPPERCASE
+**Data:** 2026-05-04 (Wave 2 v4.0 — Componente 06)
+**Contexto:** O DAT v3.0 §8 e o Backlog v4.0 (Componente 06 Notas Tecnicas)
+sugerem nomes lowercase para os 4 novos valores (`'matriz'`, `'lam_matriz'`,
+`'filial'`, `'lam_filial'`). No entanto, todos os outros enums do projeto
+usam UPPERCASE: `setor_enum` (STUDIO/VENDEDOR/MOTORISTA/CLICHERIA),
+`localizacao_enum` (MATRIZ/FILIAL), `status_prova_enum` (CRIADA/...).
+Misturar lowercase no `rota_enum` quebraria a convencao.
+**Decisao:** Adotar UPPERCASE para os 4 novos valores: `MATRIZ`,
+`LAM_MATRIZ`, `FILIAL`, `LAM_FILIAL`. Documentar a divergencia explicita
+em relacao ao DAT/Backlog literal.
+**Alternativas:**
+  - Lowercase conforme DAT (rejeitado: quebra consistencia com 3 outros
+    enums em producao desde Wave 0).
+  - Renomear todos os enums para lowercase (rejeitado: requer migration
+    destrutiva em producao + impacto em todo o codebase).
+**Consequencias:** convencao do projeto preservada. Documentado em
+CLAUDE.md (secao "Como adicionar valor ao enum `rota_enum`") + em
+analysis.md secao 3.2.
+
+---
+
+## ADR-116 — `codigo_publico` e coluna NOVA, nao reaproveita `qr_code_hash`
+**Data:** 2026-05-04 (Wave 2 v4.0 — Componente 06)
+**Contexto:** O backend ja tem `provas_digitais.qr_code_hash VARCHAR(64)
+UNIQUE` (HMAC-SHA256 hex opaco — ADR-033). A v4.0 introduz necessidade de
+um identificador HUMANO-LEGIVEL no formato `PRV-AAAA-MM-NNNNNN` para
+fallback de digitacao manual (RF-005, Componente 19 da Wave 3 v4.0).
+**Decisao:** Criar coluna NOVA `codigo_publico VARCHAR(20) UNIQUE NOT NULL`
+em `provas_digitais`. NAO reaproveita `qr_code_hash` — naturezas
+diferentes:
+  - `qr_code_hash`: HMAC opaco, valida AUTENTICIDADE do scan, 64 chars hex.
+  - `codigo_publico`: humano-legivel, resolve IDENTIFICACAO do registro,
+    formato `PRV-AAAA-MM-NNNNNN` (18 chars).
+O QR Code agora EMBUTE o `codigo_publico` no payload (segundo campo do
+formato `3SD|...|hash`) — DAT v3.0 §8.1: idempotencia entre camera e
+digitacao manual exige que ambos os mecanismos resolvam para o mesmo
+registro pelo mesmo lookup.
+**Alternativas:**
+  - Reaproveitar `qr_code_hash` truncado (rejeitado: hash hex e
+    inadequado para digitacao manual humana — chars 0/O/1/I/L causam
+    erro frequente).
+  - Reaproveitar `nro_requerimento` (rejeitado: livre-formato pelo
+    admin, nao da garantia de unicidade nem entropia — risco de
+    enumeracao).
+**Consequencias:**
+  - Migration 012 adiciona coluna + UNIQUE INDEX + backfill local das
+    16 provas existentes.
+  - QR Code payload muda de `3SD|nro_req|hash[:16]` para
+    `3SD|codigo_publico|hash[:16]`.
+  - `validar_payload_qr` flexibilizada — aceita ambos os formatos
+    durante a transicao (Wave 3 v4.0 / Componente 19 escolhe o lookup
+    apropriado em runtime).
+
+---
+
+## ADR-117 — Trigger de imutabilidade da rota permite NULL → valor
+**Data:** 2026-05-04 (Wave 2 v4.0 — Componente 06)
+**Contexto:** RN-002 v4.0 exige que a rota seja imutavel apos a criacao.
+O trigger PostgreSQL bloqueia UPDATE da coluna `rota`. MAS:
+  - Provas legadas v3.0 tem `rota = NULL` (11 em producao no momento
+    da Wave 2 v4.0).
+  - A Wave 7 (Componente 21) precisa fazer backfill: `NULL → valor`
+    inferido da localizacao do vendedor.
+  - Se o trigger bloquear `NULL → valor`, a Wave 7 falha.
+**Decisao:** Trigger `trg_provas_rota_imutavel BEFORE UPDATE` com a
+condicao `WHEN (OLD.rota IS DISTINCT FROM NEW.rota)` + corpo:
+```sql
+IF OLD.rota IS NOT NULL AND NEW.rota IS DISTINCT FROM OLD.rota THEN
+    RAISE EXCEPTION 'Coluna rota e imutavel apos definicao (RN-002 v4.0)'
+        USING ERRCODE = '22023';
+END IF;
+RETURN NEW;
+```
+Isso PERMITE `NULL → valor` (passa pela checagem `OLD.rota IS NOT NULL`)
+e BLOQUEIA `valor → outro_valor` ou `valor → NULL`.
+**Alternativas:**
+  - Trigger sem checagem de NULL (rejeitado: bloqueia o backfill da
+    Wave 7).
+  - Trigger inteligente que detecta o "modo backfill" (rejeitado:
+    estado adicional + complexidade desnecessaria — a propria
+    permissao de NULL→valor ja serve).
+**Consequencias:** 3 testes especificos cobrindo as 3 transicoes
+(NULL→valor permitido; valor→outro_valor bloqueado; valor→NULL
+bloqueado). Wave 7 / Componente 21 implementa o backfill sem
+desabilitar o trigger.
+
+---
+
+## ADR-118 — Frontend: 2 toggles em vez de 4 radios para a rota
+**Data:** 2026-05-04 (Wave 2 v4.0 — Componente 06)
+**Contexto:** O `analysis.md` (Gate 1) propos 4 radio buttons na tela
+de criacao para representar `MATRIZ / LAM_MATRIZ / FILIAL / LAM_FILIAL`.
+O design entregue pelo Mario no Gate 2 (print) usa 2 controles
+independentes:
+  - Segment "Matriz / Filial" (radio button styled)
+  - Switch "Laminacao" (boolean on/off)
+**Decisao:** Adotar a solucao do design — 2 toggles na UI; deriva o
+`RotaCriacao` no submit:
+```ts
+const rota = laminacao
+  ? (origem === 'MATRIZ' ? 'LAM_MATRIZ' : 'LAM_FILIAL')
+  : origem;
+```
+**Alternativas:**
+  - 4 radios (rejeitado: visualmente carregado, exige o usuario ler
+    todas as 4 labels para escolher uma).
+  - Dropdown com 4 opcoes (rejeitado: esconde a estrutura semantica
+    "matriz vs filial × com/sem laminacao").
+**Consequencias:**
+  - UX mais clara: usuario decide PRIMEIRO a unidade (Matriz ou Filial),
+    DEPOIS se ha laminacao.
+  - Modal de confirmacao dupla (proposto no analysis.md §4.8)
+    descartado — os 2 toggles ja forcam escolha consciente.
+  - Texto auxiliar "A rota escolhida e imutavel apos o cadastro"
+    permanece como mitigacao do risco "Confusao operacional"
+    (Backlog v4.0 §6).
+
+---
+
+## ADR-119 — Modificacao cirurgica em `state_machine.executar_transicao`
+**Data:** 2026-05-04 (Wave 2 v4.0 — Componente 06)
+**Contexto:** O `executar_transicao` (Wave 3 v3.0) em
+`backend/app/services/state_machine.py` linha 365 sobrescrevia
+`prova.rota = determinar_rota(usuario)` na transicao
+`RETIRADA → APROVADA_PELO_VENDEDOR`. Isso colidia com o trigger
+PostgreSQL `trg_provas_rota_imutavel` introduzido nesta wave (ADR-117) —
+toda aprovacao de prova v4.0 falharia com SQLSTATE 22023.
+
+**Bug observavel sem a correcao:** admin cria prova v4.0 com
+`rota=MATRIZ` → vendedor MATRIZ aprova → trigger bloqueia o UPDATE
+porque `executar_transicao` tenta sobrescrever para `PADRAO` (derivado
+da localizacao). Aprovacao falha em producao no primeiro uso v4.0.
+
+**Decisao:** Modificar 4 linhas em `executar_transicao` (linhas
+358-373) para preservar `prova.rota` quando ja preenchida; derivar via
+`determinar_rota(usuario)` apenas se `prova.rota IS NULL` (provas
+legadas v3.0):
+```python
+if aprovando:
+    if prova.rota is None:
+        rota_depois = determinar_rota(usuario)  # legacy v3.0
+    else:
+        rota_depois = prova.rota  # imutavel — Wave 2 v4.0
+```
+**Autorizacao explicita do Mario** registrada na Secao 14 do
+`analysis.md` antes da execucao.
+
+**Alternativas:**
+  - Trigger menos rigoroso (rejeitado: derived_value PADRAO/DIRETA
+    nunca bate com MATRIZ/LAM_MATRIZ/etc — trigger ficaria sem efeito).
+  - Cindir a Wave 2 v4.0 em 2 sessoes para nao tocar state_machine
+    (rejeitado: sem essa correcao, a regra de imutabilidade da wave
+    e violada na primeira aprovacao — bug em producao).
+  - Reescrever toda a state machine v4.0 nesta sessao (rejeitado:
+    isso e Wave 3 v4.0 / Componente 11 — fora do escopo).
+
+**Consequencias:**
+  - Provas v4.0 (com rota persistida) tem aprovacao funcional sem
+    erros de trigger.
+  - Provas legadas v3.0 (rota=NULL) continuam tendo rota derivada na
+    aprovacao (comportamento v3.0 preservado) ate a Wave 7
+    (Componente 21) fazer o backfill final.
+  - Wave 3 v4.0 (Componente 11) reescreve `executar_transicao` por
+    inteiro com a tabela de transicoes ampliada para 14 estados.

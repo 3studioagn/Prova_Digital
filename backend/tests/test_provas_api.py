@@ -190,6 +190,7 @@ async def test_create_prova_happy_path(admin_user, vendedor_matriz, mock_db):
         "nro_requerimento": "REQ-2026-0001",
         "cliente": "ACME",
         "vendedor_id": str(vendedor_matriz.id),
+        "rota": "MATRIZ",
         "object_key": object_key,
     }
 
@@ -209,11 +210,18 @@ async def test_create_prova_happy_path(admin_user, vendedor_matriz, mock_db):
     assert data["prova"]["nro_requerimento"] == "REQ-2026-0001"
     assert data["prova"]["vendedor_nome"] == vendedor_matriz.nome
     assert data["prova"]["status"] == "CRIADA"
-    assert data["prova"]["rota"] is None  # ADR-042
-    assert data["prova"]["rota_projetada"] == "PADRAO"  # MATRIZ
+    # Wave 2 v4.0: rota e PERSISTIDA na criacao com a escolha do admin
+    # (RN-002 v4.0). Substituiu o ADR-042 + rota_projetada da v3.0.
+    assert data["prova"]["rota"] == "MATRIZ"
     assert data["prova"]["ciclo_atual"] == 1
     assert len(data["prova"]["qr_code_hash"]) == 64
-    assert data["qr_code_payload"].startswith("3SD|REQ-2026-0001|")
+    # Wave 2 v4.0: payload do QR embute `codigo_publico` (PRV-AAAA-MM-NNNNNN)
+    # em vez de `nro_requerimento` (DAT v3.0 §8.1 — idempotencia camera↔
+    # digitacao manual via Componente 19 da Wave 3 v4.0).
+    assert data["prova"]["codigo_publico"].startswith("PRV-")
+    assert data["qr_code_payload"].startswith(
+        f"3SD|{data['prova']['codigo_publico']}|"
+    )
 
     # PDF base64 decodavel comecando com %PDF-
     pdf_bytes = base64.b64decode(data["etiqueta_pdf_base64"])
@@ -251,12 +259,14 @@ async def test_create_prova_vendedor_filial_projeta_rota_direta(
                     "nro_requerimento": "REQ-F-001",
                     "cliente": "Cliente Y",
                     "vendedor_id": str(vendedor_filial.id),
+                    "rota": "FILIAL",
                     "object_key": "provas/2026/04/xyz/arte.png",
                 },
             )
 
     assert resp.status_code == 201
-    assert resp.json()["prova"]["rota_projetada"] == "DIRETA"
+    # Wave 2 v4.0: rota persistida = escolha do admin (FILIAL no payload).
+    assert resp.json()["prova"]["rota"] == "FILIAL"
 
 
 async def test_create_prova_duplicate_nro_req_cleans_up_r2(
@@ -276,6 +286,7 @@ async def test_create_prova_duplicate_nro_req_cleans_up_r2(
                     "nro_requerimento": "REQ-DUP",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/dup/arte.jpg",
                 },
             )
@@ -299,6 +310,7 @@ async def test_create_prova_vendedor_not_found_cleans_up_r2(admin_user, mock_db)
                     "nro_requerimento": "REQ-X",
                     "cliente": "C",
                     "vendedor_id": str(uuid.uuid4()),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/miss/arte.jpg",
                 },
             )
@@ -323,6 +335,7 @@ async def test_create_prova_vendedor_nao_e_vendedor(admin_user, mock_db):
                     "nro_requerimento": "REQ-NOTVEND",
                     "cliente": "C",
                     "vendedor_id": str(motorista.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/nv/arte.jpg",
                 },
             )
@@ -350,6 +363,7 @@ async def test_create_prova_vendedor_inativo(admin_user, mock_db):
                     "nro_requerimento": "REQ-INAT",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_inativo.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/i/arte.jpg",
                 },
             )
@@ -377,6 +391,7 @@ async def test_create_prova_object_not_in_r2(admin_user, vendedor_matriz, mock_d
                     "nro_requerimento": "REQ-MISS",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/miss/arte.jpg",
                 },
             )
@@ -404,6 +419,7 @@ async def test_create_prova_file_too_large(admin_user, vendedor_matriz, mock_db)
                     "nro_requerimento": "REQ-BIG",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/big/arte.jpg",
                 },
             )
@@ -434,6 +450,7 @@ async def test_create_prova_magic_bytes_invalid(admin_user, vendedor_matriz, moc
                     "nro_requerimento": "REQ-FAKE",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/fake/arte.png",
                 },
             )
@@ -479,6 +496,7 @@ async def test_create_prova_commit_failure_rollback_and_cleanup(
                     "nro_requerimento": "REQ-FAIL",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/fail/arte.jpg",
                 },
             )
@@ -525,6 +543,7 @@ async def test_create_prova_refresh_failure_after_commit_responds_201(
                     "nro_requerimento": "REQ-REFRESH-FAIL",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/refreshfail/arte.jpg",
                 },
             )
@@ -575,6 +594,7 @@ async def test_create_prova_pdf_generation_failure_rollsback_before_commit(
                     "nro_requerimento": "REQ-PDFFAIL",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/pdffail/arte.jpg",
                 },
             )
@@ -627,6 +647,7 @@ async def test_create_prova_integrity_error_returns_409(
                     "nro_requerimento": "REQ-RACE",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/race/arte.jpg",
                 },
             )
@@ -663,6 +684,7 @@ async def test_create_prova_cleanup_r2_failure_does_not_mask_original_error(
                     "nro_requerimento": "REQ-DUP-CLEAN",
                     "cliente": "C",
                     "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
                     "object_key": "provas/2026/04/dupclean/arte.jpg",
                 },
             )
@@ -684,6 +706,7 @@ async def test_create_prova_requires_admin(regular_user, mock_db):
                 "nro_requerimento": "REQ-1",
                 "cliente": "C",
                 "vendedor_id": str(uuid.uuid4()),
+                "rota": "MATRIZ",
                 "object_key": "provas/2026/04/x/arte.jpg",
             },
         )
@@ -700,6 +723,7 @@ async def test_create_prova_rejects_object_key_outside_provas(admin_user, mock_d
                 "nro_requerimento": "REQ-1",
                 "cliente": "C",
                 "vendedor_id": str(uuid.uuid4()),
+                "rota": "MATRIZ",
                 "object_key": "etc/passwd",
             },
         )
@@ -716,18 +740,25 @@ def _make_prova(
     id=None,
     nome="Prova Teste",
     nro_requerimento="REQ-TEST-001",
+    codigo_publico=None,
     cliente="Cliente X",
     vendedor_id=None,
     status_prova=StatusProvaEnum.CRIADA,
     rota=None,
     ciclo_atual=1,
 ):
-    """Fabrica de ProvaDigital in-memory (sem INSERT real)."""
+    """Fabrica de ProvaDigital in-memory (sem INSERT real).
+
+    Wave 2 v4.0: `codigo_publico` autopreenchido com PRV-2026-04-XXXXXX
+    se nao informado (todos os testes de Wave 2 v4.0+ ganham codigo
+    valido sem precisar passar explicitamente).
+    """
     now = datetime.now(timezone.utc)
     return ProvaDigital(
         id=id or uuid.uuid4(),
         nome=nome,
         nro_requerimento=nro_requerimento,
+        codigo_publico=codigo_publico or f"PRV-2026-04-{uuid.uuid4().hex[:6].upper()}",
         cliente=cliente,
         vendedor_id=vendedor_id or uuid.uuid4(),
         imagem_url=f"provas/2026/04/{uuid.uuid4().hex}/arte.jpg",
@@ -1308,36 +1339,43 @@ async def test_get_detail_happy_admin(admin_user, vendedor_matriz, mock_db):
     assert data["nome"] == "Prova Detalhe"
     assert data["vendedor_nome"] == vendedor_matriz.nome
     assert data["vendedor_localizacao"] == "MATRIZ"
-    assert data["rota_projetada"] == "PADRAO"
+    # Wave 2 v4.0: rota persistida na criacao (campo `rota_projetada`
+    # foi removido — frontend consome `prova.rota` diretamente).
+    # `_make_prova(rota=None)` simula prova legada v3.0 ainda nao
+    # backfilled (Wave 7 / Componente 21).
     assert data["rota"] is None
     # F05: apenas 1 execute (scoped), nao 2 como antes da otimizacao.
     assert mock_db.execute.call_count == 1
 
 
-async def test_get_detail_rota_projetada_filial(
+async def test_get_detail_prova_v4_com_rota_persistida(
     admin_user, vendedor_filial, mock_db
 ):
+    """Wave 2 v4.0: prova v4.0 tem rota persistida desde a criacao —
+    `prova.rota` substitui `rota_projetada` da v3.0.
+    """
     _setup(mock_db, admin=admin_user)
-    prova = _make_prova(vendedor_id=vendedor_filial.id)
+    prova = _make_prova(vendedor_id=vendedor_filial.id, rota=RotaEnum.LAM_FILIAL)
     mock_db.execute.side_effect = [
         _detail_row(prova, vendedor_filial.nome, vendedor_filial.localizacao),
     ]
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
         resp = await ac.get(f"{PREFIX}/{prova.id}")
     assert resp.status_code == 200
-    assert resp.json()["rota_projetada"] == "DIRETA"
+    assert resp.json()["rota"] == "LAM_FILIAL"
 
 
-async def test_get_detail_rota_projetada_none_para_nao_vendedor(
+async def test_get_detail_prova_legada_rota_null(
     admin_user, mock_db
 ):
-    """Edge case: vendedor original nao e mais VENDEDOR (setor mudou).
+    """Wave 2 v4.0: prova legada v3.0 com `rota=NULL` continua valida —
+    a coluna `rota` e NULLABLE ate a Wave 7 (Componente 21) fazer o backfill.
 
-    F05: passamos `vendedor_setor=SetorEnum.STUDIO` explicitamente no
-    _detail_row — antes o setor vinha de um segundo SELECT Usuario.
+    O campo `rota_projetada` foi removido; o frontend renderiza `rota=None`
+    como "rota nao definida (legada)" na UI.
     """
     ex_vendedor = make_user(setor=SetorEnum.STUDIO, localizacao=None, is_admin=False)
-    prova = _make_prova(vendedor_id=ex_vendedor.id)
+    prova = _make_prova(vendedor_id=ex_vendedor.id, rota=None)
     _setup(mock_db, admin=admin_user)
     mock_db.execute.side_effect = [
         _detail_row(prova, ex_vendedor.nome, None, vendedor_setor=SetorEnum.STUDIO),
@@ -1345,7 +1383,7 @@ async def test_get_detail_rota_projetada_none_para_nao_vendedor(
     async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
         resp = await ac.get(f"{PREFIX}/{prova.id}")
     assert resp.status_code == 200
-    assert resp.json()["rota_projetada"] is None
+    assert resp.json()["rota"] is None
 
 
 async def test_get_detail_vendedor_scoping_happy(vendedor_matriz, mock_db):
@@ -1760,16 +1798,20 @@ async def test_get_qr_code_png_db_error_returns_502(admin_user, mock_db):
 def _make_prova_com_hash(
     *, nro_requerimento, qr_code_hash, vendedor_id=None,
     status_prova=StatusProvaEnum.CRIADA, rota=None,
+    codigo_publico=None,
 ):
     """Fabrica de ProvaDigital com controle do `qr_code_hash` (para testes
     de scan). `_make_prova` acima sempre grava `"a"*64` — aqui precisamos
     do hash real que foi usado para gerar o payload de teste.
+
+    Wave 2 v4.0: `codigo_publico` autopreenchido se nao passado.
     """
     now = datetime.now(timezone.utc)
     return ProvaDigital(
         id=uuid.uuid4(),
         nome="Prova Scan",
         nro_requerimento=nro_requerimento,
+        codigo_publico=codigo_publico or f"PRV-2026-04-{uuid.uuid4().hex[:6].upper()}",
         cliente="Cliente Scan",
         vendedor_id=vendedor_id or uuid.uuid4(),
         imagem_url=f"provas/2026/04/{uuid.uuid4().hex}/arte.jpg",

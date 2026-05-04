@@ -153,6 +153,7 @@ class TestProvaCreateRequestNormalization:
             nro_requerimento="req-001",
             cliente="ACME",
             vendedor_id=uuid.uuid4(),
+            rota="MATRIZ",  # Wave 2 v4.0 — campo obrigatorio
             object_key="provas/2026/04/abc/arte.jpg",
         )
         assert req.nro_requerimento == "REQ-001"

@@ -20,14 +20,18 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **v4.0 W1 — RBAC Matriz** | ✅ **COMPLETA** | Componente 05 (atualizacao v4.0) — Matriz de Acesso por Perfil em 3 camadas independentes. SSoT em `shared/access-matrix.json` (12 regras x 4 perfis = 48 celulas). Camada Python: `backend/app/access/` (matrix + enforce + scopes + guards) + 36 testes. Camada Frontend: `lib/access-matrix.ts` + `lib/hooks/use-authorization.ts` + `components/Restricted` + `components/AuthToast` + middleware reescrito com lookup de perfil + cache LRU 30s + cookie `auth-toast` em redirect. Camada RLS: 4 migrations (009-012) — helpers SECURITY DEFINER em schema `app_private` (resolve advisor `*_security_definer_function_executable`) + rebase das 12 policies + extensao de `pol_etiquetas_select` para Motorista/Clicheria (lacuna L-RLS-1). Refactor coordenado: substituicao de `Depends(get_admin_user)` por `Depends(access_required(rule_key))` em audit_log/reports/configuracoes/users/provas; `_scoping_filter` delega para `scope_filter_for`; `require_role` removido. Frontend: guards proativos em /auditoria, /relatorios (promovido de reativo), /usuarios, /configuracoes, /nova-prova; layout consulta Matriz para esconder itens; `useGlobalShortcuts` deriva da Matriz. Validado via `scripts/verify_rbac_equivalence.py` em producao (3 camadas batem: admin 16/16, vendedor 0, motorista 0, clicheria 2). **757 testes** (era 724 + 36 novos - 3 removidos). Decisao a confirmar: Clicheria PARCIAL com scope `status_clicheria` mantida (Matriz literal diz FULL — registrado follow-up). | — |
 | **v4.0 W1 — Audit Fixes** | ✅ **COMPLETO** | Auditoria critica + metodica do trabalho da Wave 1 v4.0 (2026-04-30, commit `ac3be70`). Findings: 0 CRITICAL · 2 HIGH · 6 MEDIUM · 8 LOW. Corrigidos os 2 HIGH (H-1 middleware sem `ativo` no select permitia user desativado passar; H-2 cookie `auth-toast` sem `Secure` em prod) + 5 MEDIUM (M-1 flash de UI proibida nas 5 pages durante carga do `/users/me` — `if (auth.loading) return null` antes do guard; M-2 `_load_matrix` Python valida scope/acesso/match com FAIL FAST + 4 testes novos; M-3 `buildRules` TS valida runtime com paridade ao Python; M-4 `getRuleForPath` normaliza trailing slash defensivamente; M-5 etapa [4/4] do `verify_rbac_equivalence.py` agora asserta de verdade — confronta Matriz Python com counts RLS para 48 celulas). Tests: **761** (era 757 + 4 novos M-2). Smoke preview validou redirect anonimo + trailing slash. Script verify rodou em producao: SUCESSO. ADRs novos: D-6 (validacao runtime FAIL FAST do JSON SSoT em ambos os lados) + D-7 (trailing slash normalizado defensivamente em `getRuleForPath`). Follow-up registrado: M-6 + L-1..L-8. | — |
 | **v4.0 W1 — Audit Round 2** | ✅ **COMPLETO** | Auditoria sênior independente pos-Audit Fixes (2026-04-30, commit `09eaf78` em `wave1-v4/audit`). Veredito: APROVADO COM CORRECOES. Findings: **0 CRITICAL · 0 ALTO · 6 MEDIUM · 7 BAIXO · 4 INFO**. Sessao de correcao 2026-05-04 (`wave1-v4/fixes/execution`) corrigiu **17/17 achados** em 13 commits atomicos. **MEDIUM**: AUD-001+006 (CLAUDE.md snippet pos-M-1), AUD-002 (verify script cobre 6 tabelas — promove M-6), AUD-003 ([4/4] valida (rule,profile,table) triple), AUD-004 (rename test_matrix_rls_equivalence -> _python_), AUD-005 (Vitest minimo + 15 testes do middleware — promove L-1). **BAIXO**: AUD-101 (RLS 013 REVOKE TRUNCATE audit_logs — 4a camada RNF-005), AUD-102+103 (CLAUDE.md notas), AUD-104 (useCurrentUser runtime guard de setor), AUD-105 (provas.detail key em endpoints de detalhe), AUD-106 (D-8 _scoping_filter shim status formal de L-2), AUD-107 (comentario script — junto com AUD-003). **INFO**: AUD-201..204 registrados como D-9..D-12 em DECISIONS. **Validacao**: backend pytest 176/176 nos modulos tocados; frontend Vitest 15/15; verify_rbac_equivalence em producao SUCESSO (24 cells governadas + 32 sanity); RLS 013 aplicada via MCP — `has_table_privilege('authenticated','audit_logs','TRUNCATE') = false`; advisors sem novos alertas. ADRs novos: D-8 (_scoping_filter shim) + D-9 (invariante dashboard×home_by_profile) + D-10 (registro orfao improvavel) + D-11 (RLS rastreada via supabase_migrations+Git) + D-12 (extracts removidos por design) + D-13 (Vitest minimo Opcao A). | — |
+| **v4.0 W2 — C06 Cadastro com Rota** | ✅ **COMPLETO** | Componente 06 (atualizacao v4.0) — Cadastro de Prova com Selecao de Rota + Etiqueta com Codigo Textual. **Migration 012** (alembic_version=012): ALTER TYPE rota_enum ADD VALUE 4 novos (`MATRIZ`/`LAM_MATRIZ`/`FILIAL`/`LAM_FILIAL` — UPPERCASE, ADR-115); legacy `PADRAO`/`DIRETA` permanecem ate Wave 7. ADD COLUMN `codigo_publico VARCHAR(20) UNIQUE NOT NULL` formato `PRV-AAAA-MM-NNNNNN` (DAT v3.0 §8.3, ADR-116). Backfill local das 16 provas existentes na propria migration. UNIQUE INDEX `idx_provas_codigo_publico` + INDEX `idx_provas_rota`. Trigger `trg_provas_rota_imutavel` permite NULL→valor (Wave 7) e bloqueia valor→outro_valor / valor→NULL com SQLSTATE 22023 (ADR-117). **Backend**: `codigo_publico_service.py` (gerar com CSPRNG `secrets.choice` + alfabeto 31 chars sem 0/O/1/I/L); `RotaCriacaoEnum` Pydantic bloqueia legacy na criacao; `qrcode_service.gerar_payload_qr` embute `codigo_publico` no segundo campo (DAT §8.1 — idempotencia camera↔digitacao manual via Componente 19 da Wave 3 v4.0); `etiqueta_service.gerar_pdf` renderiza codigo abaixo do QR + badge da rota no rodape; `state_machine.executar_transicao` modificacao cirurgica autorizada (ADR-119 — preserva rota se ja preenchida; deriva apenas em prova legada `rota=NULL`). Handler `POST /api/v1/provas/` persiste `body.rota` + `codigo_publico`; removeu `rota_projetada` do response. **Frontend**: `nova-prova/page.tsx` REWRITE COMPLETO seguindo print do design — canvas com grid de pontos + blob amarelo + onda; topbar pill+botoes; box branco da ficha com 2 toggles (segment Matriz/Filial + switch Laminacao — ADR-118 — derivam as 4 rotas no submit); cards laterais (Unidade Selecionada + cole imagem com paste handler real ⌘V); footer ORIGEM/STATUS. Tipos atualizados (Rota com 6 valores + RotaCriacao com 4 + ROTA_LABELS); detalhe da prova exibe codigo_publico em mono. **Testes**: 795 (era 781 + 14 novos — 20 do `test_codigo_publico_service` + 14 do `test_provas_api_v4`); 0 regressao Wave 0..6 + Wave 1 v4.0. Frontend `tsc --noEmit` exit 0; `next build` 13/13 paginas OK. ADRs 115-119. | — |
 
 **Estado atual do banco de producao:**
-- `alembic_version = 011` (migration 011 aplicada no closeout da Wave 5, 2026-04-27 — ADR-099 cosmetica). Wave 6 nao criou Alembic. Wave 1 v4.0 nao criou Alembic.
+- `alembic_version = 012` (migration 012 aplicada na Wave 2 v4.0, 2026-05-04 — ADRs 115-119). Wave 6 nao criou Alembic. Wave 1 v4.0 nao criou Alembic.
 - **6 tabelas de dominio** + `alembic_version` (todas com RLS habilitada)
+- **`provas_digitais.codigo_publico VARCHAR(20) UNIQUE NOT NULL`** (Wave 2 v4.0, ADR-116): identificador alfanumerico humano-legivel `PRV-AAAA-MM-NNNNNN`. UNIQUE INDEX `idx_provas_codigo_publico`. Embutido no payload do QR Code (DAT §8.1 — idempotencia camera↔digitacao manual via Componente 19 da Wave 3 v4.0).
+- **`rota_enum` com 6 valores**: 4 v4.0 (`MATRIZ`/`LAM_MATRIZ`/`FILIAL`/`LAM_FILIAL`) + 2 legacy v3.0 (`PADRAO`/`DIRETA`). Os legacy permanecem ate a Wave 7 (Componente 21) fazer o backfill final — drop nao e suportado pelo Postgres em transacao.
+- **Trigger `trg_provas_rota_imutavel` (BEFORE UPDATE)** (Wave 2 v4.0, ADR-117): bloqueia mudanca de rota apos definicao com SQLSTATE 22023. Permite NULL→valor (Wave 7 backfill); bloqueia valor→outro_valor e valor→NULL.
 - **Schema `app_private`** (Wave 1 v4.0, RLS 012): 3 funcoes helper SECURITY DEFINER `current_user_is_admin()` / `current_user_setor()` / `current_user_id()` referenciadas pelas 12 policies. Schema NAO listado em `db-schemas` do PostgREST (nao exposto via REST).
-- **12 policies RLS** reescritas na Wave 1 v4.0 usando os helpers. Cobertura semantica preservada vs RLS 005/006; `pol_etiquetas_select` estendida para incluir Motorista (status COM_MOTORISTA) e Clicheria (clicheria-states) — fecha lacuna L-RLS-1.
+- **12 policies RLS** reescritas na Wave 1 v4.0 usando os helpers. Cobertura semantica preservada vs RLS 005/006; `pol_etiquetas_select` estendida para incluir Motorista (status COM_MOTORISTA) e Clicheria (clicheria-states) — fecha lacuna L-RLS-1. **Wave 2 v4.0 nao criou nova policy** — `pol_provas_insert` ja exigia admin (cobre o cenario v4.0).
 - **`audit_logs` com 4 camadas de defesa** (RNF-005): (1) trigger `trg_audit_logs_imutavel` (Wave 0); (2) RLS deny-by-default `pol_audit_select` admin-only (Wave 0/1/2); (3) REVOKE GRANT-level INSERT/UPDATE/DELETE para `anon`/`authenticated` (Wave 6, RLS 008 — ADR-112); (4) REVOKE TRUNCATE para `anon`/`authenticated` (Wave 1 v4.0 Audit Round 2, RLS 013 — AUD-W1V4-101 — fecha lacuna onde TRUNCATE bypassa RLS e nao dispara trigger BEFORE UPDATE/DELETE). `service_role` mantem GRANT em todas as camadas (preserva flexibilidade operacional).
-- **32 indexes** cobrindo filtros dos Componentes 07 + relatorios da Wave 5 (migration 010: +`idx_provas_vendedor_status` +`idx_movimentacoes_status_novo_created_at` — ADR-095). Wave 6 nao criou indice (4 indices em `audit_logs` ja cobrem; advisor `unused_index` deve cair conforme uso real).
+- **34 indexes** cobrindo filtros dos Componentes 07 + relatorios da Wave 5 (migration 010: +`idx_provas_vendedor_status` +`idx_movimentacoes_status_novo_created_at` — ADR-095) + Wave 2 v4.0 (migration 012: +`idx_provas_codigo_publico` UNIQUE +`idx_provas_rota`). Wave 6 nao criou indice (4 indices em `audit_logs` ja cobrem; advisor `unused_index` deve cair conforme uso real).
 - **3 usuarios ativos**: 2 admins (`admin@3studio.com.br` + `ops@3studio.com.br`) + 1 vendedor FILIAL (`mariosouza@teste.com.br`)
 - **Advisor Supabase limpo** exceto: 1 INFO `rls_enabled_no_policy` em `alembic_version` (intencional, ADR-025) + 1 WARN `auth_leaked_password_protection` (WONTFIX plano pago, ADR-027)
 
@@ -465,3 +469,50 @@ ate uma pagina admin-only — o backend ainda retornara 403 e a RLS
 ainda filtrara dados. Para invalidacao ativa do cache (publicacao
 via Realtime ou similar), ver follow-up em `audit-report.md` §
 "Itens de backlog tecnico" item 7.
+
+
+---
+
+## Como adicionar valor ao enum `rota_enum` (Wave 2 v4.0+)
+
+A `rota` e uma das colunas centrais da v4.0: 4 valores
+(`MATRIZ`/`LAM_MATRIZ`/`FILIAL`/`LAM_FILIAL`) + 2 legacy v3.0
+(`PADRAO`/`DIRETA`) que sao mantidos ate a Wave 7 (Componente 21).
+
+Adicionar um novo valor exige sincronizacao em CINCO camadas — sem
+todas as 5, o sistema fica em estado inconsistente:
+
+1. **Python `RotaEnum`** em `backend/app/db/models.py`: adicionar o
+   novo membro (UPDATE com UPPERCASE conforme ADR-115).
+2. **Pydantic `RotaCriacaoEnum`** em
+   `backend/app/domain/schemas/prova.py`: adicionar o novo membro SE
+   o valor for valido para criacao de prova v4.0 em diante. Legacy
+   nao entra aqui (bloqueio na criacao).
+3. **PostgreSQL via Alembic**: nova migration com
+   `ALTER TYPE rota_enum ADD VALUE IF NOT EXISTS '<NOVO>';` (em
+   transacao, ja que Postgres 12+ permite com IF NOT EXISTS).
+4. **Tabela de transicoes da Wave 3 v4.0** (`state_machine.TRANSICOES`
+   + `ATORES_POR_TRANSICAO`): adicionar as transicoes da nova rota.
+   ATENCAO: na Wave 2 v4.0 (atual) a tabela ainda usa o modelo v3.0;
+   essa atualizacao e responsabilidade do Componente 11 v4.0.
+5. **Frontend** (`frontend/src/lib/types/prova.ts`): adicionar o valor
+   em `Rota`, `RotaCriacao` (se aplicavel), `ROTA_LABELS` e
+   `ROTA_OPTIONS`/`ROTA_CRIACAO_OPTIONS`. Tambem adicionar em
+   `ROTA_BADGE_LABELS` em `backend/app/services/etiqueta_service.py`
+   para o PDF nao explodir.
+
+**Teste de drift Python ↔ PostgreSQL** existe em
+`tests/test_rota_enum_drift.py` (a ser criado na primeira oportunidade
+— Wave 3 v4.0 ou auditoria) — confronta `set(RotaEnum)` com
+`SELECT enumlabel FROM pg_enum WHERE typname='rota_enum'`. Se algum
+PR adicionar valor em apenas um dos lados, o teste falha.
+
+**Trigger de imutabilidade** (`trg_provas_rota_imutavel`, ADR-117) NAO
+muda. Continua bloqueando mudanca de valor existente.
+
+**RLS** nao precisa ser alterada para novos valores de rota — as
+policies operam sobre `vendedor_id` / `setor` / `status`, nao sobre
+`rota`.
+
+**`codigo_publico`** NAO depende da rota — formato `PRV-AAAA-MM-NNNNNN`
+e estavel independente do enum.
