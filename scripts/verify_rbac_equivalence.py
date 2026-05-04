@@ -125,7 +125,42 @@ async def cleanup_users() -> None:
         )
 
 
-async def count_visible_provas(auth_uid: uuid.UUID) -> int:
+# ─── Cobertura das 6 tabelas (AUD-W1V4-002) ──────────────────────────
+#
+# 6 tabelas com policies RLS no schema public, todas referenciando
+# helpers app_private.current_user_*. A Wave 1 v4.0 inicial só validava
+# provas_digitais. AUD-W1V4-002 estende para o conjunto completo.
+
+TABLES_TO_VALIDATE: tuple[str, ...] = (
+    "provas_digitais",       # pol_provas_select
+    "movimentacoes",         # pol_movimentacoes_select
+    "etiquetas",             # pol_etiquetas_select
+    "audit_logs",            # pol_audit_select (admin only)
+    "configuracoes_sistema", # pol_config_select (admin only)
+    "usuarios",              # pol_usuarios_select (self or admin)
+)
+
+
+# ─── Counts genericos ────────────────────────────────────────────────
+
+
+async def count_admin_total(table: str) -> int:
+    """Total real da tabela (bypass RLS via sessao postgres).
+
+    Usado como expected para perfis FULL. `table` e hardcoded em
+    TABLES_TO_VALIDATE — interpolacao em f-string e segura.
+    """
+    async with conn() as c:
+        row = await c.fetchrow(f"SELECT count(*)::int AS n FROM public.{table}")
+        return int(row["n"]) if row else 0
+
+
+async def count_visible_table(auth_uid: uuid.UUID, table: str) -> int:
+    """Count visivel sob role `authenticated` impersonado para `auth_uid`.
+
+    AUD-W1V4-002: substitui count_visible_provas (que so cobria
+    provas_digitais). Aceita qualquer tabela em TABLES_TO_VALIDATE.
+    """
     async with conn() as c:
         async with c.transaction():
             await c.execute(
@@ -133,18 +168,25 @@ async def count_visible_provas(auth_uid: uuid.UUID) -> int:
                 f'{{"sub":"{auth_uid}","role":"authenticated"}}',
             )
             await c.execute("SELECT set_config('role', 'authenticated', true)")
-            row = await c.fetchrow("SELECT count(*)::int AS n FROM public.provas_digitais")
+            row = await c.fetchrow(f"SELECT count(*)::int AS n FROM public.{table}")
             return int(row["n"]) if row else 0
 
 
+# Aliases retrocompatíveis (mantem legibilidade do main()).
+
+async def count_visible_provas(auth_uid: uuid.UUID) -> int:
+    return await count_visible_table(auth_uid, "provas_digitais")
+
+
 async def count_provas_admin_view() -> int:
-    """Total real da tabela (sem RLS) — usa a sessao postgres do connect."""
-    async with conn() as c:
-        row = await c.fetchrow("SELECT count(*)::int AS n FROM public.provas_digitais")
-        return int(row["n"]) if row else 0
+    return await count_admin_total("provas_digitais")
+
+
+# ─── Expectativas por scope (Matriz Python) ──────────────────────────
 
 
 async def count_provas_motorista_expected() -> int:
+    """Provas com status COM_MOTORISTA (scope status_motorista_em_transito)."""
     async with conn() as c:
         row = await c.fetchrow(
             "SELECT count(*)::int AS n FROM public.provas_digitais "
@@ -163,6 +205,157 @@ async def count_provas_clicheria_expected() -> int:
             "  'RECEBIDA_PELA_CLICHERIA'::public.status_prova_enum])"
         )
         return int(row["n"]) if row else 0
+
+
+async def count_provas_vendedor_self_expected(user_id: uuid.UUID) -> int:
+    """Provas onde vendedor_id = user_id (scope self_vendedor)."""
+    async with conn() as c:
+        row = await c.fetchrow(
+            "SELECT count(*)::int AS n FROM public.provas_digitais "
+            "WHERE vendedor_id = $1",
+            user_id,
+        )
+        return int(row["n"]) if row else 0
+
+
+# Movimentacoes: pol_movimentacoes_select abrange admin OR self_vendedor
+# via prova OR ator_self (usuario_id) OR motorista_status OR clicheria_status.
+
+async def count_movimentacoes_vendedor_self_expected(user_id: uuid.UUID) -> int:
+    async with conn() as c:
+        row = await c.fetchrow(
+            "SELECT count(*)::int AS n FROM public.movimentacoes m "
+            "WHERE m.usuario_id = $1 "
+            "OR m.prova_id IN (SELECT id FROM public.provas_digitais "
+            "                  WHERE vendedor_id = $1)",
+            user_id,
+        )
+        return int(row["n"]) if row else 0
+
+
+async def count_movimentacoes_motorista_expected(user_id: uuid.UUID) -> int:
+    async with conn() as c:
+        row = await c.fetchrow(
+            "SELECT count(*)::int AS n FROM public.movimentacoes m "
+            "WHERE m.usuario_id = $1 "
+            "OR m.prova_id IN (SELECT id FROM public.provas_digitais "
+            "                  WHERE status = 'COM_MOTORISTA'::public.status_prova_enum)",
+            user_id,
+        )
+        return int(row["n"]) if row else 0
+
+
+async def count_movimentacoes_clicheria_expected(user_id: uuid.UUID) -> int:
+    async with conn() as c:
+        row = await c.fetchrow(
+            "SELECT count(*)::int AS n FROM public.movimentacoes m "
+            "WHERE m.usuario_id = $1 "
+            "OR m.prova_id IN (SELECT id FROM public.provas_digitais "
+            "                  WHERE status = ANY (ARRAY["
+            "                    'ENVIADA_PARA_CLICHERIA'::public.status_prova_enum,"
+            "                    'ENCAMINHADA_A_CLICHERIA'::public.status_prova_enum,"
+            "                    'RECEBIDA_PELA_CLICHERIA'::public.status_prova_enum]))",
+            user_id,
+        )
+        return int(row["n"]) if row else 0
+
+
+# Etiquetas: pol_etiquetas_select via prova (sem branch ator_self).
+
+async def count_etiquetas_vendedor_self_expected(user_id: uuid.UUID) -> int:
+    async with conn() as c:
+        row = await c.fetchrow(
+            "SELECT count(*)::int AS n FROM public.etiquetas e "
+            "WHERE EXISTS (SELECT 1 FROM public.provas_digitais pd "
+            "              WHERE pd.id = e.prova_id AND pd.vendedor_id = $1)",
+            user_id,
+        )
+        return int(row["n"]) if row else 0
+
+
+async def count_etiquetas_motorista_expected() -> int:
+    async with conn() as c:
+        row = await c.fetchrow(
+            "SELECT count(*)::int AS n FROM public.etiquetas e "
+            "WHERE EXISTS (SELECT 1 FROM public.provas_digitais pd "
+            "              WHERE pd.id = e.prova_id "
+            "              AND pd.status = 'COM_MOTORISTA'::public.status_prova_enum)"
+        )
+        return int(row["n"]) if row else 0
+
+
+async def count_etiquetas_clicheria_expected() -> int:
+    async with conn() as c:
+        row = await c.fetchrow(
+            "SELECT count(*)::int AS n FROM public.etiquetas e "
+            "WHERE EXISTS (SELECT 1 FROM public.provas_digitais pd "
+            "              WHERE pd.id = e.prova_id "
+            "              AND pd.status = ANY (ARRAY["
+            "                'ENVIADA_PARA_CLICHERIA'::public.status_prova_enum,"
+            "                'ENCAMINHADA_A_CLICHERIA'::public.status_prova_enum,"
+            "                'RECEBIDA_PELA_CLICHERIA'::public.status_prova_enum]))"
+        )
+        return int(row["n"]) if row else 0
+
+
+async def expected_counts_for_smoke_users() -> dict[Profile, dict[str, int]]:
+    """Constroi a matriz esperada (profile, table) -> count.
+
+    Para cada perfil smoke, calcula o que a Matriz da Wave 1 v4.0 deve
+    permitir ver. Para FULL = total da tabela. Para NEGADO = 0. Para
+    PARCIAL, calcula via query equivalente ao scope (espelhando a clausula
+    da policy correspondente em RLS 010/011/012).
+
+    AUD-W1V4-002: estende cobertura de 1 (provas_digitais) para 6
+    tabelas.
+    """
+    out: dict[Profile, dict[str, int]] = {p: {} for p in Profile}
+
+    # studio_admin: full em todas as 6 tabelas.
+    for t in TABLES_TO_VALIDATE:
+        out[Profile.STUDIO_ADMIN][t] = await count_admin_total(t)
+
+    vendedor_id = SMOKE_USER_IDS[Profile.VENDEDOR]
+    motorista_id = SMOKE_USER_IDS[Profile.MOTORISTA]
+    clicheria_id = SMOKE_USER_IDS[Profile.CLICHERIA]
+
+    # vendedor: parcial self_vendedor em provas/mov/etiquetas; negado em
+    # audit/config; self (= 1) em usuarios.
+    out[Profile.VENDEDOR]["provas_digitais"] = \
+        await count_provas_vendedor_self_expected(vendedor_id)
+    out[Profile.VENDEDOR]["movimentacoes"] = \
+        await count_movimentacoes_vendedor_self_expected(vendedor_id)
+    out[Profile.VENDEDOR]["etiquetas"] = \
+        await count_etiquetas_vendedor_self_expected(vendedor_id)
+    out[Profile.VENDEDOR]["audit_logs"] = 0
+    out[Profile.VENDEDOR]["configuracoes_sistema"] = 0
+    out[Profile.VENDEDOR]["usuarios"] = 1  # self via pol_usuarios_select
+
+    # motorista: parcial status_motorista em provas/mov/etiquetas; negado
+    # em audit/config; self em usuarios.
+    out[Profile.MOTORISTA]["provas_digitais"] = \
+        await count_provas_motorista_expected()
+    out[Profile.MOTORISTA]["movimentacoes"] = \
+        await count_movimentacoes_motorista_expected(motorista_id)
+    out[Profile.MOTORISTA]["etiquetas"] = \
+        await count_etiquetas_motorista_expected()
+    out[Profile.MOTORISTA]["audit_logs"] = 0
+    out[Profile.MOTORISTA]["configuracoes_sistema"] = 0
+    out[Profile.MOTORISTA]["usuarios"] = 1
+
+    # clicheria: parcial status_clicheria em provas/mov/etiquetas; negado
+    # em audit/config; self em usuarios.
+    out[Profile.CLICHERIA]["provas_digitais"] = \
+        await count_provas_clicheria_expected()
+    out[Profile.CLICHERIA]["movimentacoes"] = \
+        await count_movimentacoes_clicheria_expected(clicheria_id)
+    out[Profile.CLICHERIA]["etiquetas"] = \
+        await count_etiquetas_clicheria_expected()
+    out[Profile.CLICHERIA]["audit_logs"] = 0
+    out[Profile.CLICHERIA]["configuracoes_sistema"] = 0
+    out[Profile.CLICHERIA]["usuarios"] = 1
+
+    return out
 
 
 async def main() -> int:
@@ -184,35 +377,44 @@ async def main() -> int:
 
     failures: list[str] = []
     try:
-        print("\n[3/4] Validando RLS via SQL impersonado...")
-        # Esperados por perfil baseados na Matriz da Wave 1 v4.0:
-        #  - admin (FULL): total da tabela.
-        #  - vendedor (PARCIAL self_vendedor): 0 (vendedor smoke nao tem provas).
-        #  - motorista (PARCIAL status_motorista_em_transito): count COM_MOTORISTA.
-        #  - clicheria (PARCIAL status_clicheria — divergencia v3.0 mantida):
-        #       count nos 3 status de clicheria.
-        admin_total = await count_provas_admin_view()
-        motorista_expected = await count_provas_motorista_expected()
-        clicheria_expected = await count_provas_clicheria_expected()
+        print("\n[3/4] Validando RLS via SQL impersonado (4 perfis x 6 tabelas)...")
+        # AUD-W1V4-002: cobertura estendida de 1 (provas_digitais) para 6
+        # tabelas com policies em public.* via app_private.current_user_*.
+        # Esperados por (perfil, tabela) constroidos por expected_counts_for_smoke_users
+        # (espelha as clausulas das policies em RLS 010/011/012).
+        expected = await expected_counts_for_smoke_users()
 
-        admin_seen     = await count_visible_provas(SMOKE_USER_AUTH_UIDS[Profile.STUDIO_ADMIN])
-        vendedor_seen  = await count_visible_provas(SMOKE_USER_AUTH_UIDS[Profile.VENDEDOR])
-        motorista_seen = await count_visible_provas(SMOKE_USER_AUTH_UIDS[Profile.MOTORISTA])
-        clicheria_seen = await count_visible_provas(SMOKE_USER_AUTH_UIDS[Profile.CLICHERIA])
+        rls_counts: dict[Profile, dict[str, int]] = {p: {} for p in Profile}
+        for profile in Profile:
+            auth_uid = SMOKE_USER_AUTH_UIDS[profile]
+            for table in TABLES_TO_VALIDATE:
+                rls_counts[profile][table] = await count_visible_table(auth_uid, table)
 
-        print(f"      admin     ve {admin_seen} provas (esperado {admin_total})")
-        print(f"      vendedor  ve {vendedor_seen} provas (esperado 0)")
-        print(f"      motorista ve {motorista_seen} provas (esperado {motorista_expected})")
-        print(f"      clicheria ve {clicheria_seen} provas (esperado {clicheria_expected})")
+        # Cabecalho da matriz 4x6.
+        col_w = max(len(t) for t in TABLES_TO_VALIDATE) + 2
+        print("      " + " ".ljust(14) + "".join(t.ljust(col_w) for t in TABLES_TO_VALIDATE))
+        for profile in Profile:
+            row = [f"{rls_counts[profile][t]}/{expected[profile][t]}".ljust(col_w)
+                   for t in TABLES_TO_VALIDATE]
+            print(f"      {profile.value.ljust(14)}" + "".join(row))
+        print("      (formato: visto/esperado por (perfil, tabela))")
 
-        if admin_seen != admin_total:
-            failures.append(f"admin RLS: viu {admin_seen}, esperado {admin_total}")
-        if vendedor_seen != 0:
-            failures.append(f"vendedor RLS: viu {vendedor_seen}, esperado 0")
-        if motorista_seen != motorista_expected:
-            failures.append(f"motorista RLS: viu {motorista_seen}, esperado {motorista_expected}")
-        if clicheria_seen != clicheria_expected:
-            failures.append(f"clicheria RLS: viu {clicheria_seen}, esperado {clicheria_expected}")
+        # Comparacao dura: cada celula precisa bater.
+        for profile in Profile:
+            for table in TABLES_TO_VALIDATE:
+                seen = rls_counts[profile][table]
+                exp = expected[profile][table]
+                if seen != exp:
+                    failures.append(
+                        f"[{profile.value}][{table}] RLS viu {seen}, esperado {exp}"
+                    )
+
+        # Aliases retrocompativeis usados pela etapa [4/4].
+        admin_total = expected[Profile.STUDIO_ADMIN]["provas_digitais"]
+        admin_seen = rls_counts[Profile.STUDIO_ADMIN]["provas_digitais"]
+        vendedor_seen = rls_counts[Profile.VENDEDOR]["provas_digitais"]
+        motorista_seen = rls_counts[Profile.MOTORISTA]["provas_digitais"]
+        clicheria_seen = rls_counts[Profile.CLICHERIA]["provas_digitais"]
 
         print("\n[4/4] Validando equivalencia Matriz <-> Python para 48 celulas...")
         # M-5 (audit fixes): asserca de verdade que a Matriz Python concorda
