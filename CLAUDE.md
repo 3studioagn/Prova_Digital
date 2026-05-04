@@ -444,3 +444,17 @@ de verdade espelhada por TS/Python/RLS. Para adicionar uma nova pagina:
 - `get_admin_user` continua existindo mas e legacy — apenas para
   invariantes de negocio que NAO sao celula da Matriz (ex.: RN-010 em
   `users.py`).
+
+**Latencia de revogacao no middleware (AUD-W1V4-103):** o middleware
+mantem um cache LRU em memoria (`PROFILE_CACHE`, TTL 30s) com snapshot
+de `is_admin`/`setor`/`ativo` por `auth_uid`. **Apos PATCH/DELETE em
+`/api/v1/users/{id}` que altera essas colunas, o middleware pode
+continuar deixando o usuario passar pelas regras antigas por ate ~30
+segundos.** Defesa em profundidade preserva: o backend valida
+`get_current_user` (`ativo=true`) por request — sem cache; e o RLS
+usa `app_private.current_user_*()` que sempre le `usuarios` fresh.
+Logo, o pior caso da janela de 30s e o middleware permitir navegar
+ate uma pagina admin-only — o backend ainda retornara 403 e a RLS
+ainda filtrara dados. Para invalidacao ativa do cache (publicacao
+via Realtime ou similar), ver follow-up em `audit-report.md` §
+"Itens de backlog tecnico" item 7.
