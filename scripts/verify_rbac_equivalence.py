@@ -416,15 +416,27 @@ async def main() -> int:
         motorista_seen = rls_counts[Profile.MOTORISTA]["provas_digitais"]
         clicheria_seen = rls_counts[Profile.CLICHERIA]["provas_digitais"]
 
-        print("\n[4/4] Validando equivalencia Matriz <-> Python para 48 celulas...")
-        # M-5 (audit fixes): asserca de verdade que a Matriz Python concorda
-        # com o RLS para TODAS as 48 celulas (12 regras x 4 perfis).
-        # - Para a regra `provas.list` (a unica que dispara count direto neste
-        #   script), confronta o veredito da Matriz Python com o que o RLS
-        #   retornou: PARCIAL/FULL deve permitir o acesso (decision != NEGADO);
-        #   NEGADO deve coincidir com count == 0.
-        # - Para as outras 11 regras, valida apenas que a Matriz Python
-        #   classifica os 4 perfis (FULL/PARCIAL/NEGADO) sem inconsistencia.
+        print("\n[4/4] Validando equivalencia Matriz Python <-> RLS por celula...")
+        # AUD-W1V4-003: a etapa anterior (M-5) so pegava drift no caso
+        # `NEGADO + count > 0`. Cenarios FULL e PARCIAL passavam silenciosamente
+        # mesmo com divergencia. AUD-W1V4-107 substituiu o bloco abaixo por
+        # validacao explicita de cada (rule, profile, table) onde a regra
+        # GOVERNA o SELECT da tabela.
+        #
+        # O mapping `RULE_GOVERNS_TABLE` lista as regras que controlam
+        # diretamente o SELECT em uma ou mais tabelas RLS-protegidas:
+        #   - provas.list   -> provas_digitais
+        #   - provas.detail -> provas_digitais + movimentacoes + etiquetas
+        #     (endpoints derivados do detalhe usam essas tabelas via
+        #     pol_movimentacoes_select/pol_etiquetas_select)
+        #   - auditoria     -> audit_logs
+        #   - configuracoes -> configuracoes_sistema
+        # Outras regras (login, dashboard, scanner, provas.create,
+        # provas.cancel, provas.restart, usuarios, relatorios) nao governam
+        # SELECT direto — ou sao universais, ou controlam INSERT/UPDATE,
+        # ou usam SELECT mais permissivo (ex: pol_usuarios_select e
+        # self_or_admin, mais largo que a regra de pagina). Para essas,
+        # mantemos a validacao de sanity do enum Acesso.
         from datetime import datetime, timezone  # noqa: PLC0415
 
         # Constroi os 4 usuarios fixture uma unica vez.
@@ -448,29 +460,57 @@ async def main() -> int:
             Profile.CLICHERIA:    _u(SetorEnum.CLICHERIA, False),
         }
 
-        # Confronto explicito provas.list <-> RLS counts.
-        rls_counts_by_profile = {
-            Profile.STUDIO_ADMIN: admin_seen,
-            Profile.VENDEDOR:     vendedor_seen,
-            Profile.MOTORISTA:    motorista_seen,
-            Profile.CLICHERIA:    clicheria_seen,
+        # Mapping rule_key -> tabelas que a regra governa para SELECT.
+        rule_governs_table: dict[str, tuple[str, ...]] = {
+            "provas.list":   ("provas_digitais",),
+            "provas.detail": ("provas_digitais", "movimentacoes", "etiquetas"),
+            "auditoria":     ("audit_logs",),
+            "configuracoes": ("configuracoes_sistema",),
         }
-        rule_provas_list = matrix.rules_by_key["provas.list"]
-        for profile, rls_count in rls_counts_by_profile.items():
-            decision = evaluate(rule_provas_list, users_by_profile[profile])
-            # Hoje nenhum dos 4 perfis e NEGADO em provas.list. Mas se virar:
-            if decision.acesso == Acesso.NEGADO and rls_count != 0:
-                failures.append(
-                    f"[provas.list][{profile.value}] Matriz nega no Python "
-                    f"mas RLS retornou {rls_count} > 0 (drift critico)."
-                )
 
-        # Sanity: as outras 11 regras + 4 perfis = 44 celulas. Apenas validar
-        # que evaluate() retorna um Acesso valido (ja tipado como enum, mas
-        # confirma que o JSON foi parseado sem corrupcao silenciosa).
-        celulas_validadas = 4  # provas.list ja contado acima
+        cells_validated = 0
+        for rule_key, tables in rule_governs_table.items():
+            rule = matrix.rules_by_key[rule_key]
+            for profile, user in users_by_profile.items():
+                decision = evaluate(rule, user)
+                for table in tables:
+                    seen = rls_counts[profile][table]
+                    admin_total_t = rls_counts[Profile.STUDIO_ADMIN][table]
+
+                    if decision.acesso == Acesso.NEGADO:
+                        if seen != 0:
+                            failures.append(
+                                f"[{rule_key}][{profile.value}][{table}] "
+                                f"Matriz=NEGADO mas RLS viu {seen} > 0 (drift)."
+                            )
+                    elif decision.acesso == Acesso.FULL:
+                        if seen != admin_total_t:
+                            failures.append(
+                                f"[{rule_key}][{profile.value}][{table}] "
+                                f"Matriz=FULL mas RLS viu {seen} de "
+                                f"{admin_total_t} possiveis (drift)."
+                            )
+                    elif decision.acesso == Acesso.PARCIAL:
+                        # Para PARCIAL, validamos contra `expected` calculado
+                        # via espelho da clausula da policy (etapa [3/4]).
+                        # Se o smoke vendedor tem 0 provas e expected=0,
+                        # passa. Se aparece prova nova com vendedor_id smoke,
+                        # expected sobe e RLS deve refletir.
+                        exp = expected[profile][table]
+                        if seen != exp:
+                            failures.append(
+                                f"[{rule_key}][{profile.value}][{table}] "
+                                f"Matriz=PARCIAL scope={decision.scope} mas "
+                                f"RLS viu {seen}, esperado {exp} (drift)."
+                            )
+                    cells_validated += 1
+
+        # Sanity das outras 8 regras (4 universais + 4 admin-only de acao):
+        # validar apenas que decision retorna Acesso enum valido (confirma
+        # parsing do JSON sem corrupcao). Sem teste de count direto.
+        sanity_validated = 0
         for rule in matrix.rules:
-            if rule.key == "provas.list":
+            if rule.key in rule_governs_table:
                 continue
             for profile, user in users_by_profile.items():
                 decision = evaluate(rule, user)
@@ -479,14 +519,25 @@ async def main() -> int:
                         f"[{rule.key}][{profile.value}] decision invalida: "
                         f"{decision!r}"
                     )
-                celulas_validadas += 1
-        if celulas_validadas != 48:
+                sanity_validated += 1
+
+        # Total: 4 governadas (1+3+1+1=6 mappings) x 4 perfis = 24 cells +
+        # 8 nao-governadas x 4 perfis = 32 cells sanity = 56 validacoes.
+        expected_governed = sum(len(ts) for ts in rule_governs_table.values()) * 4
+        expected_sanity = (len(matrix.rules) - len(rule_governs_table)) * 4
+        if cells_validated != expected_governed:
             failures.append(
-                f"Esperava validar 48 celulas, validei {celulas_validadas}."
+                f"Esperava {expected_governed} cells governadas validadas, "
+                f"validei {cells_validated}."
             )
-        else:
-            print("      OK — 48 celulas validadas (Python consistente, "
-                  "provas.list bate com RLS).")
+        if sanity_validated != expected_sanity:
+            failures.append(
+                f"Esperava {expected_sanity} cells sanity validadas, "
+                f"validei {sanity_validated}."
+            )
+        if not failures:
+            print(f"      OK — {cells_validated} cells governadas (rule x profile x table) "
+                  f"+ {sanity_validated} cells sanity validadas contra RLS.")
 
     finally:
         print("\n[cleanup] Removendo usuarios smoke...")
