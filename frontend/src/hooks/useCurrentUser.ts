@@ -20,12 +20,43 @@ interface State {
 }
 
 /**
+ * AUD-W1V4-104 (audit Round 2): conjunto canonico de setores aceitos
+ * em runtime. Espelha o enum `Setor` em `@/lib/access-matrix`.
+ * `apiFetch<UserInfo>` faz cast TypeScript sem validacao runtime —
+ * se o backend retornar um setor fora deste conjunto, sem este guard
+ * o componente continua e `resolveProfile` retorna null silenciosamente
+ * ("negado em tudo", deny seguro mas dificil de diagnosticar).
+ */
+const VALID_SETORES: ReadonlySet<Setor> = new Set<Setor>([
+  "STUDIO",
+  "VENDEDOR",
+  "MOTORISTA",
+  "CLICHERIA",
+]);
+
+function isValidUserInfo(payload: unknown): payload is UserInfo {
+  if (typeof payload !== "object" || payload === null) return false;
+  const u = payload as Record<string, unknown>;
+  return (
+    typeof u.id === "string" &&
+    typeof u.nome === "string" &&
+    typeof u.is_admin === "boolean" &&
+    typeof u.setor === "string" &&
+    VALID_SETORES.has(u.setor as Setor)
+  );
+}
+
+/**
  * Busca o usuario corrente via GET /api/v1/users/me.
  *
  * O layout tambem faz essa chamada — a duplicacao e aceita porque o
  * response e <1 KB e o browser pode cachear (ADR-087, Lote C).
  * Alternativa seria React Context no layout, mas isso requer tocar
  * em codigo Wave 1.
+ *
+ * AUD-W1V4-104: payload e validado em runtime contra o conjunto de
+ * setores canonicos. Setor invalido -> user=null (deny seguro) com
+ * console.warn explicito para facilitar diagnostico.
  */
 export function useCurrentUser(): State {
   const [state, setState] = useState<State>({ user: null, loading: true });
@@ -40,8 +71,16 @@ export function useCurrentUser(): State {
       return;
     }
     try {
-      const user = await apiFetch<UserInfo>("/api/v1/users/me", { token });
-      setState({ user, loading: false });
+      const payload = await apiFetch<unknown>("/api/v1/users/me", { token });
+      if (!isValidUserInfo(payload)) {
+        console.warn(
+          "[useCurrentUser] payload invalido em /api/v1/users/me; tratando como nao-autenticado",
+          payload,
+        );
+        setState({ user: null, loading: false });
+        return;
+      }
+      setState({ user: payload, loading: false });
     } catch {
       setState({ user: null, loading: false });
     }
