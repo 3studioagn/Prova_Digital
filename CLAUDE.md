@@ -379,6 +379,16 @@ de verdade espelhada por TS/Python/RLS. Para adicionar uma nova pagina:
      decisao tem `acesso` (`"full"`/`"parcial"`/`"negado"`) e, se
      parcial, `scope` (um dos 3 kinds em `scope_kinds`).
 
+   **AVISO (AUD-W1V4-102)**: o middleware faz **pass-through silencioso**
+   para rotas com `getRuleForPath = null` (sem entrada na Matriz). Isso
+   significa que se voce criar `app/(dashboard)/<x>/page.tsx` SEM
+   adicionar entrada correspondente aqui, qualquer usuario autenticado
+   acessa a pagina — mesmo vendedor/motorista/clicheria. O comportamento
+   e intencional para nao quebrar prototipagem, mas exige disciplina:
+   **toda nova rota precisa de entrada na Matriz**, mesmo que seja `full`
+   para os 4 perfis. Defesa de fundo (backend `access_required` + RLS)
+   continua valendo — a Matriz e a CAMADA SUPERIOR.
+
 2. **Atualizar `EXPECTED_KEYS` em `backend/tests/access/test_matrix_structure.py`**
    para incluir a nova chave. Se for chave cuja regra nao se encaixa nas
    semanticas existentes (ex.: novo scope kind), atualizar tambem
