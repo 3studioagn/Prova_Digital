@@ -852,3 +852,73 @@ prosseguir."**
 Não escreverei código de produção, não aplicarei migration, não
 abrirei PR até a autorização chegar. Se a autorização vier
 acompanhada de correções ao plano, incorporarei antes de começar.
+
+---
+
+## 9. Resultado da Execução (anexado em 2026-05-05 após Gate 2)
+
+Sessão executada em `wave2-v4/fixes/execution`. **15 commits atômicos
+de execução** (rastreáveis ao ID do achado) + **1 commit do plano**
+(em `wave2-v4/fixes/plan`). Total: **16 commits**.
+
+### 9.1 Diferenças entre planejado e realizado
+
+| Achado | Planejado (§2) | Realizado | Divergência? |
+|---|---|---|---|
+| AUD-W2V4-001 + A01 + 006 + 007 | 1 commit coeso `state_machine.py` + ajuste de 1 teste | 1 commit `cbd6506` cobrindo `state_machine.py` + 2 testes ajustados (`test_state_machine.py` 1 ajustado + 2 novos; `test_provas_api.py` 1 ajustado) | nenhuma material — 1 teste a mais de provas_api precisou ser ajustado |
+| AUD-W2V4-002 + D01 + D02 | commit dos 3 frontend + nota anexo | commit `1a88ab8` cobrindo os 3 + nota explícita; tsc/build re-validados | nenhuma |
+| AUD-W2V4-T01 | suíte com 5 cenários banco real | 5 cenários, skipif sem `INTEGRATION_DATABASE_URL` | nenhuma |
+| AUD-W2V4-T02 | 3 testes drift | 5 testes (3 + 2 sanity) | a mais — sanity tests adicionados |
+| AUD-W2V4-T03 | 3 testes upgrade/downgrade/idempotente | 3 testes implementados | nenhuma |
+| AUD-W2V4-A02 + M03 | default vazio + texto auxiliar | implementado + classe CSS `fieldHint` | nenhuma |
+| AUD-W2V4-M01 | reescrever `schema.sql` | reescrito + nota dos 3 chunks (resolve M02 parcialmente) | nenhuma |
+| AUD-W2V4-003 | corrigir docstring | feito + correção de tamanho 17→18 (bug menor pré-existente) | a mais — pequeno bonus |
+| AUD-W2V4-004 | retry no handler | implementado com classificação por constraint_name + 3 testes novos | nenhuma |
+| AUD-W2V4-005 | docstring de contrato | feito + bloco "TEST PENDING Componente 19" | nenhuma |
+| AUD-W2V4-M02 | nota CLAUDE.md + docstring | feito em CLAUDE.md "Estado atual" + docstring migration 012 | nenhuma |
+| AUD-W2V4-S01 | guarda separador `\|` | feito + 1 teste novo | nenhuma |
+| AUD-W2V4-P03 | cache logo SVG ou WONTFIX | implementado `lru_cache` em `_check_assets`; cache de bytes WONTFIX-parcial documentado | conforme planejado (decisão alternativa autorizada) |
+| AUD-W2V4-M04 | bloco "Pós-supersedimento" no ADR-120 | feito | nenhuma |
+| AUD-W2V4-T05 | aumentar para 10k amostras | feito com tolerância matemática justificada (>= 9_995) | nenhuma |
+| AUD-W2V4-T04 | smoke E2E manual obrigatório | documentado em `fix-validation.md` Seção 2.9 com 11 itens de checklist | nenhuma |
+| AUD-W2V4-INFO (S02/S03/P01/P02) | só registrar | registrados em apêndice de `audit-report.md` | nenhuma |
+
+### 9.2 Suíte de teste — totais pós-correção
+
+- **Backend:** 805 passed + 9 skipped (era 795 + 0 antes da sessão).
+- Novos testes: 2 (AUD-001) + 5 (T01) + 5 (T02) + 3 (T03) + 3
+  (AUD-004) + 1 (S01) = 19 testes adicionados.
+- Skipped: 5 (T01) + 3 (T03) + 1 (T02) = 9 (todos por falta de
+  `INTEGRATION_DATABASE_URL` — esperado).
+- Testes ajustados: 1 (`test_executar_reinicio_ciclo_reprovada_para_criada_incrementa`)
+  + 1 (`test_reiniciar_happy_prova_reprovada`) + 1
+  (`test_create_prova_integrity_error_returns_409`) = 3 ajustes.
+- Math: 795 + 19 - 0 = 814 (esperado), 805 passed + 9 skipped = 814.
+  ✅ Bate.
+
+### 9.3 Documentação acumulativa atualizada
+
+- **DECISIONS.md:** ADR-123 + ADR-124 + bloco "Pós-supersedimento"
+  no ADR-120.
+- **CHANGELOG.md:** nova seção "Wave 2 v4.0 — Correções
+  Pós-Auditoria Sênior" com tabela de 26 achados por severidade.
+- **CLAUDE.md:** seção "Estado atual do banco" com nota dos 3
+  chunks MCP.
+- **docs/db/schema.sql:** reescrito com `alembic_version=012` +
+  estado real.
+- **docs/wave2-v4/audit-report.md:** apêndice "Status de Resolução
+  por Achado" — tabela completa.
+- **docs/wave2-v4/fix-plan.md:** este anexo §9.
+- **docs/wave2-v4/fix-validation.md:** novo arquivo com checklist +
+  auto-crítica + recomendações.
+
+### 9.4 Recomendação final
+
+**PR pronto para merge condicional** — aguarda smoke E2E manual
+(Seção 2.9 do `fix-validation.md`).
+
+**Recomenda-se nova rodada de auditoria independente em sessão
+separada após o merge**, usando o prompt de auditoria pós-Wave 2
+v4.0, para confirmar que (a) achados originais foram resolvidos,
+(b) correções não introduziram novos problemas, (c) Wave 7
+continua viável.
