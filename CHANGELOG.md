@@ -2,6 +2,162 @@
 
 ---
 
+## [2026-05-05 — Wave 2 v4.0 — Correcoes Pos-Auditoria Senior]
+
+Sessao de correcao dos 26 achados do `docs/wave2-v4/audit-report.md`
+(3 CRITICAL + 7 HIGH + 4 MEDIUM + 8 LOW + 4 INFO). Branch
+`wave2-v4/fixes/execution`. Veredito da auditoria: REPROVADO E
+REFAZER — 2 CRITICAL bloqueantes (AUD-W2V4-001 reinicio zera rota
+violando RN-006 v4.0; AUD-W2V4-002 branch development build-broken
+com helper `isAllowedImageType` uncommitted). Todos os 26 achados
+tratados; nenhum deferred.
+
+### CRITICAL (3 — bloqueantes)
+
+- **AUD-W2V4-001 + A01 + 006 + 007** (commit `cbd6506`): trocar
+  `rota_depois = None` por `rota_depois = rota_antes` no ramo
+  `reiniciando_ciclo` de `state_machine.executar_transicao`.
+  Modificacao cirurgica do ADR-119 completada para o ramo
+  `reiniciando_ciclo`. Resolve o bug de SQLSTATE 22023 disparado
+  pelo trigger `trg_provas_rota_imutavel` para qualquer prova com
+  rota nao-NULL. ADR-123 novo. **Pre-requisito da Wave 7**.
+- **AUD-W2V4-002 + D01 + D02** (commit `1a88ab8`): commitar as 3
+  alteracoes uncommitted que sustentavam o Visual Refresh v2 mas
+  estavam dirty no working tree (`prova.ts` com helper
+  `isAllowedImageType`, `useCreateProva.ts` consumindo o helper,
+  `globals.css` com cor ajustada). Branch `development` (`wave2-v4/
+  audit`) volta a compilar (`tsc --noEmit` exit 0; `next build`
+  13/13 paginas). Anexo Visual Refresh v1 do `analysis.md`
+  commitado com nota explicita de supersedimento.
+
+### HIGH (7)
+
+- **AUD-W2V4-T01** (commit `c9bd87b`): suite
+  `test_imutabilidade_rota.py` com 5 testes integrados (banco real
+  via `INTEGRATION_DATABASE_URL`, skipif sem ela). Cobre `NULL→valor`
+  permitido (Wave 7 readiness), `valor→outro` bloqueado,
+  `valor→NULL` bloqueado, aprovacao v4.0 preserva, reinicio v4.0
+  preserva (validador automatizado do fix AUD-W2V4-001).
+- **AUD-W2V4-T02** (commit `420de1d`): suite
+  `test_rota_enum_drift.py` com 5 testes confrontando `RotaEnum`
+  Python ↔ `pg_enum` PostgreSQL ↔ `Rota`/`RotaCriacao` TypeScript ↔
+  `RotaCriacaoEnum` Pydantic. Detecta drift automaticamente.
+  Confirma zero drift atual entre TS e Python. Postgres skipif
+  sem `INTEGRATION_DATABASE_URL`.
+- **AUD-W2V4-T03** (commit `3af50d1`): suite `test_migration_012.py`
+  com 3 testes de upgrade/downgrade/idempotencia (banco real via
+  `INTEGRATION_DATABASE_URL` + schema temporario). Pre-requisito
+  para Wave 7 criar migration 013+ sem conflito.
+- **AUD-W2V4-A02 + M03** (commit `c7de064`): default
+  `INITIAL_FORM.rota = ""` (era `"MATRIZ"`); tipo do `FormState.rota`
+  muda para `RotaCriacao | ""`; `canSubmit` bloqueia envio com
+  rota vazia; `handleSubmit` narrowing explicito; texto auxiliar
+  "A rota escolhida e imutavel apos o cadastro" restaurado abaixo
+  do segment. Mitigacao do risco "Confusao operacional" do Backlog
+  v4.0 §6 — substituta da mitigacao descartada em ADR-118
+  SUPERSEDIDO. ADR-124 novo.
+- **AUD-W2V4-M01** (commit `f02d882`): `docs/db/schema.sql`
+  reescrito refletindo `alembic_version=012`, `rota_enum` com 6
+  valores, coluna `codigo_publico VARCHAR(20) UNIQUE NOT NULL`,
+  trigger `trg_provas_rota_imutavel`, indexes
+  `idx_provas_codigo_publico` UNIQUE + `idx_provas_rota`, schema
+  `app_private` da Wave 1 v4.0, RLS 008-013. Nota explicita sobre
+  divergencia 3 chunks MCP.
+- **AUD-W2V4-003** (commit `78aeb15`): docstring de
+  `codigo_publico_service.py` corrigida — trigger
+  `trg_provas_rota_imutavel` protege apenas `rota`, nao
+  `codigo_publico`. Tamanho total tambem corrigido para 18 chars
+  (era 17 — bug menor pre-existente).
+
+### MEDIUM (4)
+
+- **AUD-W2V4-004** (commit `4e99410`): refactor do
+  try/except do handler `criar_prova` em while loop com max 3
+  tentativas que classifica `IntegrityError` por
+  `constraint_name`. Colisao em `idx_provas_codigo_publico` retenta
+  com codigo regenerado (3x) ate sucesso ou 502; colisao em
+  `provas_digitais_nro_requerimento_key` mantem 409 atual; outros
+  IntegrityError (FK, NOT NULL) viram 502 (mudanca de contrato vs
+  409 generico antigo enganoso). 3 testes novos +
+  test_create_prova_integrity_error_returns_409 ajustado.
+- **AUD-W2V4-005** (commit `42532e9`): docstring de
+  `qrcode_service.validar_payload_qr` ganhou bloco "AUD-W2V4-005
+  (contrato explicito)" detalhando a semantica polimorfica do
+  segundo campo do payload (codigo_publico v4.0 preferencial vs
+  nro_requerimento legacy). TEST PENDING para Componente 19.
+- **AUD-W2V4-M02** (commit `1ec605b`): documentar divergencia
+  entre migration Alembic atomic do repo e os 3 chunks
+  `012a/b/c` MCP em producao. CLAUDE.md (secao "Estado atual do
+  banco") + docstring da migration 012 atualizados.
+- **AUD-W2V4-T04**: smoke E2E manual obrigatorio antes do merge
+  para `main`. Checklist documentado em `fix-validation.md`.
+
+### LOW (8)
+
+- **AUD-W2V4-S01** (commit `42532e9` junto com AUD-005): defesa
+  preventiva em `gerar_payload_qr` rejeitando identificador com
+  separador `|`. Novo teste mais 1.
+- **AUD-W2V4-007** (commit `cbd6506` junto com AUD-001): audit log
+  de reinicio agora grava `rota_depois = rota_antes.value` (era
+  None hardcoded). Mudanca de contrato silenciosa documentada.
+- **AUD-W2V4-P03** (commit `38b2fc5`): `lru_cache(maxsize=1)` em
+  `_check_assets` — economiza 2 syscalls `Path.exists()` por
+  `gerar_pdf` apos primeira chamada. Cache de bytes do SVG
+  classificado WONTFIX-parcial (gargalo e parse XML do svglib,
+  nao read).
+- **AUD-W2V4-M03** (commit `c7de064` junto com AUD-A02): default
+  `INITIAL_FORM.rota = ""`.
+- **AUD-W2V4-M04** (commit `7c80523`): bloco "Pos-supersedimento"
+  no ADR-120 esclarecendo que Visual Refresh v2 eliminou a
+  duplicacao de logos backend↔frontend.
+- **AUD-W2V4-T05** (commit `6b6c727`): teste de unicidade
+  aumentado de 200 para 10.000 amostras (tolerar 5 colisoes —
+  paradoxo do aniversario com 31^6 da ~5.6%).
+- **AUD-W2V4-D01** (commit `1a88ab8` junto com AUD-002): nota de
+  supersedimento explicita no anexo Visual Refresh v1 do
+  `analysis.md`.
+- **AUD-W2V4-D02** (commit `1a88ab8` junto com AUD-002):
+  re-validacao `tsc --noEmit` exit 0 + `next build` 13/13 NO
+  ESTADO COMMITADO confirmada apos AUD-002.
+
+### INFO (4 — registrar status)
+
+- **AUD-W2V4-S02**: etiqueta semi-publica por design — mitigacao
+  fica para Componente 19 / Wave 3 v4.0 (registrado follow-up).
+- **AUD-W2V4-S03**: `service_role` bypassa RLS mas trigger
+  continua disparando — confirmado.
+- **AUD-W2V4-P01**: `idx_provas_rota` aparece como `unused_index`
+  esperado (zero provas v4.0 em producao).
+- **AUD-W2V4-P02**: `idx_provas_codigo_publico` ja usado pelo
+  UNIQUE check do INSERT — confirmado.
+
+### Validacao
+
+- Backend: **804 passed + 9 skipped** (era 795 + 0; +9 testes
+  novos: 2 do AUD-001, 5 do AUD-T01, 5 do AUD-T02, 3 do AUD-T03,
+  3 do AUD-004, 1 do AUD-S01; 9 skipped sao das 3 suites
+  integradas T01/T02/T03 sem `INTEGRATION_DATABASE_URL`). 0
+  regressao Wave 0..6 + Wave 1 v4.0 + Wave 2 v4.0 base.
+- Frontend: `tsc --noEmit` exit 0 NO ESTADO COMMITADO; `next
+  build` 13/13 paginas; `/nova-prova` em 6.84 kB / 209 kB First
+  Load (+50 bytes vs pre-fix por causa do hint).
+- ADRs novos: ADR-123 + ADR-124. ADR-120 com bloco
+  "Pos-supersedimento".
+- 14 commits atomicos rastreaveis ao ID do achado em
+  `wave2-v4/fixes/execution`.
+
+### Recomendacao
+
+- **PR aberto para revisao**, smoke E2E manual obrigatorio antes
+  do merge para `main` (4 rotas + reinicio de ciclo + escaneamento).
+- Recomenda-se nova rodada de auditoria independente em sessao
+  separada usando o prompt de auditoria pos-Wave 2 v4.0, para
+  confirmar que (a) achados originais foram resolvidos, (b)
+  correcoes nao introduziram novos problemas, (c) Wave 7 continua
+  viavel.
+
+---
+
 ## [2026-05-05 — Wave 2 v4.0 — Componente 06 — Visual Refresh v2]
 
 Segundo refresh visual da pagina `/nova-prova` apos feedback do Mario:

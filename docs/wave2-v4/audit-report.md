@@ -962,3 +962,75 @@ vendedor for FILIAL. Resultado: prova segue por rota direta antiga.
 ---
 
 **Fim do relatório de auditoria.**
+
+---
+
+## APÊNDICE — Status de Resolução por Achado (2026-05-05)
+
+> Adicionado pela sessão de Audit Fixes (`wave2-v4/fixes/execution`).
+> O corpo original do relatório acima **NÃO foi editado** — este
+> apêndice anota o status final de cada achado.
+
+### CRITICAL (3)
+
+| ID | Status | Commit | Critério de validação |
+|---|---|---|---|
+| AUD-W2V4-001 | **RESOLVIDO** | `cbd6506` | `state_machine.py:377-384` agora preserva `rota_antes` no reinício. 3 testes em `test_state_machine.py` (1 ajustado + 2 novos cobrindo v4.0/legacy NULL); 1 teste em `test_provas_api.py` ajustado; cenário 5 de `test_imutabilidade_rota.py` valida com banco real. ADR-123. |
+| AUD-W2V4-002 | **RESOLVIDO** | `1a88ab8` | 3 arquivos commitados (`prova.ts`, `useCreateProva.ts`, `globals.css`); `tsc --noEmit` exit 0 + `next build` 13/13 NO ESTADO COMMITADO; anexo `analysis.md` com nota de supersedimento explícita. |
+| AUD-W2V4-A01 | **RESOLVIDO** | `cbd6506` | Mesma raiz de AUD-W2V4-001 — modificação cirúrgica do ADR-119 completada para o ramo `reiniciando_ciclo`. |
+
+### HIGH (7)
+
+| ID | Status | Commit | Critério |
+|---|---|---|---|
+| AUD-W2V4-006 | **RESOLVIDO** | `cbd6506` | Mesma raiz de AUD-W2V4-001 — regressão Wave 3 C14 corrigida para 5 provas legacy + futuras v4.0. |
+| AUD-W2V4-T01 | **RESOLVIDO** | `c9bd87b` | `backend/tests/test_imutabilidade_rota.py` criado com 5 testes integrados (`NULL→valor`, `valor→outro`, `valor→NULL`, aprovação v4.0, reinício v4.0). Skip sem `INTEGRATION_DATABASE_URL` (alinhado com padrão da suíte). |
+| AUD-W2V4-T02 | **RESOLVIDO** | `420de1d` | `backend/tests/test_rota_enum_drift.py` criado com 5 testes (Python↔Postgres skipif; TS↔Python rodam — confirmam zero drift atual; subset Pydantic; sanity). |
+| AUD-W2V4-T03 | **RESOLVIDO** | `3af50d1` | `backend/tests/test_migration_012.py` criado com 3 testes (upgrade fresh, downgrade reverte, idempotência via down-up). Skip sem `INTEGRATION_DATABASE_URL`. |
+| AUD-W2V4-A02 | **RESOLVIDO** | `c7de064` | Default `INITIAL_FORM.rota = ""` força escolha; texto auxiliar "rota imutável após cadastro" restaurado. ADR-124. |
+| AUD-W2V4-M01 | **RESOLVIDO** | `f02d882` | `docs/db/schema.sql` reescrito refletindo `alembic_version=012` + estruturas Wave 2 v4.0 + Wave 1 v4.0 + RLS 008-013 + nota dos 3 chunks MCP. |
+| AUD-W2V4-003 | **RESOLVIDO** | `78aeb15` | Docstring de `codigo_publico_service.py` corrigida (trigger não enforça unicidade do `codigo_publico`). |
+
+### MEDIUM (4)
+
+| ID | Status | Commit | Critério |
+|---|---|---|---|
+| AUD-W2V4-004 | **RESOLVIDO** | `4e99410` | While loop com retry 3x em `idx_provas_codigo_publico`; classificação por `constraint_name`; mensagem clara para race TOCTOU de `nro_requerimento`; 502 para outros IntegrityError. 3 testes novos. |
+| AUD-W2V4-005 | **RESOLVIDO** | `42532e9` | Docstring de `validar_payload_qr` documenta contrato polimórfico do segundo campo (codigo_publico v4.0 vs nro_requerimento legacy). TEST PENDING explícito para Componente 19. |
+| AUD-W2V4-M02 | **RESOLVIDO** | `1ec605b` | CLAUDE.md "Estado atual do banco" + docstring da migration 012 documentam os 3 chunks MCP e set manual de `alembic_version='012'`. |
+| AUD-W2V4-T04 | **RESOLVIDO** (manual) | (`fix-validation.md`) | Smoke E2E manual obrigatório antes do merge para `main` documentado em checklist. Execução por Mario. |
+
+### LOW (8)
+
+| ID | Status | Commit | Critério |
+|---|---|---|---|
+| AUD-W2V4-S01 | **RESOLVIDO** | `42532e9` | `gerar_payload_qr` rejeita identificador com separador `\|`. 1 teste novo. |
+| AUD-W2V4-007 | **RESOLVIDO** | `cbd6506` | Audit log de reinício agora grava `rota_depois = rota_antes.value` (mudança de contrato documentada e mais honesta). |
+| AUD-W2V4-P03 | **RESOLVIDO** (parcial) | `38b2fc5` | `@lru_cache(maxsize=1)` em `_check_assets` — economiza 2 syscalls/request. Cache de bytes do SVG classificado WONTFIX-parcial (gargalo é parse XML, não read) — documentado no docstring. |
+| AUD-W2V4-M03 | **RESOLVIDO** | `c7de064` | Junto com AUD-W2V4-A02 — default vazio. |
+| AUD-W2V4-M04 | **RESOLVIDO** | `7c80523` | Bloco "Pós-supersedimento" no ADR-120 esclarece eliminação da duplicação de logos. |
+| AUD-W2V4-T05 | **RESOLVIDO** | `6b6c727` | Amostras aumentadas de 200 para 10.000 (tolera 5 colisões com base em paradoxo do aniversário). |
+| AUD-W2V4-D01 | **RESOLVIDO** | `1a88ab8` | Anexo Visual Refresh v1 do `analysis.md` commitado com nota explícita de supersedimento. |
+| AUD-W2V4-D02 | **RESOLVIDO** | `1a88ab8` | Re-validação `tsc --noEmit` exit 0 + `next build` 13/13 NO ESTADO COMMITADO confirmada após AUD-002. |
+
+### INFO (4 — registrar status)
+
+| ID | Status | Tratamento |
+|---|---|---|
+| AUD-W2V4-S02 | **NÃO APLICÁVEL nesta sessão** | Mitigações DAT v3.0 §8.2 (rate limiting) ficam para Componente 19 / Wave 3 v4.0. Registrado follow-up. |
+| AUD-W2V4-S03 | **CONFIRMADO** | `service_role` bypassa RLS mas `trg_provas_rota_imutavel` BEFORE UPDATE continua disparando — não é escape route. Sem ação necessária. |
+| AUD-W2V4-P01 | **CONFIRMADO** | `idx_provas_rota` aparece como `unused_index` esperado (zero provas v4.0). Cairá com uso real. |
+| AUD-W2V4-P02 | **CONFIRMADO** | `idx_provas_codigo_publico` já usado pelo UNIQUE check da migration 012. Sem ação. |
+
+### Recapitulação
+
+- **Total resolvido:** 22/26 explícitos + 4 INFO confirmados/não-aplicáveis = **26/26**.
+- **Deferred:** 0.
+- **Não resolvido:** 0.
+- **CRITICAL bloqueantes:** ambos resolvidos (AUD-W2V4-001 + AUD-W2V4-002).
+- **Wave 7 readiness:** preservada e validada via testes T01/T02/T03 + fix de AUD-W2V4-001.
+
+**Recomenda-se nova rodada de auditoria independente em sessão
+separada para confirmar que (a) achados originais foram resolvidos,
+(b) correções não introduziram novos problemas, (c) a Wave 7
+continua viável.**

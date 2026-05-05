@@ -4931,3 +4931,129 @@ agressivos". O codigo da Wave 2 v4.0 original tinha 2 `as` agressivos:
   helper — defesa em profundidade preservada.
 - Politica vale para todo trabalho frontend futuro nesta Wave e
   proximas.
+
+
+---
+
+## ADR-123 — Reinicio de ciclo preserva rota (RN-006 v4.0 + RF-009 v4.0)
+**Data:** 2026-05-05 (Wave 2 v4.0 Audit Fixes)
+**Resolve:** AUD-W2V4-001 + AUD-W2V4-A01 + AUD-W2V4-006 + AUD-W2V4-007
+**Contexto:** A modificacao cirurgica autorizada por Mario na Wave 2
+v4.0 (ADR-119) cobriu apenas o ramo `aprovando` de
+`state_machine.executar_transicao`. O ramo `reiniciando_ciclo` (linhas
+377-384) continuou zerando `prova.rota = None`, o que entra em
+conflito direto com o trigger `trg_provas_rota_imutavel` (ADR-117)
+para qualquer prova com rota nao-NULL — disparando SQLSTATE 22023
+no UPDATE da rota e fazendo o endpoint `POST /provas/{id}/reiniciar-
+ciclo` retornar 502.
+
+A regressao afetava (a) toda prova v4.0 reprovada (rota=MATRIZ/
+LAM_MATRIZ/FILIAL/LAM_FILIAL), (b) provas legacy com rota=PADRAO/
+DIRETA (5 provas em producao no momento). Apenas provas legacy com
+rota=NULL nao eram afetadas (porque o UPDATE NULL->NULL nao dispara o
+trigger).
+
+Alem do bug HTTP 502, isso bloquearia indiretamente a Wave 7
+(Componente 21): qualquer fluxo que envolvesse re-executar a state
+machine apos backfill quebraria.
+
+**Decisao:** completar a modificacao cirurgica do ADR-119 para o ramo
+`reiniciando_ciclo` — substituir `rota_depois = None` por
+`rota_depois = rota_antes`. Isso preserva rota imutavel em todos os
+3 cenarios (v4.0, legacy nao-NULL, legacy NULL):
+```python
+if reiniciando_ciclo:
+    ciclo_depois = ciclo_antes + 1
+    rota_depois = rota_antes  # AUD-W2V4-001 fix
+    acao_audit = "reiniciar_ciclo"
+```
+
+O audit log do reinicio (`detalhes_json`) agora grava
+`rota_depois = rota_antes.value` (ou None se legacy NULL) em vez do
+None hardcoded antigo — mudanca de contrato silenciosa documentada
+em AUD-W2V4-007. O contrato novo e mais honesto: o log refletia algo
+que nao acontecia (zeramento) por causa do bug; agora reflete a
+preservacao real.
+
+**Alternativas:**
+  - Reverter o trigger para permitir valor->NULL em reinicio
+    (rejeitado: quebraria a invariante RN-002 v4.0 da imutabilidade
+    da rota; admin nao deve conseguir contornar via reinicio).
+  - Detectar reinicio no trigger via context variable
+    (rejeitado: complexidade desnecessaria; a state machine ja
+    decide a semantica e pode preservar a rota deliberadamente).
+  - Esperar a Wave 3 v4.0 (Componente 11) reescrever a state machine
+    inteira (rejeitado: sem o fix, reinicio quebra ja para 5 provas
+    legacy E para qualquer prova v4.0 — bug em producao precisa de
+    fix imediato).
+
+**Consequencias:**
+  - Reinicio de ciclo funcional para todas as provas (v4.0, legacy
+    nao-NULL, legacy NULL).
+  - Wave 7 continua viavel (state machine nao quebra apos backfill).
+  - Audit log consistente (rota_depois reflete o que de fato
+    aconteceu).
+  - Testes ajustados em test_state_machine.py (1 alterado + 2 novos
+    para v4.0 e legacy NULL); test_provas_api.py 1 ajustado
+    (test_reiniciar_happy_prova_reprovada agora espera rota
+    preservada). Validacao integrada com banco real em
+    test_imutabilidade_rota.py (AUD-W2V4-T01 — cenario 5).
+
+---
+
+## ADR-124 — Default rota vazio + texto auxiliar (mitigacao "Confusao operacional")
+**Data:** 2026-05-05 (Wave 2 v4.0 Audit Fixes)
+**Resolve:** AUD-W2V4-A02 + AUD-W2V4-M03
+**Contexto:** O Backlog v4.0 §6 lista o risco "Confusao operacional"
+— admin pode submeter prova com rota errada e descobrir tarde
+(imutabilidade RN-002). A mitigacao original proposta pelo analysis.md
+§4.8 era um modal de confirmacao dupla apos o submit (reapresentando
+a rota escolhida). O ADR-118 SUPERSEDIDO descartou o modal alegando
+que "os 2 toggles forçam escolha consciente", mas o Visual Refresh v2
+(que SUPERSEDIU o ADR-118) voltou para 4 botoes diretos com
+default `INITIAL_FORM.rota = "MATRIZ"`, removendo o argumento
+original. O texto auxiliar "rota imutavel" tambem foi removido no
+Polish round 1.
+
+Resultado pos-Wave 2 v4.0: ZERO mitigacao do risco operacional
+documentado pelo Backlog. Admin podia submeter rapido sem prestar
+atencao, e o default `MATRIZ` agravava — qualquer prova de FILIAL
+criada por descuido nasce errada e e imutavel.
+
+**Decisao:** mitigacao substituta em duas partes:
+  1. Default `INITIAL_FORM.rota = ""` (string vazia) — forca admin
+     a clicar em uma das 4 rotas conscientemente. Tipo do
+     `FormState.rota` muda de `RotaCriacao` para
+     `RotaCriacao | ""`. `canSubmit` bloqueia envio enquanto
+     `rota === ""`. `handleSubmit` faz narrowing explicito
+     (`form.rota !== ""`) antes de passar para `submit({rota:
+     RotaCriacao})`.
+  2. Texto auxiliar "A rota escolhida e imutavel apos o cadastro"
+     restaurado abaixo do segment de rotas, em tom muted
+     (`color: var(--color-card-text-muted)`, `font-size: var(--fs-xs)`).
+     Pequeno, sem chamar atencao excessiva — apenas um nudge
+     informativo.
+
+Backend nao mudou: `RotaCriacaoEnum` Pydantic continua exigindo um
+dos 4 valores v4.0; envio com "" resultaria em 422, mas `canSubmit`
+ja bloqueia antes do request. Defesa em profundidade preservada.
+
+**Alternativas:**
+  - Modal de confirmacao (a original do analysis.md §4.8) —
+    rejeitado: introduz friccao em fluxo frequente (admin cria varias
+    provas/dia); o nudge passivo + bloqueio do default e mais
+    proporcional ao risco.
+  - Manter default `MATRIZ` + adicionar so o texto auxiliar
+    (rejeitado: o texto sozinho nao impede submit rapido; o admin
+    le e clica antes de processar).
+  - Default vazio sem texto auxiliar (rejeitado: bloqueia submit
+    mas nao explica POR QUE a rota importa; sem texto, parece
+    apenas mais um campo obrigatorio).
+
+**Consequencias:**
+  - `/nova-prova` 6.84 kB / 209 kB First Load (+50 bytes vs sem hint).
+  - tsc --noEmit exit 0; next build 13/13 paginas — sem regressao.
+  - Quem ler ADR-118 SUPERSEDIDO entende o trade-off do "switch
+    forçava escolha" foi resolvido por outra via aqui.
+  - Smoke E2E manual obrigatorio antes do merge para `main` valida
+    o novo fluxo (AUD-W2V4-T04).
