@@ -1,17 +1,16 @@
 /*
- * Wave 2 v4.0 (Componente 06) — Cadastro de Prova Digital
+ * Wave 2 v4.0 (Componente 06) — Cadastro de Prova Digital — Visual Refresh v2
  *
- * Layout segue fielmente o print do design entregue pelo Mario:
- *   - Canvas com background ambient (grid de pontos + blob amarelo + onda)
- *   - Topbar com timestamp pill (esquerda) + 2 botoes (direita)
- *   - Layout grid: ficha branca (esquerda) + 2 cards (direita)
- *   - Ficha tem segment "Matriz / Filial" + switch "Laminacao"
- *   - Footer da ficha mostra ORIGEM e STATUS
+ * Layout fiel ao Figma do Mario (entrega 2026-05-05):
+ *   - Header da pagina: titulo "Nova prova Digital" a esquerda + botao
+ *     "Cadastrar prova" amarelo a direita (mesmo padrao de /usuarios).
+ *   - 1 box branco unico (.ficha) preenche todo o resto do .cardInner.
+ *   - Dentro do box: 2 fieldRow (Nome/Req, Cliente/Vendedor) + segment
+ *     de 4 botoes diretos (Matriz | Filial | Lam. Matriz | Lam. Filial)
+ *     com pill animado via framer-motion + dropzone grande que ocupa
+ *     toda a area inferior.
  *
- * As 4 rotas v4.0 sao derivadas das 2 toggles (origem + laminacao) no submit.
- *
- * Tela de sucesso (apos criar) preserva layout v3.0 com pequenos ajustes
- * para mostrar codigo_publico em destaque.
+ * Tela de sucesso (apos criar) mostra detalhes + iframe do PDF real.
  */
 
 /* ─── Aviso mobile / desktop only ───────────────────────────────────────── */
@@ -36,85 +35,58 @@
   }
 }
 
-/* ─── Canvas (raiz do layout de criacao) ────────────────────────────────── */
+/* ─── Canvas (raiz do layout de criacao) ────────────────────────────────── *
+ * Wave 2 v4.0 (Visual Refresh v2): a raiz e um flex column simples que
+ * ocupa 100% do .cardInner do layout dashboard. Sem background, padding
+ * ou decoracao propria — o .cardInner ja prove fundo cinza
+ * (--color-card-bg) e padding generoso via var(--card-padding). Mesmo
+ * padrao de /dashboard. */
 
 .canvas {
   position: relative;
-  height: calc(100vh - 64px);
-  /* Wave 2 v4.0 — feedback Mario 2: o conteudo deve preencher 100% do
-     box branco SEM moldura interna vazia. Antes era 24/32/32 — criava
-     uma faixa vazia visivel ao redor de toda a area de conteudo (top,
-     lados e bottom). Agora 12/12/12 deixa apenas o respiro minimo para
-     nao grudar absolutamente nas bordas (acessibilidade visual). */
-  padding: 12px;
-  background: #fafaf7;
-  overflow: hidden;
-  isolation: isolate;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 
-/* ─── Topbar (timestamp + acoes) ─────────────────────────────────────────── */
+/* ─── Page header (titulo + botao primario) ──────────────────────────────── *
+ * Espelha o padrao de /usuarios e /provas: titulo grande a esquerda,
+ * botao primario amarelo a direita, separados via flex space-between. */
 
-.topbar {
+.pageHeader {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 32px;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2.5rem;
+  flex-wrap: wrap;
 }
 
-.timestamp {
-  display: inline-block;
-  background: #ffffff;
-  color: #5b5b5b;
-  font-size: 12px;
+.pageTitle {
+  font-size: clamp(2.5rem, 5vw, 4rem);
   font-weight: 500;
-  letter-spacing: 0.02em;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  color: var(--color-card-text);
+  letter-spacing: -0.02em;
+  margin: 0;
 }
 
-.topActions {
-  display: flex;
-  gap: 12px;
-}
-
-.btnGhost,
 .btnSubmit {
   font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  padding: 10px 22px;
-  border-radius: 999px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: 0.75rem 1.75rem;
+  border-radius: var(--radius-pill);
   border: none;
   cursor: pointer;
-  transition: opacity 0.15s, transform 0.05s;
-}
-
-.btnGhost {
-  background: #ffffff;
-  color: #2c2c2c;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-}
-
-.btnGhost:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.btnSubmit {
-  background: #f8d126;
-  color: #1a1a1a;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 2px 6px rgba(248, 209, 38, 0.4);
+  transition: background 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
+  background: var(--color-accent);
+  color: var(--color-card-text);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
 
 .btnSubmit:hover:not(:disabled) {
+  background: var(--color-accent-hover);
   transform: translateY(-1px);
 }
 
@@ -123,262 +95,32 @@
 }
 
 .btnSubmit:disabled {
-  background: #ddd6b6;
-  color: #8a8a8a;
+  background: color-mix(in srgb, var(--color-accent) 40%, var(--color-card-surface));
+  color: var(--color-card-text-muted);
   cursor: not-allowed;
   box-shadow: none;
 }
 
-/* ─── Layout principal (ficha esquerda + cards direita) ─────────────────── */
-
-.layout {
-  display: grid;
-  /* Colunas laterais encolhem em viewports estreitas (~1440 com sidebar
-     ~250 = ~893 disponiveis) para preservar a coluna central com tamanho
-     util. ficha minmax(280, 340) + aside minmax(220, 280) + 1fr no centro
-     + gap 20 da: pior caso ~290px de center; melhor caso ~290px tambem
-     (ficha/aside chegam ao max). Em viewports muito largas, ficha e aside
-     param de crescer e o center absorve o restante. */
-  grid-template-columns: 320px 1fr 240px;
-  /* CRITICO: 1fr na linha implicita — sem isso, a linha tem altura `auto`
-     (= conteudo) e align-items: stretch nao tem altura para esticar.
-     Resultado: a ficha terminava onde o conteudo termina, deixando espaco
-     vazio no fundo do canvas. Com 1fr, a linha estica para a altura do
-     container .layout (que tem flex:1 dentro do canvas). */
-  grid-template-rows: 1fr;
-  gap: 20px;
-  flex: 1;
-  min-height: 0;
+/* Respeita o usuario que prefere reduzir movimento (WCAG 2.3.3). */
+@media (prefers-reduced-motion: reduce) {
+  .segmentBtn,
+  .btnSubmit {
+    transition: none !important;
+    animation: none !important;
+  }
 }
 
-/* Coluna central: visualizacao da rota ocupa 100% da altura disponivel
-   entre topbar e o final do canvas (Wave 2 v4.0 — feedback Mario). */
-.center {
-  grid-column: 2;
-  position: relative;
-  height: 100%;
-  display: flex;
-}
-
-/* ─── Visualizacao da rota (Wave 2 v4.0 — print do Mario) ──────────────── */
-
-.rotaViz {
-  position: relative;
-  width: 100%;
-  flex: 1;
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-.vizDots {
-  position: absolute;
-  inset: 0;
-  background-image: radial-gradient(
-    circle at center,
-    rgba(0, 0, 0, 0.07) 1px,
-    transparent 1.5px
-  );
-  background-size: 16px 16px;
-  pointer-events: none;
-}
-
-.vizSvg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-/* Halo amarelo radial em volta do destino selecionado — usa a cor
-   primaria do projeto (#f8d126). */
-.vizHalo {
-  position: absolute;
-  width: 380px;
-  height: 380px;
-  margin-left: -190px;
-  margin-top: -190px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(248, 209, 38, 0.55) 0%,
-    rgba(248, 209, 38, 0.18) 38%,
-    rgba(248, 209, 38, 0) 70%
-  );
-  filter: blur(20px);
-  pointer-events: none;
-  transition: left 0.3s ease, top 0.3s ease;
-}
-
-/* Container generico de no posicionado em x/y % do .rotaViz */
-.vizNode {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  pointer-events: none;
-  transition: left 0.3s ease, top 0.3s ease;
-}
-
-/* Quando o destino e ativo, label fica abaixo do ponto */
-.vizNodeDest {
-  flex-direction: column-reverse;
-}
-
-/* Pontos circulares dos nos */
-.vizDot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #1a1a1a;
-}
-
-.vizDotOrigem {
-  background: #1a1a1a;
-}
-
-.vizDotActive {
-  width: 16px;
-  height: 16px;
-  background: #f8d126;
-  box-shadow:
-    0 0 0 4px rgba(248, 209, 38, 0.25),
-    0 0 0 1px rgba(0, 0, 0, 0.15);
-}
-
-.vizDotOutline {
-  background: #ffffff;
-  border: 1.5px solid rgba(0, 0, 0, 0.35);
-  width: 12px;
-  height: 12px;
-}
-
-/* Badge ORIGEM (preto, texto branco) */
-.vizBadgeOrigem {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  color: #ffffff;
-  background: #1a1a1a;
-  padding: 4px 9px;
-  border-radius: 4px;
-  text-transform: uppercase;
-}
-
-/* Badge do destino selecionado (preto, texto branco) */
-.vizBadgeDest {
-  display: inline-flex;
-  align-items: center;
-  background: #1a1a1a;
-  color: #ffffff;
-  padding: 7px 12px;
-  border-radius: 8px;
-  white-space: nowrap;
-}
-
-.vizBadgeDest strong {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-/* Badge da alternativa (outline, fundo claro) */
-.vizBadgeAlt {
-  display: inline-flex;
-  align-items: center;
-  background: #ffffff;
-  color: #1a1a1a;
-  padding: 7px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  white-space: nowrap;
-}
-
-.vizBadgeAlt strong {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-/* Badge da Laminacao no meio do caminho */
-.vizBadgeLam {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 500;
-  color: #8a8a8a;
-  background: rgba(255, 255, 255, 0.85);
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  white-space: nowrap;
-  transition: background 0.2s, color 0.2s, border-color 0.2s;
-}
-
-.vizBadgeLamOn {
-  background: #1a1a1a;
-  color: #ffffff;
-  border-color: #1a1a1a;
-}
-
-.vizLamIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.08);
-  font-size: 9px;
-  color: inherit;
-}
-
-.vizBadgeLamOn .vizLamIcon {
-  background: #f8d126;
-  color: #1a1a1a;
-}
-
-/* ─── Ficha (box branco) ────────────────────────────────────────────────── */
+/* ─── Ficha (box branco unico — preenche o resto da area do .cardInner) ── */
 
 .ficha {
-  grid-column: 1;
   background: #ffffff;
-  border-radius: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
-  padding: 22px 22px 16px;
+  border-radius: var(--radius-card-xl);
+  padding: 2.25rem 2.75rem;
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-
-.fichaEyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: #8a8a8a;
-  margin: 0;
-  text-transform: uppercase;
-}
-
-.checkIcon {
-  font-size: 11px;
-  color: #5b5b5b;
-}
-
-.fichaTitle {
-  margin: 0 0 4px;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: #1a1a1a;
+  gap: 1rem;
+  min-height: 0;
 }
 
 /* ─── Campos do form ────────────────────────────────────────────────────── */
@@ -386,197 +128,142 @@
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0.5rem;
   border: none;
   padding: 0;
   margin: 0;
+  min-width: 0;
 }
 
 .fieldRow {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 1.25rem;
 }
 
 .label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: #8a8a8a;
-  text-transform: uppercase;
+  font-size: var(--fs-base);
+  font-weight: 400;
+  color: var(--color-card-text);
+  letter-spacing: 0;
+  text-transform: none;
   margin: 0;
 }
 
 .input {
   font-family: inherit;
-  font-size: 14px;
-  color: #1a1a1a;
-  background: #f6f6f3;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 8px;
-  padding: 10px 12px;
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  background: var(--color-card-surface);
+  border: none;
+  border-radius: var(--radius-pill);
+  height: 48px;
+  padding: 0 1.5rem;
   width: 100%;
-  transition: border-color 0.15s, background 0.15s;
+  transition: box-shadow 0.15s ease, background 0.15s ease;
 }
 
 .input::placeholder {
-  color: #b0b0b0;
+  color: var(--color-card-text-muted);
 }
 
 .input:focus {
   outline: none;
-  border-color: #1a1a1a;
-  background: #ffffff;
+  box-shadow: 0 0 0 2px var(--color-accent);
 }
 
 .input:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
-.inlineError {
-  font-size: 12px;
-  color: #b32424;
+/* Native select chevron — segue o padrao de /provas e /configuracoes */
+select.input {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9' fill='none'><path d='M1 1l6 6 6-6' stroke='%23000' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 1.5rem center;
+  padding-right: 3rem;
+  cursor: pointer;
 }
 
-/* ─── Segment "Matriz / Filial" ──────────────────────────────────────────── */
+.inlineError {
+  font-size: var(--fs-xs);
+  color: var(--color-danger);
+}
 
-.segment {
+/* ─── Segment de 4 botoes (Rota — Visual Refresh v2) ─────────────────────── *
+ * 4 botoes em uma linha so. Cada celula 1fr. Botao ativo = pill preto
+ * sobre cinza claro. Espelha o design Figma entregue pelo Mario. */
+
+.segment4 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 0;
-  background: #f6f6f3;
-  border-radius: 10px;
+  background: var(--color-card-surface);
+  border-radius: var(--radius-pill);
   padding: 4px;
 }
 
 .segmentBtn {
+  position: relative;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 10px 14px;
+  padding: 0.75rem 1rem;
   background: transparent;
-  color: #5b5b5b;
+  color: var(--color-card-text-muted);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: color 0.18s ease;
 }
 
 .segmentBtn:hover:not(:disabled):not(.segmentBtnActive) {
-  color: #1a1a1a;
+  color: var(--color-card-text);
+}
+
+/* Pill preto animado — framer-motion `layoutId` desliza entre as celulas
+   quando o usuario clica em uma rota diferente. */
+.segmentPill {
+  position: absolute;
+  inset: 0;
+  background: var(--color-card-text);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  z-index: 0;
+}
+
+/* Label fica acima do pill animado. */
+.segmentLabel {
+  position: relative;
+  z-index: 1;
 }
 
 .segmentBtnActive {
-  background: #1a1a1a;
   color: #ffffff;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .segmentBtn:disabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
-.segmentIcon {
-  font-size: 14px;
-  display: inline-block;
-}
+/* ─── Anexo / dropzone (Visual Refresh v2 — preenche o resto da ficha) ──── *
+ * O wrapper `.anexoField` e o ULTIMO filho da ficha (depois dos fieldsets).
+ * Recebe `flex: 1` para crescer e empurrar a dropzone interna ate o limite
+ * inferior do box branco. Sem `min-height` rigido na dropzone — assim o
+ * tamanho final acompanha o espaco disponivel e nunca transborda. */
 
-/* ─── Toggle row "Laminação" ─────────────────────────────────────────────── */
-
-.toggleRow {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 12px;
-  background: #f6f6f3;
-  border-radius: 10px;
-  padding: 12px 14px;
-}
-
-.toggleIcon {
-  font-size: 16px;
-  color: #5b5b5b;
-}
-
-.toggleText {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.toggleTitle {
-  font-size: 13px;
-  font-weight: 500;
-  color: #1a1a1a;
-}
-
-.toggleSub {
-  font-size: 11px;
-  color: #8a8a8a;
-}
-
-.switch {
-  position: relative;
-  width: 38px;
-  height: 22px;
-  background: #d4d4d0;
-  border: none;
-  border-radius: 999px;
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.2s;
-}
-
-.switch:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.switchOn {
-  background: #1a1a1a;
-}
-
-.switchKnob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
-  background: #ffffff;
-  border-radius: 50%;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-  transition: transform 0.2s;
-}
-
-.switchOn .switchKnob {
-  transform: translateX(16px);
-}
-
-.hint {
-  font-size: 11px;
-  color: #8a8a8a;
-  margin: -4px 0 0;
-  line-height: 1.4;
-}
-
-/* ─── Anexo / dropzone ───────────────────────────────────────────────────── */
-
-.anexoHead {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
-.anexoMeta {
-  font-size: 10px;
-  color: #b0b0b0;
-  letter-spacing: 0.06em;
+.anexoField {
+  flex: 1;
+  min-height: 0;
 }
 
 .dropzone {
@@ -584,26 +271,28 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px dashed rgba(0, 0, 0, 0.18);
-  border-radius: 10px;
-  padding: 18px;
-  background: #fafaf7;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border-radius: var(--radius-card-lg);
+  padding: 1.5rem;
+  background: var(--color-card-surface);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  min-height: 70px;
+  transition: background 0.18s ease, box-shadow 0.18s ease,
+    transform 0.05s ease;
 }
 
 .dropzone:hover {
-  border-color: #1a1a1a;
+  background: color-mix(in srgb, var(--color-card-surface) 70%, #ffffff);
 }
 
 .dropzoneActive {
-  border-color: #1a1a1a;
-  background: #ffffff;
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-card-surface));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
 .dropzoneFilled {
-  padding: 10px;
+  background: color-mix(in srgb, var(--color-card-surface) 60%, #ffffff);
 }
 
 .fileInput {
@@ -617,38 +306,49 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 0.625rem;
   pointer-events: none;
+  text-align: center;
 }
 
 .dropzoneIcon {
-  font-size: 18px;
-  color: #5b5b5b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--color-card-text);
+  font-weight: 600;
 }
 
 .dropzoneTitle {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 500;
-  color: #1a1a1a;
+  color: var(--color-card-text);
 }
 
 .dropzoneHint {
-  font-size: 11px;
-  color: #8a8a8a;
+  font-size: var(--fs-xs);
+  color: var(--color-card-text-muted);
+  letter-spacing: 0.05em;
 }
 
 .previewContainer {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 0.75rem;
   width: 100%;
+  max-width: 420px;
 }
 
 .previewImg {
-  width: 48px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 6px;
+  max-width: 100%;
+  max-height: clamp(160px, 22vh, 240px);
+  object-fit: contain;
+  border-radius: var(--radius-card);
   background: #ffffff;
 }
 
@@ -656,272 +356,193 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   overflow: hidden;
+  min-width: 0;
+  text-align: center;
 }
 
 .previewInfo strong {
   font-weight: 500;
-  color: #1a1a1a;
+  color: var(--color-card-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .previewInfo span {
-  color: #8a8a8a;
-}
-
-/* ─── Footer da ficha ────────────────────────────────────────────────────── */
-
-.fichaFooter {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  padding-top: 12px;
-  margin-top: 4px;
-}
-
-.fichaFooter > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.fichaFooterValue {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #1a1a1a;
-  font-weight: 500;
-}
-
-.statusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #f8d126;
-  box-shadow: 0 0 0 3px rgba(248, 209, 38, 0.18);
-}
-
-/* ─── Cards laterais (direita) ──────────────────────────────────────────── */
-
-.aside {
-  grid-column: 3;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.card {
-  background: #ffffff;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.cardLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: #8a8a8a;
-  text-transform: uppercase;
-  margin: 0;
-}
-
-.cardDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #f8d126;
-}
-
-.cardTitle {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: #1a1a1a;
-}
-
-.cardBody {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
-  color: #5b5b5b;
-}
-
-.kbd {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  font-weight: 500;
-  padding: 1px 5px;
-  background: #f6f6f3;
-  border-radius: 3px;
-  color: #5b5b5b;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  color: var(--color-card-text-muted);
 }
 
 /* ─── Erro global do form ────────────────────────────────────────────────── */
 
 .errorBox {
-  background: #fff4f4;
-  color: #b32424;
-  border: 1px solid #f0c8c8;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 12px;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-left: 3px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  padding: 0.625rem 0.875rem;
+  font-size: var(--fs-xs);
 }
 
-/* ─── Tela de sucesso ────────────────────────────────────────────────────── */
+/* ─── Tela de sucesso ────────────────────────────────────────────────────── *
+ * Mesmos tokens da raiz das outras paginas. Substitui o padding 24/32 que
+ * antes pintava uma "moldura" extra dentro do .cardInner. */
 
 .successHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
-  padding: 24px 32px 0;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
 }
 
 .successTitle {
-  font-size: 24px;
-  font-weight: 700;
-  color: #1a1a1a;
+  font-size: clamp(1.875rem, 2.6vw, 2.25rem);
+  font-weight: 500;
+  color: var(--color-card-text);
+  letter-spacing: -0.015em;
   margin: 0;
 }
 
 .btnPrimary {
   font-family: inherit;
-  font-size: 14px;
-  font-weight: 600;
-  padding: 10px 22px;
-  border-radius: 999px;
-  background: #f8d126;
-  color: #1a1a1a;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: 0.75rem 1.75rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-card-text);
+  border: none;
   cursor: pointer;
-  box-shadow: 0 2px 6px rgba(248, 209, 38, 0.4);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-accent) 40%, transparent);
+  transition: background 0.15s ease;
+}
+
+.btnPrimary:hover {
+  background: var(--color-accent-hover);
 }
 
 .btnSecondary {
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 500;
-  padding: 8px 16px;
-  border-radius: 6px;
-  background: #f6f6f3;
-  color: #1a1a1a;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 0.5rem 1.125rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-card-surface);
+  color: var(--color-card-text);
+  border: none;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .btnSecondary:hover {
-  background: #ebebe6;
+  background: color-mix(in srgb, var(--color-card-surface) 75%, var(--color-card-text));
 }
 
 .successGrid {
   display: grid;
-  grid-template-columns: 360px 1fr;
-  gap: 24px;
-  padding: 0 32px 32px;
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  gap: 1.25rem;
 }
 
 .infoCard {
   background: #ffffff;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 20px;
+  border-radius: var(--radius-card-lg);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .h2 {
-  margin: 0 0 16px;
-  font-size: 16px;
-  font-weight: 600;
-  color: #1a1a1a;
+  margin: 0 0 1rem;
+  font-size: var(--fs-lg);
+  font-weight: 500;
+  color: var(--color-card-text);
 }
 
 .dl {
   display: grid;
   grid-template-columns: 110px 1fr;
-  gap: 8px 12px;
-  margin: 0 0 20px;
-  font-size: 13px;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 1.25rem;
+  font-size: var(--fs-sm);
 }
 
 .dl dt {
-  color: #8a8a8a;
-  font-weight: 500;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  color: var(--color-card-text-muted);
+  font-weight: 400;
+  font-size: var(--fs-xs);
+  letter-spacing: 0;
+  text-transform: none;
   align-self: center;
 }
 
 .dl dd {
   margin: 0;
-  color: #1a1a1a;
+  color: var(--color-card-text);
 }
 
 .codigoPublico {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-weight: 600;
-  font-size: 14px;
-  color: #1a1a1a;
+  font-size: var(--fs-sm);
+  color: var(--color-card-text);
+  letter-spacing: 0.02em;
 }
 
 .actions {
   display: flex;
-  gap: 8px;
+  gap: 0.5rem;
   flex-wrap: wrap;
 }
 
 .pdfPreview {
   background: #ffffff;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  padding: 20px;
+  border-radius: var(--radius-card-lg);
+  padding: 1.5rem;
+  min-height: 0;
 }
 
 .pdfFrame {
   width: 100%;
   height: 600px;
   border: none;
-  border-radius: 6px;
-  background: #fafaf7;
+  border-radius: var(--radius-card);
+  background: var(--color-card-surface);
 }
 
-/* ─── Responsivo (tablet) ────────────────────────────────────────────────── */
+/* ─── Responsivo (tablet + mobile-grande) ─────────────────────────────────
+ * Mobile real (<768px) ja e bloqueado pelo .mobileNotice. Os breakpoints
+ * abaixo cobrem viewports intermediarios (laptop pequeno e tablet
+ * landscape). */
 
 @media (max-width: 1100px) {
-  .layout {
+  .ficha {
+    padding: 1.75rem 1.5rem;
+    gap: 0.875rem;
+  }
+
+  .fieldRow {
     grid-template-columns: 1fr;
+    gap: 1rem;
   }
-  .ficha,
-  .aside,
-  .center {
-    grid-column: 1;
+
+  .pageTitle {
+    font-size: clamp(2rem, 4.5vw, 3rem);
   }
-  .center {
-    min-height: 360px;
-    order: 2;
+}
+
+@media (max-width: 900px) {
+  /* Segment de 4 botoes colapsa para grid 2x2 — labels "Lam. Matriz" /
+     "Lam. Filial" nao cabem em 1 linha em viewports estreitos. */
+  .segment4 {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
   }
-  .aside {
-    flex-direction: row;
-    flex-wrap: wrap;
-    order: 3;
-  }
-  .aside .card {
-    flex: 1 1 240px;
-  }
+
+  /* O pill animado do framer-motion ainda funciona em 2x2 — layoutId
+     transita com qualquer numero de celulas. */
 }

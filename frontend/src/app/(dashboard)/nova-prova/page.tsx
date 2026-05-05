@@ -10,13 +10,14 @@ import {
   type DragEvent,
   type FormEvent,
 } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch, ApiError } from "@/lib/api";
 import { useCreateProva } from "@/hooks/useCreateProva";
 import { useAuthorization } from "@/lib/hooks/use-authorization";
 import { Restricted } from "@/components/Restricted";
 import {
-  ALLOWED_IMAGE_TYPES,
+  isAllowedImageType,
   MAX_UPLOAD_BYTES,
   type ProvaCreateResponse,
   type RotaCriacao,
@@ -26,26 +27,17 @@ import styles from "./nova-prova.module.css";
 
 // ─── Estado do form ────────────────────────────────────────────────────────
 //
-// Wave 2 v4.0 (Componente 06): a rota e dividida em 2 controles
-// independentes na UI (decisao de UX do design) que sao combinados em
-// `RotaCriacao` no submit:
-//   - origem (MATRIZ | FILIAL) — segment com 2 botoes
-//   - laminacao (boolean) — switch on/off
-// Combinacoes:
-//   MATRIZ + lam OFF -> "MATRIZ"
-//   MATRIZ + lam ON  -> "LAM_MATRIZ"
-//   FILIAL + lam OFF -> "FILIAL"
-//   FILIAL + lam ON  -> "LAM_FILIAL"
-
-type Origem = "MATRIZ" | "FILIAL";
+// Wave 2 v4.0 — Visual Refresh v2 (2026-05-05): a rota agora e um unico
+// controle de 4 botoes diretos (alinhado ao design Figma entregue pelo
+// Mario). Substituiu o composto origem+laminacao da entrega anterior
+// (ADR-118 supersedido). O `rota` armazena diretamente `RotaCriacao`.
 
 interface FormState {
   nome: string;
   nro_requerimento: string;
   cliente: string;
   vendedor_id: string;
-  origem: Origem;
-  laminacao: boolean;
+  rota: RotaCriacao;
 }
 
 const INITIAL_FORM: FormState = {
@@ -53,178 +45,23 @@ const INITIAL_FORM: FormState = {
   nro_requerimento: "",
   cliente: "",
   vendedor_id: "",
-  origem: "FILIAL",   // Default conforme o print: "Filial" selecionado
-  laminacao: false,
+  rota: "MATRIZ", // Default conforme o print: "Matriz" selecionado
 };
 
-function deriveRota(origem: Origem, laminacao: boolean): RotaCriacao {
-  if (laminacao) {
-    return origem === "MATRIZ" ? "LAM_MATRIZ" : "LAM_FILIAL";
-  }
-  return origem;
-}
-
-// Rotulos da unidade — Wave 2 v4.0. Endereco e cidade removidos a
-// pedido do Mario (a informacao e apenas qual UNIDADE foi selecionada
-// — o sistema nao distingue cidade especifica).
-const UNIDADES_INFO: Record<Origem, { titulo: string }> = {
-  MATRIZ: { titulo: "Matriz" },
-  FILIAL: { titulo: "Filial" },
-};
-
-
-// ─── Visualizacao da rota (Wave 2 v4.0 — print Mario) ────────────────────
-//
-// Ocupa a coluna central do layout. Mostra origem (3Studio), destino
-// selecionado (Matriz ou Filial — ativo) e alternativa (outline). Nó
-// "Laminacao" aparece no meio do caminho — preenchido quando ativo,
-// outline quando off.
-//
-// Coordenadas em % do container (responsivo). Curvas SVG geradas com
-// Bezier cubico. Cores do projeto: preto (#1a1a1a), amarelo (#f8d126).
-
-interface RotaVizProps {
-  origem: Origem;
-  laminacao: boolean;
-}
-
-const VIZ_NODES = {
-  ORIGEM: { x: 12, y: 22 },     // %: topo-esquerda
-  MATRIZ: { x: 78, y: 22 },     // %: topo-direita
-  FILIAL: { x: 80, y: 78 },     // %: baixo-direita
-  LAMI: { x: 46, y: 50 },       // %: meio
-} as const;
-
-function RotaVisualization({ origem, laminacao }: RotaVizProps) {
-  const dest = origem === "MATRIZ" ? VIZ_NODES.MATRIZ : VIZ_NODES.FILIAL;
-  const altr = origem === "MATRIZ" ? VIZ_NODES.FILIAL : VIZ_NODES.MATRIZ;
-  const altrLabel = origem === "MATRIZ" ? "Filial" : "Matriz";
-  const destLabel = UNIDADES_INFO[origem].titulo;
-
-  // SVG path da curva ORIGEM -> (LAMI se ativo) -> destino. Coordenadas
-  // em viewBox 0..100; preserveAspectRatio "none" estica horizontal e
-  // vertical (linha visualmente desproporcional aceita — o objetivo e
-  // representar fluxo, nao mapa fisico).
-  const O = VIZ_NODES.ORIGEM;
-  const D = dest;
-  const L = VIZ_NODES.LAMI;
-  const path = laminacao
-    ? `M ${O.x} ${O.y} ` +
-      `C ${O.x + 18} ${O.y + 12}, ${L.x - 14} ${L.y - 6}, ${L.x} ${L.y} ` +
-      `S ${D.x - 14} ${D.y - 6}, ${D.x} ${D.y}`
-    : `M ${O.x} ${O.y} ` +
-      `C ${O.x + 26} ${O.y + (D === VIZ_NODES.FILIAL ? 14 : 0)}, ` +
-      `${D.x - 26} ${D.y - (D === VIZ_NODES.FILIAL ? 14 : 0)}, ` +
-      `${D.x} ${D.y}`;
-
-  // Ponto decorativo intermediario (visual da Image 2: pequena bolinha
-  // no meio da curva). Posicao: meio entre ORIGEM e destino.
-  const midDot = laminacao
-    ? { x: (O.x + L.x) / 2, y: (O.y + L.y) / 2 + 2 }
-    : { x: (O.x + D.x) / 2, y: (O.y + D.y) / 2 + 2 };
-
-  return (
-    <div className={styles.rotaViz} aria-hidden="true">
-      {/* Grid de pontos ambient como pano de fundo da visualizacao */}
-      <div className={styles.vizDots} />
-
-      {/* Curva SVG */}
-      <svg
-        className={styles.vizSvg}
-        viewBox="0 0 100 100"
-        preserveAspectRatio="none"
-      >
-        <path
-          d={path}
-          fill="none"
-          stroke="#1a1a1a"
-          strokeOpacity="0.18"
-          strokeWidth="0.35"
-          strokeLinecap="round"
-        />
-        <circle
-          cx={midDot.x}
-          cy={midDot.y}
-          r="0.6"
-          fill="#f8d126"
-        />
-      </svg>
-
-      {/* Halo amarelo radial em volta do destino — cor do projeto */}
-      <div
-        className={styles.vizHalo}
-        style={{ left: `${dest.x}%`, top: `${dest.y}%` }}
-      />
-
-      {/* Pontos: ORIGEM */}
-      <div
-        className={styles.vizNode}
-        style={{ left: `${O.x}%`, top: `${O.y}%` }}
-      >
-        <span className={`${styles.vizDot} ${styles.vizDotOrigem}`} />
-        <span className={styles.vizBadgeOrigem}>ORIGEM</span>
-      </div>
-
-      {/* Destino selecionado (preenchido) */}
-      <div
-        className={`${styles.vizNode} ${styles.vizNodeDest}`}
-        style={{ left: `${D.x}%`, top: `${D.y}%` }}
-      >
-        <span className={`${styles.vizDot} ${styles.vizDotActive}`} />
-        <span className={styles.vizBadgeDest}>
-          <strong>{destLabel}</strong>
-        </span>
-      </div>
-
-      {/* Alternativa (outline, nao selecionada) */}
-      <div
-        className={styles.vizNode}
-        style={{ left: `${altr.x}%`, top: `${altr.y}%` }}
-      >
-        <span className={`${styles.vizDot} ${styles.vizDotOutline}`} />
-        <span className={styles.vizBadgeAlt}>
-          <strong>{altrLabel}</strong>
-        </span>
-      </div>
-
-      {/* Laminacao no meio */}
-      <div
-        className={styles.vizNode}
-        style={{ left: `${L.x}%`, top: `${L.y}%` }}
-      >
-        <span
-          className={`${styles.vizBadgeLam} ${
-            laminacao ? styles.vizBadgeLamOn : ""
-          }`}
-        >
-          <span className={styles.vizLamIcon} aria-hidden="true">▥</span>
-          Laminação
-        </span>
-      </div>
-    </div>
-  );
-}
+// Ordem das 4 rotas no segment — espelha o design (Matriz / Filial /
+// Lam. Matriz / Lam. Filial). Labels human-readable inline para nao
+// depender de ROTA_LABELS (que tambem cobre legacy v3.0).
+const ROTA_BUTTONS: ReadonlyArray<{ value: RotaCriacao; label: string }> = [
+  { value: "MATRIZ", label: "Matriz" },
+  { value: "FILIAL", label: "Filial" },
+  { value: "LAM_MATRIZ", label: "Lam. Matriz" },
+  { value: "LAM_FILIAL", label: "Lam. Filial" },
+] as const;
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// Timestamp `dd/MM, HH:mm` em pt-BR (atualiza a cada minuto).
-function useCurrentTimestamp(): string {
-  const [now, setNow] = useState<Date | null>(null);
-  useEffect(() => {
-    setNow(new Date());
-    const id = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(id);
-  }, []);
-  if (!now) return "";  // Evita SSR mismatch — vazio ate o hydrate.
-  const dd = String(now.getDate()).padStart(2, "0");
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mi = String(now.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm}, ${hh}:${mi}`;
 }
 
 export default function NovaProvaPage() {
@@ -240,8 +77,6 @@ export default function NovaProvaPage() {
   const [vendedoresError, setVendedoresError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const timestamp = useCurrentTimestamp();
 
   const getToken = useCallback(async () => {
     const supabase = createClient();
@@ -298,7 +133,7 @@ export default function NovaProvaPage() {
       setArquivoError(null);
       return;
     }
-    if (!(ALLOWED_IMAGE_TYPES as readonly string[]).includes(file.type)) {
+    if (!isAllowedImageType(file.type)) {
       setArquivo(null);
       setArquivoPreview(null);
       setArquivoError(
@@ -349,13 +184,17 @@ export default function NovaProvaPage() {
 
   // Wave 2 v4.0: paste-from-clipboard (atalho ⌘V mostrado no card lateral).
   // Aceita imagens coladas direto no body — converte em File e dispara
-  // o mesmo handler do upload. Defensivo contra acionar dentro de inputs.
+  // o mesmo handler do upload. Defensivo contra acionar dentro de inputs:
+  // usa `instanceof` (em vez de cast) para narrowing seguro do EventTarget.
   useEffect(() => {
     function onPaste(e: ClipboardEvent) {
-      const target = e.target as HTMLElement | null;
-      if (target) {
-        const tag = target.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const target = e.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement
+      ) {
+        return;
       }
       const items = e.clipboardData?.items;
       if (!items) return;
@@ -385,11 +224,6 @@ export default function NovaProvaPage() {
     );
   }, [loading, form, arquivo]);
 
-  const rotaDerivada = useMemo(
-    () => deriveRota(form.origem, form.laminacao),
-    [form.origem, form.laminacao],
-  );
-
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -399,11 +233,11 @@ export default function NovaProvaPage() {
         nro_requerimento: form.nro_requerimento.trim(),
         cliente: form.cliente.trim(),
         vendedor_id: form.vendedor_id,
-        rota: rotaDerivada,
+        rota: form.rota,
         arquivo,
       });
     },
-    [canSubmit, arquivo, form, rotaDerivada, submit],
+    [canSubmit, arquivo, form, submit],
   );
 
   const handleNovaProva = useCallback(() => {
@@ -444,106 +278,24 @@ export default function NovaProvaPage() {
     }
   }, []);
 
-  // ─── Tela de sucesso (depois de criar) ──────────────────────────────
-  // Mantida a estrutura da Wave 2 v3.0; ajustes minimos para mostrar
-  // codigo_publico + rota persistida (Wave 2 v4.0).
-  if (result) {
-    const pdfDataUrl = `data:application/pdf;base64,${result.etiqueta_pdf_base64}`;
-    return (
-      <>
-        <div className={styles.mobileNotice}>
-          <p>Para acessar esse recurso, acesse a versao desktop.</p>
-        </div>
-        <div className={styles.desktopOnly}>
-          <header className={styles.successHeader}>
-            <h1 className={styles.successTitle}>Prova criada com sucesso</h1>
-            <button
-              type="button"
-              className={styles.btnPrimary}
-              onClick={handleNovaProva}
-            >
-              Nova prova
-            </button>
-          </header>
-
-          <section className={styles.successGrid}>
-            <div className={styles.infoCard}>
-              <h2 className={styles.h2}>Detalhes da prova</h2>
-              <dl className={styles.dl}>
-                <dt>Código</dt>
-                <dd className={styles.codigoPublico}>
-                  {result.prova.codigo_publico}
-                </dd>
-                <dt>Nome</dt>
-                <dd>{result.prova.nome}</dd>
-                <dt>Requerimento</dt>
-                <dd>{result.prova.nro_requerimento}</dd>
-                <dt>Cliente</dt>
-                <dd>{result.prova.cliente}</dd>
-                <dt>Vendedor</dt>
-                <dd>
-                  {result.prova.vendedor_nome}
-                  {result.prova.vendedor_localizacao
-                    ? ` (${result.prova.vendedor_localizacao})`
-                    : ""}
-                </dd>
-                <dt>Rota</dt>
-                <dd>
-                  {result.prova.rota === "MATRIZ" && "Matriz"}
-                  {result.prova.rota === "LAM_MATRIZ" && "Lam. Matriz"}
-                  {result.prova.rota === "FILIAL" && "Filial"}
-                  {result.prova.rota === "LAM_FILIAL" && "Lam. Filial"}
-                  {result.prova.rota === "PADRAO" && "Matriz (legada)"}
-                  {result.prova.rota === "DIRETA" && "Filial (legada)"}
-                  {!result.prova.rota && "—"}
-                </dd>
-                <dt>Status</dt>
-                <dd>{result.prova.status}</dd>
-                <dt>Ciclo</dt>
-                <dd>{result.prova.ciclo_atual}</dd>
-              </dl>
-
-              <div className={styles.actions}>
-                <button
-                  type="button"
-                  className={styles.btnSecondary}
-                  onClick={() => handleDownloadPdf(result)}
-                >
-                  Baixar etiqueta (PDF)
-                </button>
-                <button
-                  type="button"
-                  className={styles.btnSecondary}
-                  onClick={() => handlePrint(result)}
-                >
-                  Imprimir etiqueta
-                </button>
-              </div>
-            </div>
-
-            <div className={styles.pdfPreview}>
-              <h2 className={styles.h2}>Etiqueta</h2>
-              <iframe
-                title="Preview da etiqueta"
-                src={pdfDataUrl}
-                className={styles.pdfFrame}
-              />
-            </div>
-          </section>
-        </div>
-      </>
-    );
-  }
-
   // Wave 1 v4.0: sem acesso -> Restricted (sem renderizar form).
   // M-1 (audit fixes): retorna null durante loading evita flash de UI.
-  if (auth.loading) return null;
-  if (!auth.hasAccess) {
-    return <Restricted ruleKey="provas.create" profile={auth.profile} />;
+  // Quando ja existe `result` (prova criada), preservamos a tela de
+  // sucesso mesmo se a sessao ficar momentaneamente revalidando.
+  if (!result) {
+    if (auth.loading) return null;
+    if (!auth.hasAccess) {
+      return <Restricted ruleKey="provas.create" profile={auth.profile} />;
+    }
   }
 
-  // ─── Layout de criacao (Wave 2 v4.0 — segue o print do Mario) ────────
-  const unidade = UNIDADES_INFO[form.origem];
+  // ─── Layout de criacao (Wave 2 v4.0 — Visual Refresh v2) ─────────────
+  const pdfDataUrl = result
+    ? `data:application/pdf;base64,${result.etiqueta_pdf_base64}`
+    : null;
+
+  // Easing curve compartilhada entre header, ficha e dropzone.
+  const ENTER_EASE = [0.32, 0.72, 0, 1] as const;
 
   return (
     <>
@@ -551,77 +303,164 @@ export default function NovaProvaPage() {
         <p>Para acessar esse recurso, acesse a versao desktop.</p>
       </div>
 
-      <form
-        id="nova-prova-form"
-        className={styles.canvas}
-        onSubmit={handleSubmit}
-        noValidate
-      >
-        {/* Topo — pill com timestamp + botoes a direita */}
-        <header className={styles.topbar}>
-          <span className={styles.timestamp}>{timestamp || "—/—, —:—"}</span>
-          <div className={styles.topActions}>
-            <button
-              type="button"
-              className={styles.btnGhost}
-              disabled
-              title="Em desenvolvimento — use 'Cadastrar prova' para salvar."
+      <AnimatePresence mode="wait">
+        {result && pdfDataUrl ? (
+          <motion.div
+            key="success"
+            className={styles.desktopOnly}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.25, ease: ENTER_EASE }}
+          >
+            <header className={styles.successHeader}>
+              <h1 className={styles.successTitle}>Prova criada com sucesso</h1>
+              <button
+                type="button"
+                className={styles.btnPrimary}
+                onClick={handleNovaProva}
+              >
+                Nova prova
+              </button>
+            </header>
+
+            <section className={styles.successGrid}>
+              <div className={styles.infoCard}>
+                <h2 className={styles.h2}>Detalhes da prova</h2>
+                <dl className={styles.dl}>
+                  <dt>Código</dt>
+                  <dd className={styles.codigoPublico}>
+                    {result.prova.codigo_publico}
+                  </dd>
+                  <dt>Nome</dt>
+                  <dd>{result.prova.nome}</dd>
+                  <dt>Requerimento</dt>
+                  <dd>{result.prova.nro_requerimento}</dd>
+                  <dt>Cliente</dt>
+                  <dd>{result.prova.cliente}</dd>
+                  <dt>Vendedor</dt>
+                  <dd>
+                    {result.prova.vendedor_nome}
+                    {result.prova.vendedor_localizacao
+                      ? ` (${result.prova.vendedor_localizacao})`
+                      : ""}
+                  </dd>
+                  <dt>Rota</dt>
+                  <dd>
+                    {result.prova.rota === "MATRIZ" && "Matriz"}
+                    {result.prova.rota === "LAM_MATRIZ" && "Lam. Matriz"}
+                    {result.prova.rota === "FILIAL" && "Filial"}
+                    {result.prova.rota === "LAM_FILIAL" && "Lam. Filial"}
+                    {result.prova.rota === "PADRAO" && "Matriz (legada)"}
+                    {result.prova.rota === "DIRETA" && "Filial (legada)"}
+                    {!result.prova.rota && "—"}
+                  </dd>
+                  <dt>Status</dt>
+                  <dd>{result.prova.status}</dd>
+                  <dt>Ciclo</dt>
+                  <dd>{result.prova.ciclo_atual}</dd>
+                </dl>
+
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={styles.btnSecondary}
+                    onClick={() => handleDownloadPdf(result)}
+                  >
+                    Baixar etiqueta (PDF)
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.btnSecondary}
+                    onClick={() => handlePrint(result)}
+                  >
+                    Imprimir etiqueta
+                  </button>
+                </div>
+              </div>
+
+              <div className={styles.pdfPreview}>
+                <h2 className={styles.h2}>Etiqueta</h2>
+                <iframe
+                  title="Preview da etiqueta"
+                  src={pdfDataUrl}
+                  className={styles.pdfFrame}
+                />
+              </div>
+            </section>
+          </motion.div>
+        ) : (
+          <motion.form
+            key="form"
+            id="nova-prova-form"
+            className={styles.canvas}
+            onSubmit={handleSubmit}
+            noValidate
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            {/* Header da pagina: titulo grande a esquerda + botao primario
+                a direita. Mesmo padrao de /usuarios e /provas — entra no
+                flow do form (sem position:absolute). */}
+            <motion.header
+              className={styles.pageHeader}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.28, ease: ENTER_EASE, delay: 0.04 }}
             >
-              Salvar rascunho
-            </button>
-            <button
-              type="submit"
-              className={styles.btnSubmit}
-              disabled={!canSubmit}
+              <h1 className={styles.pageTitle}>Nova prova Digital</h1>
+              <button
+                type="submit"
+                className={styles.btnSubmit}
+                disabled={!canSubmit}
+              >
+                {loading ? "Cadastrando…" : "Cadastrar prova"}
+              </button>
+            </motion.header>
+
+            {/* Box branco unico — ocupa toda a area restante do .cardInner */}
+            <motion.section
+              className={styles.ficha}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.32, ease: ENTER_EASE, delay: 0.1 }}
             >
-              {loading ? "Cadastrando…" : "Cadastrar prova"}
-            </button>
-          </div>
-        </header>
-
-        {/* Layout principal: ficha (esquerda) + cards (direita) */}
-        <main className={styles.layout}>
-          {/* ── Box branco esquerdo: ficha de cadastro ───────────────── */}
-          <section className={styles.ficha}>
-            <p className={styles.fichaEyebrow}>
-              <span className={styles.checkIcon} aria-hidden="true">☑</span>
-              FICHA DE CADASTRO
-            </p>
-            <h1 className={styles.fichaTitle}>Nova prova digital</h1>
-
-            <div className={styles.field}>
-              <label htmlFor="np-nome" className={styles.label}>NOME</label>
-              <input
-                id="np-nome"
-                type="text"
-                className={styles.input}
-                placeholder="Identificação"
-                value={form.nome}
-                onChange={(e) => setForm({ ...form, nome: e.target.value })}
-                maxLength={200}
-                required
-                disabled={loading}
-              />
-            </div>
-
-            <div className={styles.field}>
-              <label htmlFor="np-req" className={styles.label}>REQUERIMENTO</label>
-              <input
-                id="np-req"
-                type="text"
-                className={styles.input}
-                placeholder="000000"
-                value={form.nro_requerimento}
-                onChange={(e) => setForm({ ...form, nro_requerimento: e.target.value })}
-                maxLength={50}
-                required
-                disabled={loading}
-              />
+            <div className={styles.fieldRow}>
+              <div className={styles.field}>
+                <label htmlFor="np-nome" className={styles.label}>Nome</label>
+                <input
+                  id="np-nome"
+                  type="text"
+                  className={styles.input}
+                  placeholder="Identificação"
+                  value={form.nome}
+                  onChange={(e) => setForm({ ...form, nome: e.target.value })}
+                  maxLength={200}
+                  required
+                  disabled={loading}
+                />
+              </div>
+              <div className={styles.field}>
+                <label htmlFor="np-req" className={styles.label}>Requerimento</label>
+                <input
+                  id="np-req"
+                  type="text"
+                  className={styles.input}
+                  placeholder="000000"
+                  value={form.nro_requerimento}
+                  onChange={(e) => setForm({ ...form, nro_requerimento: e.target.value })}
+                  maxLength={50}
+                  required
+                  disabled={loading}
+                />
+              </div>
             </div>
 
             <div className={styles.fieldRow}>
               <div className={styles.field}>
-                <label htmlFor="np-cli" className={styles.label}>CLIENTE</label>
+                <label htmlFor="np-cli" className={styles.label}>Cliente</label>
                 <input
                   id="np-cli"
                   type="text"
@@ -635,7 +474,7 @@ export default function NovaProvaPage() {
                 />
               </div>
               <div className={styles.field}>
-                <label htmlFor="np-vend" className={styles.label}>VENDEDOR</label>
+                <label htmlFor="np-vend" className={styles.label}>Vendedor</label>
                 <select
                   id="np-vend"
                   className={styles.input}
@@ -663,82 +502,52 @@ export default function NovaProvaPage() {
               </div>
             </div>
 
-            {/* ── ROTA: segment Matriz / Filial ────────────────────── */}
-            <fieldset className={styles.field} aria-describedby="np-rota-help">
-              <legend className={styles.label}>ROTA</legend>
+            {/* ── ROTA: segment de 4 botoes diretos (Visual Refresh v2) ─
+                Substituiu o composto origem (segment 2) + laminacao (switch)
+                da entrega anterior — alinhamento com o design Figma. */}
+            <fieldset className={styles.field}>
+              <legend className={styles.label}>Rota</legend>
               <div
-                className={styles.segment}
+                className={styles.segment4}
                 role="radiogroup"
-                aria-label="Origem da rota"
+                aria-label="Rota da prova"
               >
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={form.origem === "MATRIZ"}
-                  className={`${styles.segmentBtn} ${
-                    form.origem === "MATRIZ" ? styles.segmentBtnActive : ""
-                  }`}
-                  onClick={() => setForm({ ...form, origem: "MATRIZ" })}
-                  disabled={loading}
-                >
-                  <span className={styles.segmentIcon} aria-hidden="true">⌂</span>
-                  Matriz
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={form.origem === "FILIAL"}
-                  className={`${styles.segmentBtn} ${
-                    form.origem === "FILIAL" ? styles.segmentBtnActive : ""
-                  }`}
-                  onClick={() => setForm({ ...form, origem: "FILIAL" })}
-                  disabled={loading}
-                >
-                  <span className={styles.segmentIcon} aria-hidden="true">▤</span>
-                  Filial
-                </button>
+                {ROTA_BUTTONS.map((opt) => {
+                  const active = form.rota === opt.value;
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      className={`${styles.segmentBtn} ${
+                        active ? styles.segmentBtnActive : ""
+                      }`}
+                      onClick={() => setForm({ ...form, rota: opt.value })}
+                      disabled={loading}
+                    >
+                      {active && (
+                        <motion.span
+                          layoutId="rota-pill"
+                          className={styles.segmentPill}
+                          transition={{
+                            type: "spring",
+                            bounce: 0.2,
+                            duration: 0.35,
+                          }}
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span className={styles.segmentLabel}>{opt.label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </fieldset>
 
-            {/* ── LAMINAÇÃO: switch ────────────────────────────────── */}
-            <div className={styles.toggleRow}>
-              <span className={styles.toggleIcon} aria-hidden="true">▥</span>
-              <div className={styles.toggleText}>
-                <span className={styles.toggleTitle}>Laminação</span>
-                <span className={styles.toggleSub}>
-                  {form.laminacao ? "Com laminação" : "Sem laminação"}
-                </span>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={form.laminacao}
-                aria-label="Laminação"
-                className={`${styles.switch} ${
-                  form.laminacao ? styles.switchOn : ""
-                }`}
-                onClick={() => setForm({ ...form, laminacao: !form.laminacao })}
-                disabled={loading}
-              >
-                <span className={styles.switchKnob} aria-hidden="true" />
-              </button>
-            </div>
-
-            {/* Texto auxiliar de imutabilidade — mitigacao do risco
-                "Confusao operacional na escolha manual da rota"
-                (Backlog v4.0 §6). */}
-            <p id="np-rota-help" className={styles.hint}>
-              A rota escolhida é imutável após o cadastro.
-            </p>
-
-            {/* ── ANEXO: dropzone ──────────────────────────────────── */}
-            <div className={styles.field}>
-              <div className={styles.anexoHead}>
-                <span className={styles.label}>ANEXO</span>
-                <span className={styles.anexoMeta}>
-                  {arquivo ? "selecionado" : "pendente"} · ⌘V
-                </span>
-              </div>
+            {/* ── ANEXO: dropzone — cresce para preencher o resto da ficha ─ */}
+            <div className={`${styles.field} ${styles.anexoField}`}>
+              <label className={styles.label} htmlFor="np-arquivo">Anexo</label>
               <label
                 htmlFor="np-arquivo"
                 className={`${styles.dropzone} ${
@@ -780,7 +589,7 @@ export default function NovaProvaPage() {
                       Solte ou clique
                     </span>
                     <span className={styles.dropzoneHint}>
-                      JPG · PNG · ⌘V
+                      JPG · PNG
                     </span>
                   </div>
                 )}
@@ -790,53 +599,11 @@ export default function NovaProvaPage() {
               )}
             </div>
 
-            {/* ── Footer da ficha: ORIGEM / STATUS ──────────────────── */}
-            <footer className={styles.fichaFooter}>
-              <div>
-                <span className={styles.label}>ORIGEM</span>
-                <span className={styles.fichaFooterValue}>
-                  {form.origem === "MATRIZ" ? "Matriz" : "Filial"}
-                </span>
-              </div>
-              <div>
-                <span className={styles.label}>STATUS</span>
-                <span className={styles.fichaFooterValue}>
-                  <span className={styles.statusDot} aria-hidden="true" />
-                  Ativa
-                </span>
-              </div>
-            </footer>
-
             {error && <div className={styles.errorBox}>{error}</div>}
-          </section>
-
-          {/* ── Centro: visualizacao da rota (substitui o canvas
-              decorativo da v1 — ocupa 100% da area entre ficha e cards). */}
-          <div className={styles.center}>
-            <RotaVisualization origem={form.origem} laminacao={form.laminacao} />
-          </div>
-
-          {/* ── Cards a direita ───────────────────────────────────────── */}
-          <aside className={styles.aside}>
-            <div className={styles.card}>
-              <p className={styles.cardLabel}>
-                <span className={styles.cardDot} aria-hidden="true" />
-                UNIDADE SELECIONADA
-              </p>
-              <h3 className={styles.cardTitle}>{unidade.titulo}</h3>
-            </div>
-
-            <div className={styles.card}>
-              <p className={styles.cardLabel}>
-                <kbd className={styles.kbd}>⌘V</kbd> COLE IMAGEM
-              </p>
-              <p className={styles.cardBody}>
-                Você também pode arrastar direto no anexo da ficha à esquerda.
-              </p>
-            </div>
-          </aside>
-        </main>
-      </form>
+          </motion.section>
+      </motion.form>
+        )}
+      </AnimatePresence>
     </>
   );
 }
