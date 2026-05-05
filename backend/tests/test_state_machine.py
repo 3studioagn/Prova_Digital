@@ -718,11 +718,16 @@ async def test_executar_de_volta_para_com_motorista_studio_happy(
 async def test_executar_reinicio_ciclo_reprovada_para_criada_incrementa(
     mock_db, mock_log_audit
 ):
-    """Teste 18 — Reinicio de ciclo por STUDIO: incrementa ciclo_atual, zera
-    rota e emite audit com acao='reiniciar_ciclo' (gancho C14).
+    """Teste 18 — Reinicio de ciclo por STUDIO: incrementa ciclo_atual,
+    PRESERVA rota (RN-006 v4.0 + RF-009 v4.0 — ADR-123 / AUD-W2V4-001) e
+    emite audit com acao='reiniciar_ciclo' (gancho C14).
 
     Nao exposto pelo endpoint do Lote A — mas a state_machine suporta para
     que o endpoint admin dedicado do C14 (Lote C) possa chamar sem refactor.
+
+    Pre-correcao (Wave 3 v3.0): zerava rota -> bug AUD-W2V4-001 disparava
+    o trigger trg_provas_rota_imutavel para qualquer prova com rota
+    nao-NULL. Pos-correcao Wave 2 v4.0 (commit do fix): preserva rota_antes.
     """
     studio = make_user(setor=SetorEnum.STUDIO, localizacao=None)
     prova = make_prova(
@@ -740,16 +745,84 @@ async def test_executar_reinicio_ciclo_reprovada_para_criada_incrementa(
     )
 
     assert prova.ciclo_atual == 2
-    assert prova.rota is None
+    # AUD-W2V4-001 fix: rota PRESERVADA (era None pre-correcao).
+    assert prova.rota == RotaEnum.PADRAO
     assert prova.status == StatusProvaEnum.CRIADA
     assert result.ciclo == 2
-    assert result.rota_no_momento is None
+    assert result.rota_no_momento == RotaEnum.PADRAO
 
     # Audit log usa acao especifica "reiniciar_ciclo"
     kwargs = mock_log_audit.call_args.kwargs
     assert kwargs["acao"] == "reiniciar_ciclo"
     assert kwargs["detalhes"]["ciclo"] == 2
     assert kwargs["detalhes"]["rota_antes"] == "PADRAO"
+    # AUD-W2V4-007: contrato mudou — rota_depois reflete preservacao.
+    assert kwargs["detalhes"]["rota_depois"] == "PADRAO"
+
+
+@pytest.mark.asyncio
+async def test_executar_reinicio_ciclo_v4_preserva_rota_matriz(
+    mock_db, mock_log_audit
+):
+    """Teste 18b — AUD-W2V4-001 cobertura v4.0 (mock_db): reinicio de
+    ciclo de prova v4.0 com rota=MATRIZ deve PRESERVAR rota.
+
+    Validacao integrada (banco real + trigger ativo) em
+    test_imutabilidade_rota.py (AUD-W2V4-T01).
+    """
+    studio = make_user(setor=SetorEnum.STUDIO, localizacao=None)
+    prova = make_prova(
+        status=StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
+        rota=RotaEnum.MATRIZ,  # Prova v4.0 com rota imutavel persistida
+        ciclo_atual=2,
+    )
+
+    result = await executar_transicao(
+        mock_db,
+        prova=prova,
+        status_novo=StatusProvaEnum.CRIADA,
+        usuario=studio,
+        assinatura_digital=ASSINATURA_FAKE,
+    )
+
+    # Rota MATRIZ preservada — sem trigger seria disparado em banco real.
+    assert prova.rota == RotaEnum.MATRIZ
+    assert result.rota_no_momento == RotaEnum.MATRIZ
+    assert prova.ciclo_atual == 3
+    assert result.ciclo == 3
+
+    kwargs = mock_log_audit.call_args.kwargs
+    assert kwargs["detalhes"]["rota_antes"] == "MATRIZ"
+    assert kwargs["detalhes"]["rota_depois"] == "MATRIZ"
+
+
+@pytest.mark.asyncio
+async def test_executar_reinicio_ciclo_legacy_null_mantem_null(
+    mock_db, mock_log_audit
+):
+    """Teste 18c — AUD-W2V4-001: prova legacy v3.0 com rota=NULL no
+    reinicio mantem NULL (sem regressao do caminho legacy)."""
+    studio = make_user(setor=SetorEnum.STUDIO, localizacao=None)
+    prova = make_prova(
+        status=StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
+        rota=None,  # Prova legada v3.0 sem rota persistida
+        ciclo_atual=1,
+    )
+
+    result = await executar_transicao(
+        mock_db,
+        prova=prova,
+        status_novo=StatusProvaEnum.CRIADA,
+        usuario=studio,
+        assinatura_digital=ASSINATURA_FAKE,
+    )
+
+    assert prova.rota is None
+    assert result.rota_no_momento is None
+    assert prova.ciclo_atual == 2
+
+    kwargs = mock_log_audit.call_args.kwargs
+    assert kwargs["detalhes"]["rota_antes"] is None
     assert kwargs["detalhes"]["rota_depois"] is None
 
 

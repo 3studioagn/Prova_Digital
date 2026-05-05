@@ -3287,7 +3287,11 @@ async def test_cancelar_db_error_502(admin_user, mock_db):
 
 async def test_reiniciar_happy_prova_reprovada(admin_user, mock_db):
     """C14 — admin reinicia ciclo de prova REPROVADA. Status=CRIADA,
-    ciclo_atual incrementado, rota resetada."""
+    ciclo_atual incrementado.
+
+    AUD-W2V4-001 (ADR-123): rota e PRESERVADA (RN-006 v4.0 + RF-009 v4.0).
+    Pre-correcao: rota era zerada para None.
+    """
     _setup(mock_db, admin=admin_user)
     prova = _make_prova(
         status_prova=StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
@@ -3305,11 +3309,12 @@ async def test_reiniciar_happy_prova_reprovada(admin_user, mock_db):
     data = resp.json()
     assert data["prova"]["status"] == "CRIADA"
     assert data["prova"]["ciclo_atual"] == 2
-    assert data["prova"]["rota"] is None
+    # AUD-W2V4-001 fix: rota PADRAO PRESERVADA (era None pre-fix).
+    assert data["prova"]["rota"] == "PADRAO"
     assert data["movimentacao"]["status_anterior"] == "REPROVADA_PELO_VENDEDOR"
     assert data["movimentacao"]["status_novo"] == "CRIADA"
     assert data["movimentacao"]["ciclo"] == 2
-    assert data["movimentacao"]["rota_no_momento"] is None
+    assert data["movimentacao"]["rota_no_momento"] == "PADRAO"
     assert prova.ciclo_atual == 2
     mock_db.commit.assert_awaited_once()
 
