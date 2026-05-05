@@ -379,8 +379,21 @@ async def executar_transicao(
         # porque deixar o incremento de ciclo para depois seria uma
         # ramificacao de logica que complicaria o handler de transicao
         # agora. Ver §3.3 do WAVE3_LOTE_A_ANALYSIS.md.
+        #
+        # Wave 2 v4.0 (Audit Fix AUD-W2V4-001 — ADR-123): a rota e
+        # IMUTAVEL apos a criacao (RN-002 v4.0) — preservamos `rota_antes`
+        # em vez de zerar. Isso vale para os 3 cenarios:
+        #   - Prova v4.0 (rota=MATRIZ/LAM_MATRIZ/FILIAL/LAM_FILIAL):
+        #     rota_depois = rota_antes; trigger nao dispara
+        #     (`OLD.rota IS NOT DISTINCT FROM NEW.rota` -> WHEN false).
+        #   - Prova legada v3.0 (rota=PADRAO/DIRETA): rota_depois =
+        #     rota_antes; mantem coerencia historica ate Wave 7.
+        #   - Prova legada v3.0 (rota=NULL): rota_depois = None
+        #     (rota_antes ja era None); trigger ainda nao se aplica.
+        # RF-009 v4.0, RN-006 v4.0, US-010 explicitamente exigem
+        # preservacao no reinicio.
         ciclo_depois = ciclo_antes + 1
-        rota_depois = None
+        rota_depois = rota_antes
         acao_audit = "reiniciar_ciclo"
 
     # 8. Cria a movimentacao. `rota_no_momento` e `ciclo` carregam os

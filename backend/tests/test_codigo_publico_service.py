@@ -83,14 +83,20 @@ def test_gerar_codigo_publico_determinismo_prefixo():
 
 
 def test_gerar_codigo_publico_nao_determinismo_sufixo():
-    # 200 chamadas seguidas com mesma data devem produzir sufixos distintos.
-    # Probabilidade de colisao em 200 chamadas: ~200^2 / (2 * 31^6) ≈ 2.3e-5.
-    # Aceitavel para teste — flake rate <0.001%.
+    # AUD-W2V4-T05 (Wave 2 v4.0 Audit Fix): aumentado de 200 para
+    # 10.000 amostras conforme expectativa do prompt original da
+    # execucao. Estatistica:
+    #   - 31^6 = 887_503_681 combinacoes/mes
+    #   - Probabilidade aproximada de >=1 colisao em 10k amostras
+    #     (paradoxo do aniversario): 10000^2 / (2 * 887M) ≈ 5.6%.
+    #   - Para evitar flake: tolerar ate 5 colisoes (>= 9.995 distintos).
+    #     Isso ainda e bem mais rigoroso que o teste anterior (200/199).
+    # Tempo do teste: ~50ms (secrets.choice e rapido).
     base = datetime(2026, 5, 4)
-    codigos = [gerar_codigo_publico(base) for _ in range(200)]
+    codigos = [gerar_codigo_publico(base) for _ in range(10_000)]
     distintos = len(set(codigos))
-    assert distintos >= 199, (
-        f"Esperado ~200 codigos distintos, obtive {distintos} "
+    assert distintos >= 9_995, (
+        f"Esperado ~10000 codigos distintos, obtive {distintos} "
         f"(nao-determinismo do sufixo nao funciona ou colisao alta)"
     )
 

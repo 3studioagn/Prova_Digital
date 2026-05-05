@@ -37,7 +37,12 @@ interface FormState {
   nro_requerimento: string;
   cliente: string;
   vendedor_id: string;
-  rota: RotaCriacao;
+  // AUD-W2V4-A02 + M03 (ADR-124): default e string vazia para forcar
+  // escolha consciente da rota — mitiga o risco "Confusao operacional"
+  // do Backlog v4.0 §6 (substituta da mitigacao descartada em
+  // ADR-118 SUPERSEDIDO). `RotaCriacao | ""` permite o estado nao-
+  // selecionado; o submit so e habilitado quando rota nao-vazia.
+  rota: RotaCriacao | "";
 }
 
 const INITIAL_FORM: FormState = {
@@ -45,7 +50,7 @@ const INITIAL_FORM: FormState = {
   nro_requerimento: "",
   cliente: "",
   vendedor_id: "",
-  rota: "MATRIZ", // Default conforme o print: "Matriz" selecionado
+  rota: "", // AUD-W2V4-A02/M03: forca escolha consciente (RN-002 v4.0).
 };
 
 // Ordem das 4 rotas no segment — espelha o design (Matriz / Filial /
@@ -220,6 +225,9 @@ export default function NovaProvaPage() {
       form.nro_requerimento.trim().length > 0 &&
       form.cliente.trim().length > 0 &&
       form.vendedor_id.length > 0 &&
+      // AUD-W2V4-A02/M03 (ADR-124): bloqueia submit ate admin escolher
+      // rota — RotaCriacao nao-vazia.
+      form.rota !== "" &&
       arquivo !== null
     );
   }, [loading, form, arquivo]);
@@ -227,7 +235,11 @@ export default function NovaProvaPage() {
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
-      if (!canSubmit || !arquivo) return;
+      // Guarda explicito que reduz `form.rota: RotaCriacao | ""` para
+      // `RotaCriacao` no submit (defesa em profundidade — `canSubmit` ja
+      // bloqueia, mas TS exige narrowing aqui para o tipo de
+      // `submit({rota: RotaCriacao})`).
+      if (!canSubmit || !arquivo || form.rota === "") return;
       await submit({
         nome: form.nome.trim(),
         nro_requerimento: form.nro_requerimento.trim(),
@@ -543,6 +555,13 @@ export default function NovaProvaPage() {
                   );
                 })}
               </div>
+              {/* AUD-W2V4-A02/M03 (ADR-124): texto auxiliar restaurado
+                  como mitigacao do risco "Confusao operacional" do
+                  Backlog v4.0 §6. RN-002 v4.0: rota imutavel apos
+                  cadastro (trigger trg_provas_rota_imutavel). */}
+              <span className={styles.fieldHint}>
+                A rota escolhida e imutavel apos o cadastro.
+              </span>
             </fieldset>
 
             {/* ── ANEXO: dropzone — cresce para preencher o resto da ficha ─ */}

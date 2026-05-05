@@ -58,6 +58,7 @@ FONTE UNICODE (post-Wave 2 hardening, Sessao 12):
 import io
 import logging
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 from fpdf import FPDF
@@ -135,14 +136,31 @@ def _register_fonts(pdf: FPDF) -> None:
     pdf.add_font(_FONT_FAMILY, "B", str(_FONT_BOLD))
 
 
-def _check_assets() -> None:
-    """Verifica que os SVGs dos logos existem no deploy."""
+@lru_cache(maxsize=1)
+def _check_assets() -> bool:
+    """Verifica que os SVGs dos logos existem no deploy.
+
+    AUD-W2V4-P03: cacheada via `lru_cache(maxsize=1)` — apos primeira
+    chamada bem-sucedida, todas subsequentes retornam True direto sem
+    syscall `Path.exists()`. Em alta concorrencia (10+ POST /provas/
+    simultaneos), economiza ~2 syscalls por request.
+
+    NOTA sobre cache de bytes do SVG: o fpdf2 `pdf.image()` para SVG
+    delega para svglib internamente, que faz parsing XML completo a
+    cada chamada — cachear apenas os bytes nao traria ganho real
+    porque o gargalo e o parse, nao o read. Trade-off de pre-renderizar
+    SVG -> PNG no startup para cache real foi analisado em
+    DECISIONS.md (AUD-W2V4-P03 follow-up) e classificado como
+    WONTFIX-parcial: custo de complexidade > ganho marginal de
+    performance para o volume operacional atual (<30 PDFs/dia).
+    """
     missing = [p for p in (_LOGO_3STUDIO, _LOGO_STUDIO_ART) if not p.exists()]
     if missing:
         raise RuntimeError(
             f"Assets de etiqueta ausentes: {[str(p) for p in missing]}. "
             "Verifique backend/app/services/etiqueta_assets/."
         )
+    return True
 
 
 def _fmt_datetime(dt: datetime) -> str:

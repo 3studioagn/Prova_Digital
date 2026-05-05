@@ -485,78 +485,187 @@ async def create_prova(
         ciclo_atual=1,
     )
 
-    try:
-        db.add(nova_prova)
-        await db.flush()  # garante INSERT de provas_digitais ANTES da etiqueta
+    # AUD-W2V4-004: distingue constraint violado para tratar:
+    #   - idx_provas_codigo_publico (UNIQUE codigo_publico): regenera codigo
+    #     e retenta ate 3x. Probabilidade de colisao real e baixissima
+    #     (31^6 ≈ 887M), mas se acontecer queremos auto-recover sem
+    #     mostrar mensagem enganosa de "nro_requerimento ja cadastrado".
+    #   - provas_digitais_nro_requerimento_key (UNIQUE nro_req):
+    #     409 com mensagem clara (race TOCTOU entre dois admins
+    #     criando a mesma prova).
+    #   - Outros IntegrityError (FK, NOT NULL, etc): 502.
+    _CODIGO_PUBLICO_CONSTRAINT = "idx_provas_codigo_publico"
+    _NRO_REQ_CONSTRAINT = "provas_digitais_nro_requerimento_key"
+    _MAX_CODIGO_PUBLICO_RETRIES = 3
+    tentativa = 0
+    while True:
+        tentativa += 1
+        try:
+            db.add(nova_prova)
+            await db.flush()  # garante INSERT de provas_digitais ANTES da etiqueta
 
-        nova_etiqueta = Etiqueta(
-            prova_id=prova_id,
-            nome_prova=body.nome,
-            nro_requerimento=body.nro_requerimento,
-            vendedor_nome=vendedor.nome,
-            qr_code_image=qr_image_bytes,
-        )
-        db.add(nova_etiqueta)
-        await db.flush()  # garante INSERT de etiquetas antes do audit_log
+            nova_etiqueta = Etiqueta(
+                prova_id=prova_id,
+                nome_prova=body.nome,
+                nro_requerimento=body.nro_requerimento,
+                vendedor_nome=vendedor.nome,
+                qr_code_image=qr_image_bytes,
+            )
+            db.add(nova_etiqueta)
+            await db.flush()  # garante INSERT de etiquetas antes do audit_log
 
-        await log_audit(
-            db,
-            acao="criar_prova",
-            usuario_id=admin.id,
-            prova_id=prova_id,
-            detalhes={
-                "vendedor_id": str(vendedor.id),
-                "vendedor_nome": vendedor.nome,
-                "nro_requerimento": body.nro_requerimento,
-                "codigo_publico": codigo_publico,
-                "cliente": body.cliente,
-                "rota": body.rota.value,
-                "object_key": body.object_key,
-            },
-            request=request,
-        )
+            await log_audit(
+                db,
+                acao="criar_prova",
+                usuario_id=admin.id,
+                prova_id=prova_id,
+                detalhes={
+                    "vendedor_id": str(vendedor.id),
+                    "vendedor_nome": vendedor.nome,
+                    "nro_requerimento": body.nro_requerimento,
+                    "codigo_publico": codigo_publico,
+                    "cliente": body.cliente,
+                    "rota": body.rota.value,
+                    "object_key": body.object_key,
+                },
+                request=request,
+            )
 
-        await db.commit()
-    except IntegrityError:
-        # A2 (auditoria Wave 2): race entre dois admins criando a mesma prova.
-        #
-        # Cenario: o check de unicidade do nro_requerimento no inicio do handler
-        # (linhas 300-310) roda ANTES do INSERT, entao existe uma janela TOCTOU
-        # em que outra requisicao paralela pode criar a mesma prova e commitar
-        # primeiro. O constraint UNIQUE no banco detecta o conflito e levanta
-        # IntegrityError no commit — mapeamos para 409 Conflict em vez de 500.
-        #
-        # Outros tipos de IntegrityError (FK quebrada, NOT NULL violado) tambem
-        # caem aqui porque estruturalmente estao no mesmo caminho de escrita;
-        # a mensagem e generica o suficiente para cobrir todos mas nao vaza
-        # detalhes internos de schema.
-        await db.rollback()
-        logger.warning(
-            "IntegrityError ao persistir prova nro_req=%s (provavel race de unicidade). "
-            "Limpando R2.",
-            body.nro_requerimento,
-        )
-        await _cleanup_r2(body.object_key)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Numero de requerimento ja cadastrado",
-        )
-    except Exception:
-        # F01 (auditoria externa): DB errors transitorios no commit retornam
-        # 502 para alinhar com ADR-074 (C07), ADR-076 (C08) e ADR-078 (C09).
-        # 502 expressa "upstream indisponivel, cliente pode retentar com
-        # back-off"; 500 seria "bug interno do backend" (nao e o caso aqui).
-        await db.rollback()
-        logger.exception(
-            "Falha ao persistir prova %s (nro_req=%s). Limpando R2.",
-            prova_id,
-            body.nro_requerimento,
-        )
-        await _cleanup_r2(body.object_key)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Falha ao persistir prova",
-        )
+            await db.commit()
+            break  # sucesso — sai do loop
+        except IntegrityError as exc:
+            await db.rollback()
+            # Inspeciona o constraint violado. asyncpg expoe `constraint_name`
+            # direto em UniqueViolationError; fallback para string match na
+            # mensagem cobre psycopg/outros drivers.
+            constraint = (
+                getattr(exc.orig, "constraint_name", None)
+                or str(getattr(exc.orig, "diag", None) and exc.orig.diag.constraint_name or "")
+                or ""
+            )
+            mensagem = str(exc.orig) if exc.orig is not None else str(exc)
+
+            colidiu_codigo_publico = (
+                constraint == _CODIGO_PUBLICO_CONSTRAINT
+                or _CODIGO_PUBLICO_CONSTRAINT in mensagem
+            )
+            colidiu_nro_req = (
+                constraint == _NRO_REQ_CONSTRAINT
+                or _NRO_REQ_CONSTRAINT in mensagem
+            )
+
+            if colidiu_codigo_publico and tentativa < _MAX_CODIGO_PUBLICO_RETRIES:
+                # Regenera codigo + recalcula payload do QR + regenera etiqueta
+                # PDF (porque o codigo legivel aparece abaixo do QR). Mantem
+                # o `prova_id` e `created_at` originais — sao do registro,
+                # nao do codigo.
+                logger.warning(
+                    "Colisao em %s na tentativa %d/%d para prova %s — "
+                    "regenerando codigo_publico e retentando.",
+                    _CODIGO_PUBLICO_CONSTRAINT, tentativa,
+                    _MAX_CODIGO_PUBLICO_RETRIES, prova_id,
+                )
+                codigo_publico = gerar_codigo_publico(created_at)
+                qr_payload = qrcode_service.gerar_payload_qr(
+                    codigo_publico, qr_hash
+                )
+                qr_image_bytes = qrcode_service.gerar_imagem_qr(
+                    qr_payload, size_px=200
+                )
+                pdf_bytes = gerar_pdf(
+                    nome_prova=body.nome,
+                    nro_requerimento=body.nro_requerimento,
+                    vendedor_nome=vendedor.nome,
+                    qr_image_bytes=qr_image_bytes,
+                    codigo_publico=codigo_publico,
+                    rota=RotaEnum(body.rota.value),
+                    template=template,
+                    created_at=created_at,
+                )
+                nova_prova = ProvaDigital(
+                    id=prova_id,
+                    nome=body.nome,
+                    nro_requerimento=body.nro_requerimento,
+                    codigo_publico=codigo_publico,
+                    cliente=body.cliente,
+                    vendedor_id=vendedor.id,
+                    imagem_url=body.object_key,
+                    qr_code_hash=qr_hash,
+                    status=StatusProvaEnum.CRIADA,
+                    rota=RotaEnum(body.rota.value),
+                    ciclo_atual=1,
+                )
+                continue  # retenta
+
+            if colidiu_codigo_publico:
+                # Esgotou tentativas — algo muito anormal (3 colisoes em
+                # 31^6 = ~887M). Cleanup R2 e retorna 502 para sinalizar
+                # que cliente pode retentar (nova request gera codigo novo).
+                logger.error(
+                    "Colisao persistente em %s apos %d tentativas para "
+                    "prova %s. Investigar entropia do CSPRNG.",
+                    _CODIGO_PUBLICO_CONSTRAINT,
+                    _MAX_CODIGO_PUBLICO_RETRIES, prova_id,
+                )
+                await _cleanup_r2(body.object_key)
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=(
+                        "Falha ao gerar codigo publico unico apos "
+                        "varias tentativas. Tente novamente."
+                    ),
+                )
+
+            if colidiu_nro_req:
+                # A2 (auditoria Wave 2): race TOCTOU entre dois admins
+                # criando a mesma prova. Mensagem clara para guiar UX.
+                logger.warning(
+                    "IntegrityError em %s (race TOCTOU) para nro_req=%s. "
+                    "Limpando R2.",
+                    _NRO_REQ_CONSTRAINT, body.nro_requerimento,
+                )
+                await _cleanup_r2(body.object_key)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Numero de requerimento ja cadastrado",
+                )
+
+            # Outros IntegrityError (FK quebrada, NOT NULL violado): bug
+            # estrutural — 502 (mesmo destino que erros transitorios de
+            # conexao/commit). Cliente pode retentar mas resolucao real
+            # exige investigacao do schema/dados.
+            logger.exception(
+                "IntegrityError nao classificado ao persistir prova %s "
+                "(constraint=%r, nro_req=%s). Limpando R2.",
+                prova_id, constraint, body.nro_requerimento,
+            )
+            await _cleanup_r2(body.object_key)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Falha ao persistir prova",
+            )
+        except HTTPException:
+            # Reraise HTTPException ja construido pelos branches acima
+            # (raise dentro do except IntegrityError) — nao mascarar como
+            # 502 generico abaixo.
+            raise
+        except Exception:
+            # F01 (auditoria externa): DB errors transitorios no commit
+            # retornam 502 para alinhar com ADR-074 (C07), ADR-076 (C08)
+            # e ADR-078 (C09). 502 expressa "upstream indisponivel,
+            # cliente pode retentar com back-off"; 500 seria "bug interno
+            # do backend" (nao e o caso aqui).
+            await db.rollback()
+            logger.exception(
+                "Falha ao persistir prova %s (nro_req=%s). Limpando R2.",
+                prova_id,
+                body.nro_requerimento,
+            )
+            await _cleanup_r2(body.object_key)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Falha ao persistir prova",
+            )
 
     # F02 (auditoria externa): db.refresh esta FORA do try/except do commit.
     # Se refresh falhar (conexao dropa entre commit e refresh, janela rara
