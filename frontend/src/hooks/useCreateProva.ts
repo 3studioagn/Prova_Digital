@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api";
 import {
-  ALLOWED_IMAGE_TYPES,
+  isAllowedImageType,
   MAX_UPLOAD_BYTES,
   type ProvaCreateResponse,
   type RotaCriacao,
@@ -51,7 +51,7 @@ export function useCreateProva(getToken: () => Promise<string | null>) {
   const submit = useCallback(
     async (input: CreateProvaInput): Promise<ProvaCreateResponse | null> => {
       // ── Validacao client-side (defesa em profundidade — backend re-valida).
-      if (!ALLOWED_IMAGE_TYPES.includes(input.arquivo.type as typeof ALLOWED_IMAGE_TYPES[number])) {
+      if (!isAllowedImageType(input.arquivo.type)) {
         setState({
           loading: false,
           error: "O arquivo deve ser JPG ou PNG.",

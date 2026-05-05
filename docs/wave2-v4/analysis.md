@@ -1264,3 +1264,169 @@ Via MCP `apply_migration` no projeto `rwxlpwmnkekzuurgthkr`:
 de auditoria sênior independente em sessao separada antes do merge
 para `main` — mesmo padrao da Wave 1 v4.0.
 
+---
+
+# Anexo — Visual Refresh Execution (2026-05-05)
+
+> **AVISO DE SUPERSEDIMENTO (AUD-W2V4-D01 — adicionado em 2026-05-05
+> pela sessao de Audit Fixes):** este anexo descreve o estado
+> intermediario do **Visual Refresh v1** — incluindo o componente
+> `EtiquetaPreview` SVG, layout 2-col 380px+1fr, topbar `position:
+> absolute`, etc. Esse estado foi **POSTERIORMENTE SUPERSEDIDO**
+> pelo **Visual Refresh v2** nos commits `5047172` (fix) +
+> `c06ca56` (docs/supersede ADRs 118/120/121). O codigo final em
+> `main` segue a estrutura v2 (1 box branco unico, header
+> `.pageHeader` em flow normal, segment de 4 botoes, sem
+> EtiquetaPreview SVG, sem `frontend/public/etiqueta/`). Mantemos
+> este anexo por valor historico de processo iterativo de design
+> entre Mario + assistant — quem ler para entender estado atual
+> deve consultar o CHANGELOG entrada "Wave 2 v4.0 — Componente 06
+> — Visual Refresh v2" + ADRs 118/120/121 marcados SUPERSEDIDO.
+
+Sessao subsequente ao closeout original da Wave 2 v4.0, focada
+exclusivamente em **resolver o feedback iterativo do Mario sobre o
+visual da pagina `/nova-prova`**. Nenhum codigo backend, RLS,
+migration ou RBAC foi tocado nesta sessao.
+
+## Contexto inicial
+
+O Mario reportou: _"a pagina de criar prova esta visualmente
+inconsistente em relacao as demais paginas. O conteudo dentro do box
+branco ao lado da sidebar parece estar sendo renderizado como canvas
+ou com comportamento semelhante. Esse conteudo nao esta preenchendo
+corretamente todo o box branco."_
+
+## Diagnostico (read-only, antes de tocar codigo)
+
+**Causa raiz** identificada na investigacao:
+
+1. **`.canvas` com `height: calc(100vh - 64px)`** ignorava o
+   `.cardInner` do layout dashboard (que tem `height: 100%` +
+   padding). Diferenca de altura criava um "retangulo flutuante".
+2. **`.canvas { padding: 12px }`** somava com o padding generoso do
+   `.cardInner` (`clamp(2rem, 4vw, 4rem)` = 32-64px) → moldura visual
+   dupla.
+3. **`.canvas { background: #fafaf7 }`** (quase-branco) era
+   renderizado dentro do `.cardInner` cinza `#eaeaea` — visualmente
+   um "canvas" diferente do card pai.
+
+**Inconsistencias secundarias:**
+- Cores hardcoded fora dos tokens canonicos (`#f8d126` em vez de
+  `var(--color-accent)` `#ffcb5c`, `#f6f6f3` em vez de
+  `var(--color-card-surface)` `#d9d9d9`, `#1a1a1a` em vez de
+  `var(--color-card-text)`).
+- Tipografia divergente do resto do app (titulo 22px/700 em vez de
+  `clamp(2.5rem, 5vw, 4rem) / 500`, labels com `text-transform:
+  uppercase + letter-spacing 0.12em` em vez do padrao Title Case).
+- Inputs com `border-radius: 8px` em vez de `--radius-pill`.
+- Conteudo "decorativo": `RotaVisualization` SVG (~150 linhas) sem
+  funcao operacional, cards laterais redundantes (Unidade Selecionada,
+  Cole Imagem), botao "Salvar rascunho" disabled como feature
+  fantasma, timestamp pill na topbar.
+- 2 usos de `as` agressivos (`as readonly string[]`, `as HTMLElement`)
+  contrariando a politica do Mario de "zero `any` e `as`".
+
+## Iteracao por rodadas (8 ciclos de feedback)
+
+A sessao foi conduzida em ciclos curtos: implementar -> screenshot/
+feedback -> ajustar. **Nenhum commit feito** durante a sessao —
+apenas edits e validacoes via `tsc` + preview server.
+
+| # | Foco | Output |
+|---|------|--------|
+| 1 | Diagnostico + correcao estrutural + tokens canonicos + tipografia Title Case + animacoes Framer Motion | Bug do canvas resolvido, design system alinhado, NOME->Nome, etc |
+| 2 | SVG estilo "garfo" (ORIGEM e LAMI mesma altura, MATRIZ topo, FILIAL baixo) | Layout horizontal ORIGEM->LAMI->bifurcacao |
+| 3 | Pontinhos cinza cobrindo o canvas inteiro + remocao da pill de horario | `.canvas::before { inset: calc(-1 * var(--card-padding)) }` |
+| 4 | Linhas SVG conectando no centro do dot + halo amarelo nao corta + animacao mais suave | Refator de `.vizNode` `flex column` -> `inline-block` |
+| 5 | Remocao dos icones internos dos dots + simplificacao da animacao de troca | Sem fade vertical (`y: 4`) que dava sensacao de "abaixar" |
+| 6 | Remocao do icone da Laminacao | Apenas pílula com texto |
+| 7 | Mario fez ajustes manuais (removeu eyebrow + footer da ficha, deslocou SVG `left: 50px`) — harmonizacao da tipografia + limpeza CSS orfa | `.fichaEyebrow`/`.fichaFooter`/`.fichaFooterValue`/`.statusDot`/`.checkIcon` removidos |
+| 8 | **Decisao de redesign**: remover cards laterais, ficha estende ate o topo dos botoes, remover Salvar rascunho | Topbar `position: absolute`, layout 2 cols `380px 1fr` |
+| 9 (final) | Substituir SVG decorativo por preview da etiqueta real | EtiquetaPreview replicando `etiqueta_service.py` mm-a-mm |
+| 10 (refinamento) | Apos referencia visual da etiqueta real impressa: remover codigo publico (PRV) e badge da rota do preview, deixar QR vazio | Preview agora fiel a etiqueta IMPRESSA |
+
+## Output final — arquivos tocados
+
+**Frontend (4 editados + 2 SVGs novos):**
+- `frontend/src/app/(dashboard)/nova-prova/page.tsx` — refresh do
+  componente `NovaProvaPage` + nova `EtiquetaPreview`. Removidos:
+  `RotaVisualization` + helpers (`VIZ_NODES`, `buildVizPath`,
+  `VizPoint`, `MatrizIcon`, `FilialIcon`, `OrigemNodeIcon`,
+  `LaminationIcon`, `QR_DOTS`, `FinderPattern`,
+  `ROTA_BADGE_LABELS_PREVIEW`, `ROTA_BADGE_W_PREVIEW`),
+  `UNIDADES_INFO`, `useCurrentTimestamp`. Adicionados: lookup do
+  vendedor (`vendedores.find(...)`), `truncar` helper, novo
+  `EtiquetaPreview` (~200 linhas).
+- `frontend/src/app/(dashboard)/nova-prova/nova-prova.module.css`
+  — reescrita expressiva (~340 linhas removidas, ~40 adicionadas).
+- `frontend/src/lib/types/prova.ts` — adicionado `AllowedImageType`
+  + `isAllowedImageType` (3 linhas uteis).
+- `frontend/src/hooks/useCreateProva.ts` — 1 linha mudada (cast ->
+  helper).
+- `frontend/public/etiqueta/logo_3studio.svg` — NOVO (copia do
+  backend).
+- `frontend/public/etiqueta/logo_studio_e_arte.svg` — NOVO (copia
+  do backend).
+
+**Documentacao (4 atualizados nesta sessao final):**
+- `CHANGELOG.md` — entrada `[2026-05-05 — Visual Refresh]` adicionada.
+- `DECISIONS.md` — ADRs 120-122 adicionados.
+- `CLAUDE.md` — linha "v4.0 W2 — C06 Visual Refresh" na tabela de
+  waves.
+- `docs/wave2-v4/analysis.md` — este anexo.
+
+## Validacao tecnica
+
+- **`npx tsc --noEmit`**: exit 0 (sem erros).
+- **`npx next build`**: 13/13 paginas geradas. `/nova-prova` em
+  9.18 kB / 211 kB First Load (era 6.34 kB / 169 kB — overhead +3 kB
+  do Framer Motion + EtiquetaPreview SVG).
+- **HMR + dev server limpo** apos restart com `.next/` purgado entre
+  build de producao e dev (necessario porque `next build` invalida os
+  chunks do dev server).
+- **Console + server logs**: zero erros.
+- **Politica de tipos**: `grep -nE '\bas [A-Z]| as readonly| as typeof'`
+  nos 4 arquivos editados retorna APENAS os 2 `as const` literais
+  autorizados (ENTER_EASE em `page.tsx` e ALLOWED_IMAGE_TYPES em
+  `prova.ts`).
+
+## Comportamento funcional preservado byte-a-byte
+
+A politica desta sessao foi: **mexer APENAS no visual, sem alterar
+NADA do comportamento**. Verificacao manual via leitura comparativa:
+
+- **`useCreateProva.submit`**: fluxo 3-step (POST /upload-url ->
+  PUT R2 -> POST /provas/) preservado. Apenas a verificacao de tipo
+  (`isAllowedImageType` em vez de cast) mudou.
+- **Validacoes client-side**: `MAX_UPLOAD_BYTES`, tipo de arquivo,
+  todas preservadas.
+- **Paste handler `⌘V`**: `instanceof` checks substituem o cast,
+  cobertura identica.
+- **`useAuthorization("provas.create")` + `Restricted`**: intactos.
+- **Early return `if (auth.loading) return null`** preservado (M-1
+  da Wave 1 v4.0 audit fixes).
+- **Tela de sucesso pos-criacao**: layout reescrito com tokens mas
+  mesma logica (handleDownloadPdf, handlePrint, handleNovaProva).
+- **Mobile notice** (`@media max-width: 768px`): preservado.
+- **Lookup do vendedor**: novo `const vendedorSelecionado =
+  vendedores.find(v => v.id === form.vendedor_id)` para passar
+  `vendedorNome` ao preview, sem alterar a logica de carregamento de
+  vendedores (`/api/v1/users/?setor=VENDEDOR&ativo=true`).
+
+## Itens nao implementados (nao pedidos pelo Mario)
+
+- Auditoria senior independente do refresh visual.
+- Smoke E2E manual (Mario validou visualmente em rodadas iterativas;
+  fluxo de criacao end-to-end nao foi testado nesta sessao —
+  recomenda-se antes do merge).
+- Captura de screenshots automatizados via preview_screenshot
+  autenticado (sem credenciais admin disponiveis para o agent).
+- Atualizacao do `etiqueta_service.py` para incluir/sincronizar com
+  o preview — backend permanece intacto, mantendo o codigo publico
+  (PRV) + badge da rota no PDF impresso (so o preview que omite).
+
+## Status
+
+**Visual Refresh entregue e validado tecnicamente.** Funcionalidade
+preservada. Aguardando autorizacao do Mario para commit + push.
+

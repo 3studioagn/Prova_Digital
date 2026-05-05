@@ -103,6 +103,19 @@ export interface ProvaCreateResponse {
 export const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png"] as const;
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
 
+/** Type literal derivado do array — usado em narrowing sem cast. */
+export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
+
+/** Type guard para validar `file.type` contra os MIME types permitidos
+ * sem precisar de `as readonly string[]` ou `as AllowedImageType`. Sempre
+ * que precisar narrowing, use este helper. */
+export function isAllowedImageType(value: string): value is AllowedImageType {
+  for (const allowed of ALLOWED_IMAGE_TYPES) {
+    if (allowed === value) return true;
+  }
+  return false;
+}
+
 // ─── Listagem (Componente 07) ─────────────────────────────────────────
 
 /** Item slim retornado por GET /api/v1/provas/ — espelho de ProvaListItem.
