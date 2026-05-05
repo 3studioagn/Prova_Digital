@@ -4591,6 +4591,12 @@ desabilitar o trigger.
 
 ## ADR-118 — Frontend: 2 toggles em vez de 4 radios para a rota
 **Data:** 2026-05-04 (Wave 2 v4.0 — Componente 06)
+**Status:** SUPERSEDIDO em 2026-05-05 pelo Visual Refresh v2 — adotado
+1 segment de 4 botoes diretos (Matriz | Filial | Lam. Matriz | Lam.
+Filial) alinhado ao novo design Figma entregue pelo Mario. O `FormState`
+agora armazena `rota: RotaCriacao` direto. Ver CHANGELOG 2026-05-05
+"Wave 2 v4.0 — Componente 06 — Visual Refresh v2".
+
 **Contexto:** O `analysis.md` (Gate 1) propos 4 radio buttons na tela
 de criacao para representar `MATRIZ / LAM_MATRIZ / FILIAL / LAM_FILIAL`.
 O design entregue pelo Mario no Gate 2 (print) usa 2 controles
@@ -4665,3 +4671,251 @@ if aprovando:
     (Componente 21) fazer o backfill final.
   - Wave 3 v4.0 (Componente 11) reescreve `executar_transicao` por
     inteiro com a tabela de transicoes ampliada para 14 estados.
+
+---
+
+## ADR-120 — Substituir RotaVisualization decorativo por EtiquetaPreview funcional
+**Data:** 2026-05-05 (Wave 2 v4.0 — Visual Refresh)
+**Status:** SUPERSEDIDO em 2026-05-05 pelo Visual Refresh v2 — o
+`EtiquetaPreview` SVG inteiro foi removido da tela de criacao porque o
+novo design Figma do Mario nao tem coluna direita (1 box branco unico
+ocupa toda a area). A tela de sucesso continua mostrando o PDF real via
+iframe — esse e o preview funcional final. Os arquivos
+`frontend/public/etiqueta/logo_*.svg` tambem foram removidos por ja
+nao serem referenciados. Ver CHANGELOG 2026-05-05 "Visual Refresh v2".
+
+**Contexto:** A entrega original da Wave 2 v4.0 (sessao 2026-05-04)
+incluiu um componente `RotaVisualization` na coluna direita da pagina
+`/nova-prova` — um SVG decorativo de ~150 linhas que desenhava 4 nos
+(ORIGEM, MATRIZ, FILIAL, LAMINACAO) conectados por curvas Bezier
+animadas com framer-motion (morph paths, halo amarelo pulsante,
+caminho alternativo tracejado, ícones SVG nos dots, etc — ver as
+features R1+R3+R4+R5+R6+R7 do refresh visual em CHANGELOG).
+
+Apos varias rodadas de feedback do Mario, o componente foi
+considerado **decorativo sem funcao operacional clara** — "feio" e
+"sem proposito" foram as palavras dele. A area da coluna direita
+estava sendo desperdicada com algo que nao agregava valor.
+
+**Decisao:** Substituir o `RotaVisualization` por uma `EtiquetaPreview`
+— um SVG inline com `viewBox="0 0 90 57"` (mm reais) que **replica fielmente
+o layout da etiqueta 90×57mm que sai impressa**, espelhando
+`backend/app/services/etiqueta_service.py` mm-a-mm:
+- Linha horizontal superior (y=3, stroke 0.4mm)
+- Logos reais (`logo_3studio.svg` em x=4/y=8/w=22 e
+  `logo_studio_e_arte.svg` em x=28.5/y=6.5/w=13) — copiados de
+  `backend/app/services/etiqueta_assets/` para
+  `frontend/public/etiqueta/` para servir como `<image href="...">`
+- "Aponte a camera / para o QR CODE" em x=72.5/y=9 (centro do bloco
+  de texto que tem largura 29mm desde x=58)
+- Banner preto horizontal (x=3, y=16, w=44, h=2)
+- Campos Nome / Requerimento / Vendedor em y=26/31.6/37.2
+  (espacamento 5.6mm igual ao multi_cell do backend)
+- QR placeholder vazio (apenas o quadrado em x=58/y=15/w=26 com
+  cantos arredondados rx=2.8 e stroke 0.4) — sem conteudo dentro
+  porque o QR real so existe no PDF impresso
+- "2026" em x=3/y=51.85 (font 3mm = 8.5pt)
+- "Etiqueta de rastreio" em x=87/y=51.85 com `text-anchor=end`
+- Linha horizontal inferior em y=54
+
+**Iteracao apos primeiro draft:** A primeira versao do EtiquetaPreview
+incluia o codigo publico (`PRV-AAAA-MM-NNNNNN` em mono bold abaixo do
+QR) e um badge preto da rota ao lado do "2026" — espelhando 100% do
+PDF. Apos referencia visual da etiqueta real impressa enviada pelo
+Mario, esses dois elementos foram REMOVIDOS do preview porque a
+etiqueta impressa em producao na 3Studio nao os tem (estao no PDF
+gerado mas nao na versao final que vai pro cliente). Assim o preview
+fica fiel a etiqueta REAL, nao ao PDF teorico.
+
+**Live update:** Os campos Nome/Requerimento/Vendedor sao passados
+como props ao `EtiquetaPreview` e atualizam em tempo real conforme
+o usuario digita na ficha (sem precisar submeter). Vendedor e
+resolvido via `vendedores.find(v => v.id === form.vendedor_id)?.nome`.
+Nomes longos sao truncados (32/18/24 chars com ellipsis) para nao
+explodir o layout do SVG.
+
+**Wrapper visual:** Container `.etiquetaPaper` com `aspect-ratio: 90/57`
+mantem proporcao independente do viewport; **cantos vivos** (etiqueta
+impressa nao tem cantos arredondados); sombra projetada multi-layer
+(hairline 0.5px + 1px close + 12px mid + 28px deep ambient) para dar
+sensacao de "papel sobre a mesa" sem ser dramatico. O `.etiquetaWrap`
+tem gradient radial amarelo bem sutil
+(`color-mix(in srgb, var(--color-accent) 12%, transparent)`) ao redor
+para destacar a etiqueta sem competir.
+
+**Alternativas consideradas (e rejeitadas):**
+1. **Cartao da rota (Apple-minimalista)** — um card unico grande com
+   tipografia gigante mostrando "Lam. Matriz" + decoracao gradient.
+   Rejeitado: muito generico, nao agrega contexto operacional.
+2. **Grid 2×2 das 4 rotas** — quadrados com as 4 combinacoes,
+   destacando a selecionada via `layoutId`. Rejeitado: redundante
+   com o segment + switch da ficha que ja faz isso.
+3. **Manter RotaVisualization** com refinamentos visuais (glow neon,
+   layout estilo garfo, etc). Rejeitado: o problema fundamental e
+   que e decorativo — refinar o decorativo nao resolve o problema
+   da falta de funcao.
+4. **EtiquetaPreview Apple-minimalista** (cartao branco com cantos
+   super arredondados, header logo + ano, QR estilizado, codigo
+   publico em destaque, badge da rota) — primeira tentativa.
+   Rejeitado pelo Mario apos screenshot porque nao parecia a
+   etiqueta real.
+
+**Consequencias:**
+- A coluna direita agora tem **valor funcional concreto**: o usuario
+  ve o que vai ser impresso antes mesmo de submeter.
+- Logos reais da empresa aparecem (vetoriais, escalam perfeito).
+- Trade-off de fidelidade: como removemos codigo publico e badge
+  da rota do preview (a pedido), o preview NAO mostra 100% do que
+  o PDF tera. Documentar essa diferenca no proprio JSX como
+  comentario para futuro mantenedor nao se confundir.
+- Bundle: `/nova-prova` em ~9.18 kB / 211 kB First Load (era 6.34
+  kB / 169 kB) — overhead aceitavel pelo valor funcional.
+- Logos `logo_3studio.svg` e `logo_studio_e_arte.svg` agora vivem
+  em DOIS lugares: `backend/app/services/etiqueta_assets/` (fonte
+  para o PDF) e `frontend/public/etiqueta/` (copia para o preview).
+  Se o backend trocar os logos no futuro, precisa COPIAR a versao
+  nova para o frontend tambem. Considerar simbolico ou step de
+  build no futuro se isso virar incomodo.
+
+---
+
+## ADR-121 — Topbar `position: absolute` para ficha estender ate o topo
+**Data:** 2026-05-05 (Wave 2 v4.0 — Visual Refresh)
+**Status:** SUPERSEDIDO em 2026-05-05 pelo Visual Refresh v2 — a topbar
+`absolute` foi substituida por um `.pageHeader` em flow normal (espelho
+do padrao de /usuarios e /provas: titulo grande a esquerda + botao
+amarelo a direita). O design novo do Mario tem header de pagina
+explicito acima do box branco, entao a justificativa original
+("ficha estende ate o topo") deixou de fazer sentido. Ver CHANGELOG
+2026-05-05 "Visual Refresh v2".
+
+**Contexto:** Apos remover os 2 cards laterais (Unidade Selecionada
++ Cole Imagem), a coluna direita ficou com mais espaco para o
+preview da etiqueta. O Mario solicitou que **a ficha (esquerda)
+crescesse em altura ate o topo dos botoes**, ficando "centralizada
+ao centro na altura". O layout original era flex column com:
+- `<motion.header className={topbar}>` — botao Cadastrar prova,
+  ocupava ~50px na altura
+- `<main className={layout}>` — grid 2 colunas com ficha e SVG,
+  abaixo da topbar com `gap: 1rem` (16px)
+
+Resultado: a ficha comecava 66px abaixo do topo do canvas, deixando
+espaco vazio no topo da coluna esquerda enquanto o botao "Cadastrar
+prova" ficava no canto superior direito.
+
+**Decisao:** Tirar a topbar do flow flex e posicionar como `absolute
+top: 0; right: 0; z-index: 2` no `.canvas`. Isso libera o `.layout`
+para ocupar 100% da altura do canvas (height: 100% do `.cardInner`
+do dashboard). A ficha (`.ficha { justify-content: center }`)
+estende ate a mesma linha do topo do botao, e o conteudo vertical
+fica centralizado.
+
+**Por que `absolute` e nao algo mais elaborado (overlap controlado,
+grid spans, etc):**
+- A topbar nao precisa ocupar espaco na esquerda — ela so tem o
+  botao "Cadastrar prova" no canto superior direito.
+- Com `position: absolute`, o botao fica **POR CIMA** do SVG da
+  EtiquetaPreview (na coluna direita), mas como o SVG ocupa apenas
+  ~540px max-width centralizado e o botao tem ~150px no canto, eles
+  nao se sobrepoem visualmente em viewports normais (>=1024px).
+- A ficha (coluna esquerda) ocupa 380px e nunca interfere com o
+  botao no canto direito.
+- Solucao mais simples que valeu o trade-off.
+
+**Trade-off:** Em viewports muito estreitos (<800px efetivos no
+`.cardInner`), o botao pode ficar parcialmente sobre a etiqueta.
+Mitigacao: a media query `@media (max-width: 1100px)` ja colapsa o
+grid para 1 coluna e a etiqueta vira o item de baixo — o botao no
+topo ocupa o flow normal. Mobile (`<768px`) mostra `.mobileNotice`
+de qualquer jeito.
+
+**Alternativas consideradas:**
+1. **Topbar dentro do grid como linha 0 spanning 2 colunas** —
+   funciona mas exige `display: grid` no canvas com `grid-template-rows`
+   adicional, aumentando complexidade do layout. Rejeitado.
+2. **Ficha dentro de container com margin-top negativo** — gambiarra,
+   quebra o flow normal. Rejeitado.
+3. **Manter topbar no flow e simplesmente reduzir gap** — nao resolve
+   o problema (ficha ainda fica abaixo da topbar).
+
+**Consequencias:**
+- Layout mais simples e elegante.
+- Ficha agora usa altura toda do canvas (com `justify-content:
+  center` para centralizar conteudo verticalmente).
+- Botao "Cadastrar prova" sempre visivel no canto superior direito.
+- `.canvas` perdeu `gap` (nao tem mais flow gap pra cuidar entre
+  topbar e layout).
+
+---
+
+## ADR-122 — Type guard `isAllowedImageType` em vez de cast `as readonly string[]`
+**Data:** 2026-05-05 (Wave 2 v4.0 — Visual Refresh)
+**Contexto:** O Mario explicitamente pediu "zero `any` e `as`
+agressivos". O codigo da Wave 2 v4.0 original tinha 2 `as` agressivos:
+1. `(ALLOWED_IMAGE_TYPES as readonly string[]).includes(file.type)`
+   em `nova-prova/page.tsx` e em `useCreateProva.ts` — necessario
+   porque `ALLOWED_IMAGE_TYPES` e `readonly ["image/jpeg",
+   "image/png"]` e `Array.includes` requer que o argumento seja do
+   tipo do array (TS 4.6 narrow check), entao precisa-se de cast
+   para fazer o check funcionar com `string` qualquer.
+2. `const target = e.target as HTMLElement | null` no paste handler
+   do `<input>` — necessario porque `Event.target` e `EventTarget |
+   null` e `EventTarget` nao tem `tagName` para verificar se e
+   INPUT/TEXTAREA/SELECT.
+
+**Decisao:** Eliminar ambos os `as` agressivos via duas tecnicas:
+
+1. **Type guard `isAllowedImageType`** (em `lib/types/prova.ts`):
+   ```ts
+   export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
+
+   export function isAllowedImageType(value: string): value is AllowedImageType {
+     for (const allowed of ALLOWED_IMAGE_TYPES) {
+       if (allowed === value) return true;
+     }
+     return false;
+   }
+   ```
+   Uso: `if (!isAllowedImageType(file.type)) return ...` — sem cast.
+   O type predicate (`value is AllowedImageType`) faz o narrowing
+   tipado a partir do retorno booleano.
+
+2. **`instanceof` checks** no paste handler:
+   ```ts
+   if (
+     target instanceof HTMLInputElement ||
+     target instanceof HTMLTextAreaElement ||
+     target instanceof HTMLSelectElement
+   ) {
+     return;
+   }
+   ```
+   `instanceof` ja faz narrowing nativamente — sem precisar de
+   cast. Cobertura igual a antiga via `tagName`.
+
+**Politica resultante (Wave 2 v4.0 Visual Refresh):**
+- **Zero `any`** (implicit ou explicit) em codigo novo.
+- **Zero `as` agressivos** (`as <SomeType>`, `as readonly`,
+  `as typeof`).
+- **`as const` literais permanecem permitidos** (decisao do Mario)
+  — ex: `["MATRIZ", "FILIAL"] as const`, `[0.32, 0.72, 0, 1] as const`,
+  `{key: value} as const`. Nao sao "casts" de fato — sao
+  type-narrowing nativo do TS para tipos literais.
+- Verificacao via grep:
+  `grep -nE '\bas [A-Z]| as readonly| as typeof'` em qualquer
+  arquivo modificado deve retornar APENAS `as const` literais.
+
+**Alternativas consideradas:**
+1. **Manter o cast** — rejeitado por desejo do Mario.
+2. **`@ts-ignore`** — pior, esconde tipos sem fix.
+3. **Reescrever `ALLOWED_IMAGE_TYPES` como `Set<string>`** — perde
+  o type-literal de "image/jpeg" | "image/png" e a narrowability.
+4. **Type guard fora de `lib/types/prova.ts`** — rejeitado, o
+  helper esta colado com a constante e e exportado junto para reuso.
+
+**Consequencias:**
+- Codigo mais seguro tipo-wise (sem casts que podem mentir).
+- `useCreateProva` tambem foi atualizado (1 linha) para usar o
+  helper — defesa em profundidade preservada.
+- Politica vale para todo trabalho frontend futuro nesta Wave e
+  proximas.

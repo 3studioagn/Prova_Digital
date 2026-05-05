@@ -2,6 +2,429 @@
 
 ---
 
+## [2026-05-05 — Wave 2 v4.0 — Componente 06 — Visual Refresh v2]
+
+Segundo refresh visual da pagina `/nova-prova` apos feedback do Mario:
+o Visual Refresh anterior (mesmo dia, mais cedo) ainda nao alinhava com
+o design Figma entregue. **Frontend-only, zero backend touch** — backend,
+RLS, migrations, RBAC, tipos do dominio (`RotaCriacao`, `Rota`,
+`ROTA_CRIACAO_OPTIONS`), hooks compartilhados e tela de sucesso (PDF
+iframe) permaneceram intactos.
+
+### Diagnostico inicial
+
+Cinco defeitos estruturais explicavam o gap visual em relacao ao Figma:
+
+1. **Layout 2-col (`380px 1fr`)** deixava o box branco com so 380 px;
+   a coluna direita era cinza com `EtiquetaPreview` SVG centralizada.
+2. **`.canvas::before`** desenhava pattern de pontos com `inset:
+   calc(-1 * var(--card-padding))` — vazava POR FORA do `.canvas` e
+   criava sensacao de "card branco do dashboard sumiu".
+3. **`.topbar position: absolute`** retirava o botao do flow. Ausencia
+   total de `.pageHeader` (todas as outras paginas tem um).
+4. **Composto `segment(2) + switch(laminacao)`** em vez de 4 botoes
+   diretos como o design pedia.
+5. **Dropzone pequena (`min-height: 64px`)** versus dropzone grande
+   ocupando metade inferior do box.
+
+### Decisoes (autorizadas pelo Mario antes da execucao)
+
+- **D1**: Substituir composto `segment + switch` por 4 botoes diretos.
+- **D2**: Manter "Cadastrar prova" no botao primario (Figma mostrava
+  "Novo usuario" — placeholder reusado).
+- **D3**: Mover hint "imutavel apos cadastro" para `<small>` discreto
+  abaixo do segment (compromisso entre design e mitigacao do risco
+  "Confusao operacional" do Backlog v4.0 §6).
+- **D4**: Remover `EtiquetaPreview` SVG do form; manter PDF iframe na
+  tela de sucesso.
+- **D5**: Apagar `frontend/public/etiqueta/logo_*.svg` (orfaos).
+- **D6**: Atualizar ADRs 118, 120, 121 com nota SUPERSEDIDO.
+- **D7**: 5 fases pequenas, commits opcionais ao final.
+- **D8**: `next build` apenas no fim da Fase 5.
+
+### Estrutura final (espelho 1:1 do Figma — apos Polish round 1)
+
+```
+.cardInner (cinza #eaeaea — vem do layout dashboard)
+└── .canvas (flex column · height 100% · sem decoracao)
+    ├── .pageHeader (flex space-between · margin-bottom 2.5rem)
+    │     ├── h1.pageTitle "Nova prova Digital"
+    │     └── button.btnSubmit "Cadastrar prova"
+    │
+    └── .ficha (#fff · radius xl · padding 2.25/2.75 · flex 1)
+          ├── .fieldRow (grid 2-col, inputs 48px): Nome | Requerimento
+          ├── .fieldRow (grid 2-col, inputs 48px): Cliente | Vendedor
+          ├── fieldset.field
+          │     legend.label "Rota"
+          │     .segment4 (grid 4-col com pill preto animado)
+          │       [Matriz] [Filial] [Lam. Matriz] [Lam. Filial]
+          └── div.field.anexoField (flex 1, classe dedicada)
+                label.label "Anexo"
+                .dropzone (flex 1 · min-height 0 · acompanha espaco)
+                  ↑
+                  Solte ou clique
+                  JPG · PNG
+```
+
+### Adicionado
+
+- **`.pageHeader` + `.pageTitle`** no CSS module (espelha `/usuarios`
+  e `/provas` — `clamp(2.5rem, 5vw, 4rem) · weight 500 · letter-spacing
+  -0.02em`).
+- **`.segment4`** (grid 4 colunas com pill preto animado via
+  framer-motion `layoutId="rota-pill"`).
+- **`ROTA_BUTTONS`** constante local com as 4 rotas e labels
+  human-readable.
+- **`segmentPill` + `segmentLabel`** utilitarios CSS para o pill
+  animado nao tapar o texto.
+- **Breakpoints responsivos**: <1100px colapsa fieldRow para 1 col +
+  reduz padding da ficha; <900px colapsa segment4 para grid 2x2.
+
+### Removido
+
+- **`EtiquetaPreview`** componente inteiro (216 linhas) + interface
+  `EtiquetaPreviewProps` + helper `truncar()`.
+- **`vendedorSelecionado` / `vendedorNome`** computacao live no main
+  component (so era usada pelo EtiquetaPreview).
+- **`.canvas::before`** + **`.canvas > *`** rules (pattern de pontos +
+  z-index workaround).
+- **`.topbar`** rule (substituida por `.pageHeader`).
+- **`.layout`** + **`.center`** + **`.etiquetaWrap`/`Paper`/`Svg`** +
+  **`.fichaTitle`** + **`.srOnly`** rules.
+- **`.toggleRow`/`.toggleIcon`/`.toggleText`/`.toggleTitle`/`.toggleSub`**
+  + **`.switch`/`.switchOn`/`.switchKnob`** + **`.segmentIcon`**
+  rules (composto laminacao removido).
+- **`.anexoHead`/`.anexoMeta`** ("Selecionado · ⌘V" — nao tem no
+  design).
+- **`Origem` type** + **`deriveRota()` helper** (combinacao agora e
+  direta).
+- **`rotaDerivada` useMemo** (agora `form.rota` e RotaCriacao direto).
+- Imports unused: `useId`, `ReactElement`, `ROTA_LABELS`.
+- Pasta **`frontend/public/etiqueta/`** + os 2 logos SVG (orfaos
+  apos remocao do EtiquetaPreview).
+
+### Modificado
+
+- `FormState` simplificado: `{nome, nro_requerimento, cliente,
+  vendedor_id, rota: RotaCriacao}` (era 6 campos com `origem` +
+  `laminacao`).
+- `INITIAL_FORM.rota = "MATRIZ"` (default conforme print).
+- `handleSubmit` usa `form.rota` direto (nao chama mais `deriveRota`).
+- Inputs: altura `38px → 56px`, font-size `--fs-sm → --fs-base`,
+  background `--color-card-surface-alt → --color-card-surface`,
+  padding `0 1rem → 0 1.5rem` (alinha com `/provas`).
+- Labels: font-size `--fs-xs → --fs-base`, color
+  `--color-card-text-muted → --color-card-text`.
+- `.field` gap: `0.375rem → 0.5rem`.
+- `.fieldRow` gap: `0.75rem → 1.25rem`.
+- `.ficha` radius: `--radius-card-lg → --radius-card-xl` (mais
+  arredondado, alinha com `/configuracoes`).
+- `.ficha` padding: `2rem → 2.25rem 2.75rem`; sem `min-width: 350px`,
+  sem `box-shadow`, sem `overflow: hidden`.
+- `.ficha` agora `flex: 1` (preenche o resto da altura do
+  `.cardInner` apos o `.pageHeader`).
+- `.dropzone` agora `flex: 1; min-height: clamp(220px, 28vh, 320px)`
+  com fundo `--color-card-surface` plano (sem dashed border).
+- `.dropzoneEmpty` reorganizado (gap 0.625rem, text-align center).
+- `.dropzoneIcon` aumentado de 20px → 32px (1.5rem font-size).
+- `.previewContainer` reorganizado para column com max-width 420px
+  (preview da imagem maior, centralizado).
+- ADRs 118, 120, 121 marcados como SUPERSEDIDO com referencia ao
+  Visual Refresh v2.
+
+### Arquivos tocados (apenas estes)
+
+- `frontend/src/app/(dashboard)/nova-prova/page.tsx` (902 → 686 linhas)
+- `frontend/src/app/(dashboard)/nova-prova/nova-prova.module.css` (743 → 510 linhas)
+- `frontend/public/etiqueta/` (pasta deletada)
+- `DECISIONS.md` (3 ADRs com nota SUPERSEDIDO)
+- `CHANGELOG.md` (esta entrada)
+
+### Polish round 1 (apos primeiro smoke visual do Mario)
+
+Mario abriu o `/nova-prova` no navegador dele e identificou 3 ajustes:
+
+1. **Anexo cai fora do box branco** — diagnostico: o seletor
+   `.ficha > .field:last-of-type` aplicava em DOIS elementos
+   simultaneamente (o `<fieldset>` Rota E a `<div>` Anexo), porque
+   `:last-of-type` e per-element-type, nao global. Os dois ganhavam
+   `flex: 1` e dividiam o espaco. Pior: a dropzone tinha
+   `min-height: clamp(220px, 28vh, 320px)` rigido que forcava
+   transbordamento quando o espaco disponivel era menor.
+   **Fix**: substituido o seletor por classe dedicada `.anexoField`
+   (aplicada explicitamente no `<div>` do anexo via JSX), e o
+   `min-height` da dropzone trocado por `min-height: 0` — agora ela
+   cresce com `flex: 1` acompanhando o espaco disponivel.
+2. **"A rota escolhida e imutavel apos o cadastro"** — Mario pediu
+   para remover de vez (era D3 com recomendacao de manter discreto;
+   ele preferiu retirar). `<small className={styles.hint}>` removido
+   do JSX + classe `.hint` removida do CSS module. Mitigacao do
+   risco "Confusao operacional" (Backlog v4.0 §6) fica apenas no
+   `aria-label="Rota da prova"` do radiogroup.
+3. **Inputs altos demais** — `height: 56px` → **`height: 48px`**;
+   botoes do segment de `padding: 0.875rem 1rem` → `0.75rem 1rem`
+   (acompanha proporcao). Garante que todo o conteudo da ficha cabe
+   sem comprimir a dropzone.
+
+Validacao: tsc 0 · `next build` 13/13 paginas · `/nova-prova` em
+**6.79 kB / 209 kB** (-50 bytes a mais com a remocao do hint). Mario
+confirmou visualmente apos refresh do navegador.
+
+### Validacao
+
+- `npx tsc --noEmit` em frontend: **exit 0** ao final de cada fase.
+- `npx next build`: **13/13 paginas geradas**, zero erro. `/nova-prova`
+  caiu de ~9.18 kB / 211 kB (Visual Refresh v1) para **6.79 kB /
+  209 kB First Load** (-2.39 kB JS, -2 kB First Load por causa da
+  remocao do SVG inline + hint).
+- Smoke visual: Mario validou no navegador autenticado — primeiro
+  apos as 5 fases (apontou os 3 ajustes do Polish round 1) e depois
+  apos o Polish round 1 (aprovado).
+
+### Sem regressao em
+
+- Tela de sucesso (PDF iframe + Baixar/Imprimir/Nova prova) — intacta.
+- `useCreateProva` hook — nao tocado (ja aceitava `rota: RotaCriacao`).
+- Validacao de tipo de arquivo (`isAllowedImageType`) e tamanho
+  (`MAX_UPLOAD_BYTES`) — intactas.
+- Drag & drop, file input, paste-from-clipboard (⌘V) — intactos.
+- Guard `useAuthorization("provas.create")` + `Restricted` — intactos.
+- `.mobileNotice` para <768px — intacta.
+- `prefers-reduced-motion` — preservado (atualizado para nao
+  referenciar `.switch` removido).
+- Demais paginas (`/dashboard`, `/provas`, `/usuarios`,
+  `/configuracoes`, etc.) — sem mudanca em arquivos compartilhados.
+
+---
+
+## [2026-05-05 — Wave 2 v4.0 — Componente 06 — Visual Refresh]
+
+Refresh visual completo da pagina `/nova-prova` apos feedback iterativo do
+Mario. **Frontend-only, zero backend touch** — backend, RLS, migrations,
+RBAC, types do dominio (`RotaCriacao`, `Rota`, `ROTA_LABELS`, etc) e
+hooks compartilhados (`useAuthorization`, `Restricted`,
+`useCurrentUser`) permaneceram intactos.
+
+### Diagnostico inicial
+
+A entrega original (Wave 2 v4.0 / Sessao 2026-05-04) tinha 4 problemas
+principais identificados em investigacao adversarial antes de qualquer
+edicao:
+
+1. **`.canvas` com `height: calc(100vh - 64px)`, `padding: 12px` e
+   `background: #fafaf7`** — conflitava com o `.cardInner` do layout
+   dashboard (que tem `height: 100%` + `padding: clamp(2rem, 4vw, 4rem)`
+   + `overflow-y: auto`). Resultado: retangulo quase-branco flutuante
+   sem preencher o box do card pai. Esse e o "canvas que nao preenche
+   o box branco" que o Mario reportou.
+2. **Design system paralelo**: cores hardcoded `#f8d126` (em vez de
+   `var(--color-accent)` `#ffcb5c`), `#f6f6f3` (em vez de
+   `var(--color-card-surface)` `#d9d9d9`), `#1a1a1a` (em vez de
+   `var(--color-card-text)` `#000`); tipografia 22px/700 no titulo
+   (em vez de `clamp(2.5rem, 5vw, 4rem) / 500` igual outras paginas);
+   inputs com `border-radius: 8px` (em vez de `--radius-pill`);
+   labels com `uppercase + letter-spacing 0.12em` (eyebrow forte,
+   diferente das outras paginas).
+3. **Conteudo questionavel**: `RotaVisualization` SVG decorativo de
+   ~150 linhas que era um diagrama tipo "garfo" (ORIGEM, LAMI,
+   MATRIZ/FILIAL com curvas Bezier paramétricas) sem funcao
+   operacional clara; cards laterais "UNIDADE SELECIONADA" +
+   "⌘V COLE IMAGEM" duplicando informacao da ficha; botao
+   "Salvar rascunho" disabled como feature fantasma; timestamp pill
+   na topbar sem funcao.
+4. **2 usos de `as` agressivos**:
+   `(ALLOWED_IMAGE_TYPES as readonly string[]).includes(...)` e
+   `e.target as HTMLElement | null` — Mario pediu "zero `any` e
+   `as` agressivos".
+
+### Iteracao por rodadas (8 rodadas de feedback)
+
+A sessao seguiu um ciclo: implementar → screenshot/feedback → ajustar.
+O conteudo foi refinado em 8 rodadas:
+
+1. **Correcao estrutural + tokens canonicos + tipografia**: removeu
+   `height/padding/background` do `.canvas`; substituiu cores e
+   tipografia pelos tokens; converteu UPPERCASE -> Title Case nos
+   labels (NOME->Nome, etc); animacoes Framer Motion sutis com
+   stagger; tela de sucesso alinhada com padrao das outras paginas.
+2. **Layout em "garfo" no SVG**: ORIGEM e LAMI na mesma altura
+   (y=50), MATRIZ topo-direita, FILIAL baixo-direita; bifurcacao
+   horizontal seguindo o feedback visual.
+3. **Pontinhos cobrindo o canvas inteiro** + remocao da pill de
+   horario; `.canvas::before` com `inset: calc(-1 * var(--card-padding))`
+   estendendo para fora.
+4. **Linhas conectando no centro do dot** (refator de `.vizNode`
+   `flex column` -> `inline-block` para o dot virar o anchor real);
+   halo amarelo nao corta nas bordas (`overflow: visible` em
+   `.rotaViz`); animacao de troca mais suave (longer easing,
+   AnimatePresence simplificado).
+5. **Remocao dos icones internos dos dots** (eram pequenos demais)
+   e simplificacao da animacao de troca de rota — sem fade
+   vertical (`y: 4`) que dava sensacao de "abaixar e trocar".
+6. **Remocao do icone da Laminacao**.
+7. **Ajustes manuais do Mario** (tirou eyebrow + footer da ficha,
+   deslocou SVG `left: 50px`); harmonizacao da tipografia e limpeza
+   de regras CSS orfas (`fichaEyebrow`, `fichaFooter`,
+   `fichaFooterValue`, `statusDot`, `checkIcon`).
+8. **Decisao de redesign**: remover os 2 cards laterais para dar
+   espaco ao SVG; ficha estende ate o topo dos botoes (topbar
+   `absolute`); botao "Salvar rascunho" removido. Em seguida o SVG
+   foi descartado por completo em favor de um preview da etiqueta
+   real (decisao final).
+
+### EtiquetaPreview (decisao final)
+
+Apos rejeicao do SVG decorativo, foi implementada uma replica fiel da
+etiqueta impressa 90×57mm em SVG inline, espelhando
+`backend/app/services/etiqueta_service.py` mm-a-mm. Apos uma iteracao
+visual com referencia da etiqueta real impressa, foram REMOVIDOS:
+- O codigo publico (`PRV-AAAA-MM-NNNNNN`) abaixo do QR (so existe no
+  PDF impresso, nao no preview).
+- O badge preto da rota ao lado do "2026" (mesma logica).
+- O conteudo do QR placeholder (finder patterns + dots) — o
+  quadrado fica vazio.
+
+### Adicionado
+
+- **`frontend/public/etiqueta/logo_3studio.svg`** + **`logo_studio_e_arte.svg`**:
+  copia dos SVGs reais de `backend/app/services/etiqueta_assets/` para
+  servir o preview com fidelidade total a etiqueta impressa
+  (ADR-120).
+- **`AllowedImageType` type literal** + **`isAllowedImageType`
+  type guard** em `frontend/src/lib/types/prova.ts` (ADR-122) — usado
+  por `EtiquetaPreview` indiretamente e por `useCreateProva` na
+  validacao client-side.
+- **`EtiquetaPreview` componente** em `nova-prova/page.tsx` (ADR-120):
+  - SVG inline com `viewBox="0 0 90 57"` (mm reais).
+  - Replica mm-a-mm do `etiqueta_service.gerar_pdf`: linhas
+    horizontais superior/inferior em y=3 e y=54 (stroke 0.4mm),
+    logos em x=4/y=8/w=22 e x=28.5/y=6.5/w=13, texto "Aponte a camera
+    / para o QR CODE" em x=72.5/y=9 (font 2.65mm, segunda linha em
+    bold), banner preto em x=3/y=16/w=44/h=2, campos Nome/
+    Requerimento/Vendedor em y=26/31.6/37.2 (font 2.82mm, label em
+    `font-weight=700`), QR placeholder em x=58/y=15/w=26/h=26 com
+    `rx=2.8` e `stroke=0.4`, "2026" em x=3/y=51.85 (font 3mm igual
+    8.5pt do PDF), "Etiqueta de rastreio" em x=87/y=51.85
+    `text-anchor=end`.
+  - Live update conforme o usuario digita: nome (truncado em 32
+    chars), requerimento (18), vendedor (24, lookup pelo `vendedor_id`
+    selecionado).
+  - Container "papel" `.etiquetaPaper` com `aspect-ratio: 90/57`,
+    cantos vivos (etiqueta impressa nao tem cantos arredondados), e
+    sombra projetada multi-layer (hairline 0.5px + 1px close + 12px
+    mid + 28px deep) para dar profundidade sem ser dramatico.
+  - Wrapper `.etiquetaWrap` com gradient radial amarelo bem sutil
+    (`color-mix(in srgb, var(--color-accent) 12%, transparent)`)
+    em volta para destacar a etiqueta sem competir.
+- **Animacoes Framer Motion** na entrada da pagina:
+  - Topbar: `opacity 0->1, y -4->0` em 280ms delay 40ms.
+  - Ficha: `opacity 0->1, y 8->0` em 320ms delay 100ms.
+  - Centro: `opacity 0->1, scale 0.96->1` em 400ms delay 180ms.
+  - Crossfade form↔sucesso via `<AnimatePresence mode="wait">`
+    (200ms).
+  - Easing compartilhado `[0.32, 0.72, 0, 1]` (cubic-bezier estilo
+    iOS).
+  - `@media (prefers-reduced-motion: reduce)` desliga animacoes.
+
+### Modificado
+
+- **`frontend/src/app/(dashboard)/nova-prova/page.tsx`**: refresh
+  estrutural completo. Topbar virou `<motion.header>` com apenas o
+  botao "Cadastrar prova" (sem timestamp, sem Salvar rascunho). Ficha
+  recebeu `<motion.section>` com fields ja existentes mas sem eyebrow
+  ("FICHA DE CADASTRO") e sem footer (ORIGEM/STATUS). RotaVisualization
+  e helpers (`VIZ_NODES`, `buildVizPath`, `VizPoint`, `MatrizIcon`,
+  `FilialIcon`, `OrigemNodeIcon`, `LaminationIcon`, `QR_DOTS`,
+  `FinderPattern`, `ROTA_BADGE_LABELS_PREVIEW`, `ROTA_BADGE_W_PREVIEW`)
+  removidos — substituidos por `EtiquetaPreview`. `UNIDADES_INFO`
+  removido (substituido por `ROTA_LABELS` importado de
+  `lib/types/prova`). `useCurrentTimestamp` removido. Lookup do
+  vendedor (`vendedores.find(v => v.id === form.vendedor_id)`)
+  adicionado para passar nome ao preview. Eliminados os 2 `as`
+  agressivos.
+- **`frontend/src/app/(dashboard)/nova-prova/nova-prova.module.css`**:
+  reescrita expressiva. Removidas as ~190 linhas de
+  `.rotaViz`/`.vizSvg`/`.vizHalo`/`.vizNode`/`.vizDot*`/`.vizBadge*`
+  + `vizHaloPulse` keyframe + as ~63 linhas de `.aside`/`.card`/
+  `.cardLabel`/`.cardDot`/`.cardTitle`/`.cardBody`/`.kbd` + as
+  ~40 linhas de `.fichaEyebrow`/`.checkIcon`/`.fichaFooter`/
+  `.fichaFooterValue`/`.statusDot` + as ~12 linhas de `.timestamp`/
+  `.btnGhost`/`.topActions`. Adicionadas as ~40 linhas de
+  `.etiquetaWrap`/`.etiquetaPaper`/`.etiquetaSvg`. `.canvas` perdeu
+  `height/padding/background` proprios e ganhou pseudo-element
+  `::before` com pontinhos cinza cobrindo TODA a area do `.cardInner`
+  via `inset: calc(-1 * var(--card-padding))`. `.topbar` virou
+  `position: absolute; top: 0; right: 0; z-index: 2` (fora do flow).
+  `.layout` mudou de grid 3 colunas para grid 2 colunas
+  `380px 1fr` com gap 24px. `.ficha` ganhou `justify-content: center`,
+  padding 2rem (era 1.25rem), `min-width: 350px`. Inputs em
+  `var(--color-card-surface-alt)` com height 38px e
+  `border-radius: var(--radius-pill)`. Switch ON em
+  `var(--color-accent)` (era `var(--color-card-text)`). Tipografia
+  dos labels em `var(--fs-xs) / 400 / sem caps / sem letter-spacing`
+  (igual `/configuracoes`).
+- **`frontend/src/lib/types/prova.ts`**: adicionado `AllowedImageType`
+  + `isAllowedImageType` (sem mexer nos tipos do dominio).
+- **`frontend/src/hooks/useCreateProva.ts`**: 1 linha mudada — substitui
+  `(ALLOWED_IMAGE_TYPES as readonly string[]).includes(...)` por
+  `isAllowedImageType(...)`. Lógica do fluxo (3 steps:
+  upload-url -> PUT R2 -> POST /provas/) preservada byte-a-byte.
+
+### Decisoes importantes (registradas em DECISIONS.md)
+
+- **ADR-120**: substituicao do `RotaVisualization` decorativo
+  (~150 linhas) pela `EtiquetaPreview` (replica fiel do PDF impresso).
+  Decoracao -> funcionalidade (preview real do output).
+- **ADR-121**: topbar `position: absolute` no canto superior direito
+  para a ficha estender ate a mesma linha do topo dos botoes.
+- **ADR-122**: type guard `isAllowedImageType` no lugar de cast
+  `as readonly string[]`. Politica do projeto: zero `any`, zero `as`
+  agressivos (apenas `as const` literais permanecem em arrays
+  readonly).
+
+### Validacao
+
+- **Frontend `npx tsc --noEmit`**: exit 0 (sem erros de tipo).
+- **Frontend `npx next build`**: 13/13 paginas geradas.
+  `/nova-prova` em **~9.18 kB / 211 kB First Load** (era 6.34 kB /
+  169 kB — overhead +3 kB do Framer Motion + EtiquetaPreview SVG).
+- **HMR + dev server**: limpos apos restart com `.next/` purgado entre
+  build de producao e dev (necessario apos `next build` invalidar
+  chunks do dev).
+- **Console + server logs**: zero erros.
+- **Politica de tipos**: `grep -nE '\bas [A-Z]| as readonly| as typeof'`
+  em `page.tsx`/`useCreateProva.ts`/`prova.ts` retorna apenas os
+  `as const` literais autorizados.
+
+### Arquivos novos/alterados
+
+**Frontend (4 arquivos editados + 2 SVGs copiados):**
+- `frontend/src/app/(dashboard)/nova-prova/page.tsx` (refresh
+  completo do componente NovaProvaPage + nova `EtiquetaPreview`)
+- `frontend/src/app/(dashboard)/nova-prova/nova-prova.module.css`
+  (reescrita expressiva — ~340 linhas removidas, ~40 adicionadas)
+- `frontend/src/lib/types/prova.ts` (`AllowedImageType` +
+  `isAllowedImageType` adicionados)
+- `frontend/src/hooks/useCreateProva.ts` (1 linha mudada —
+  cast -> helper)
+- `frontend/public/etiqueta/logo_3studio.svg` (NOVO — copia)
+- `frontend/public/etiqueta/logo_studio_e_arte.svg` (NOVO — copia)
+
+**Documentacao (4 arquivos):**
+- `CHANGELOG.md` (esta entrada)
+- `DECISIONS.md` (ADRs 120-122)
+- `CLAUDE.md` (linha "v4.0 W2 — C06 Visual Refresh" na tabela de waves)
+- `docs/wave2-v4/analysis.md` (anexo "Visual Refresh Execution")
+
+### Backend / outros
+
+- **Sem alteracao** em backend, RLS, migrations, RBAC, layout
+  dashboard, types de dominio, ou hooks compartilhados.
+- **Testes**: 795 do backend continuam passando (nao foram tocados
+  arquivos backend).
+
+---
+
 ## [2026-05-04 — Wave 2 v4.0 — Componente 06 (atualizacao v4.0)]
 
 Reformulacao completa do cadastro de prova digital para suportar o
