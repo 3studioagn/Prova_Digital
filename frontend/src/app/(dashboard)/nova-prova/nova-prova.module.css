@@ -194,6 +194,15 @@ select.input {
   color: var(--color-danger);
 }
 
+/* AUD-W2V4-A02/M03 (ADR-124): texto auxiliar abaixo do segment de
+ * rotas, mitigacao do risco "Confusao operacional" do Backlog v4.0 §6.
+ * Pequeno, em tom muted, sem chamar atencao excessiva. */
+.fieldHint {
+  margin-top: 0.5rem;
+  font-size: var(--fs-xs);
+  color: var(--color-card-text-muted);
+}
+
 /* ─── Segment de 4 botoes (Rota — Visual Refresh v2) ─────────────────────── *
  * 4 botoes em uma linha so. Cada celula 1fr. Botao ativo = pill preto
  * sobre cinza claro. Espelha o design Figma entregue pelo Mario. */
