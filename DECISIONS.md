@@ -4684,6 +4684,18 @@ iframe — esse e o preview funcional final. Os arquivos
 `frontend/public/etiqueta/logo_*.svg` tambem foram removidos por ja
 nao serem referenciados. Ver CHANGELOG 2026-05-05 "Visual Refresh v2".
 
+> **Pos-supersedimento (Wave 2 v4.0 Audit Fixes — AUD-W2V4-M04):** o
+> Visual Refresh v2 ELIMINOU a duplicacao dos logos
+> (`backend/app/services/etiqueta_assets/logo_*.svg` ↔
+> `frontend/public/etiqueta/logo_*.svg`) descrita nas "Consequencias"
+> abaixo. A pasta `frontend/public/etiqueta/` foi DELETADA junto com
+> o componente `EtiquetaPreview`. **Estado atual: apenas
+> `backend/app/services/etiqueta_assets/` permanece como fonte de
+> verdade dos logos** (usado pelo `etiqueta_service.gerar_pdf`). A
+> "Trade-off de fidelidade" (preview sem codigo publico/badge) e a
+> recomendacao de "step de build" deixaram de ser relevantes — nao
+> ha mais preview frontend a manter sincronizado.
+
 **Contexto:** A entrega original da Wave 2 v4.0 (sessao 2026-05-04)
 incluiu um componente `RotaVisualization` na coluna direita da pagina
 `/nova-prova` — um SVG decorativo de ~150 linhas que desenhava 4 nos
