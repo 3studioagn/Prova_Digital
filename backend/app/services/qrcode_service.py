@@ -53,7 +53,19 @@ def gerar_payload_qr(identificador: str, hash_hex: str) -> str:
     entre camera e digitacao manual (DAT v3.0 §8.1). O parametro foi
     renomeado de `nro_requerimento` para `identificador` para refletir
     essa mudanca semantica — o caller passa o que for adequado.
+
+    AUD-W2V4-S01 (defesa preventiva): rejeita identificador contendo o
+    separador `|` antes de montar o payload — evita produzir string
+    malformada com >3 campos no `split`. Os callers atuais (criar_prova
+    com codigo_publico no formato PRV-...) ja filtram isso, mas o
+    helper e publico e pode ser usado em contextos novos no futuro.
     """
+    if QR_PAYLOAD_SEPARATOR in identificador:
+        raise ValueError(
+            f"Identificador nao pode conter o separador "
+            f"{QR_PAYLOAD_SEPARATOR!r} do payload do QR "
+            f"(recebi: {identificador!r})"
+        )
     if len(hash_hex) < HASH_TRUNCADO_LEN:
         raise ValueError(
             f"Hash muito curto: esperado >= {HASH_TRUNCADO_LEN} chars, recebi {len(hash_hex)}"
@@ -73,6 +85,32 @@ def validar_payload_qr(payload: str, hash_hex_completo: str) -> bool:
     `codigo_publico` (formato `PRV-...`) ou `nro_requerimento` (livre).
 
     Rejeita prefixo errado, formato invalido e hash que nao bate.
+
+    AUD-W2V4-005 (contrato explicito): o segundo campo do payload
+    (`identificador`) tem semantica polimorfica:
+
+      - **Wave 2 v4.0+** (preferencial): `codigo_publico` no formato
+        `PRV-AAAA-MM-NNNNNN`. Imutavel e UNIQUE (idx_provas_codigo_publico).
+        Usado para idempotencia camera↔digitacao manual via Componente
+        19 da Wave 3 v4.0 — DAT v3.0 §8.1.
+      - **Legacy v3.0** (suporte transicional): `nro_requerimento` —
+        string livre fornecida pelo admin no cadastro. Usado pelas
+        provas criadas antes da migration 012 (16 provas em producao no
+        momento da Wave 2 v4.0). Wave 7 (Componente 21) regenera as
+        etiquetas dessas provas com `codigo_publico`, eliminando
+        gradualmente este formato.
+
+    O caller (Wave 3 v4.0 / Componente 19) deve fazer o lookup
+    apropriado:
+      1. Se `identificador` casa o regex `PRV-\\d{4}-\\d{2}-[...]{6}`
+         (`validar_formato_codigo_publico`), buscar por
+         `provas_digitais.codigo_publico = identificador`.
+      2. Caso contrario, buscar por
+         `provas_digitais.nro_requerimento = identificador`.
+
+    TEST PENDING (Componente 19, Wave 3 v4.0): teste integrado com
+    coexistencia de provas v4.0 e legacy no mesmo banco para garantir
+    que ambos os formatos resolvem ao registro correto sem ambiguidade.
     """
     parts = payload.split(QR_PAYLOAD_SEPARATOR)
     if len(parts) != 3:

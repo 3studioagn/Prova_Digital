@@ -71,6 +71,14 @@ def test_payload_rejeita_hash_curto():
         gerar_payload_qr("REQ", "abc")
 
 
+def test_payload_rejeita_identificador_com_separador():
+    """AUD-W2V4-S01: defesa preventiva contra identificador que contem
+    o separador `|` do payload — produziria string malformada com >3
+    campos no split."""
+    with pytest.raises(ValueError, match="separador"):
+        gerar_payload_qr("REQ|MALICIOSO", "a" * 64)
+
+
 # ─── validar_payload_qr ─────────────────────────────────────────────────
 
 
