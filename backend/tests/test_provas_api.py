@@ -614,10 +614,16 @@ async def test_create_prova_integrity_error_returns_409(
     mas o UNIQUE constraint no banco rejeita o segundo no commit.
 
     Comportamento esperado:
-      - Mapear IntegrityError para 409 Conflict (nao 500).
+      - Mapear IntegrityError de constraint do nro_requerimento para
+        409 Conflict (nao 500).
       - Mensagem deve deixar claro que o nro_requerimento ja existe.
       - db.rollback e _cleanup_r2 sao chamados, mesma semantica do
         caminho de erro generico.
+
+    AUD-W2V4-004 (atualizado): o handler agora distingue qual constraint
+    foi violado. Este teste mantem o cenario nro_requerimento — agora
+    a mensagem do erro inclui `provas_digitais_nro_requerimento_key`
+    para simular UniqueViolationError real do asyncpg.
     """
     _setup(mock_db, admin=admin_user)
     mock_db.execute.side_effect = [
@@ -625,11 +631,16 @@ async def test_create_prova_integrity_error_returns_409(
         _scalar(vendedor_matriz),
         _scalar(DEFAULT_TEMPLATE),
     ]
-    # O commit levanta IntegrityError (constraint UNIQUE violado pelo outro admin).
+    # O commit levanta IntegrityError. Mensagem inclui o nome do
+    # constraint para que o handler novo (AUD-W2V4-004) classifique
+    # como race TOCTOU de nro_requerimento.
     mock_db.commit.side_effect = IntegrityError(
         statement="INSERT ...",
         params={},
-        orig=Exception("duplicate key value violates unique constraint"),
+        orig=Exception(
+            "duplicate key value violates unique constraint "
+            '"provas_digitais_nro_requerimento_key"'
+        ),
     )
 
     with patch(
@@ -655,6 +666,149 @@ async def test_create_prova_integrity_error_returns_409(
     assert "ja cadastrado" in resp.json()["detail"]
     mock_db.rollback.assert_awaited()
     mock_delete.assert_awaited_once()
+
+
+async def test_create_prova_codigo_publico_collision_retry_succeeds(
+    admin_user, vendedor_matriz, mock_db
+):
+    """AUD-W2V4-004: colisao em idx_provas_codigo_publico no primeiro
+    commit deve disparar retry com codigo regenerado. Segunda tentativa
+    succeeda. Resposta 201 com novo codigo_publico.
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = [
+        _scalar(None),
+        _scalar(vendedor_matriz),
+        _scalar(DEFAULT_TEMPLATE),
+    ]
+    mock_db.refresh.side_effect = _refresh_prova_defaults
+    # Primeira tentativa de commit colide em codigo_publico; segunda
+    # passa.
+    mock_db.commit.side_effect = [
+        IntegrityError(
+            statement="INSERT ...",
+            params={},
+            orig=Exception(
+                "duplicate key value violates unique constraint "
+                '"idx_provas_codigo_publico"'
+            ),
+        ),
+        None,  # commit OK na segunda tentativa
+    ]
+
+    with patch(
+        "app.api.v1.provas.r2_signed.head_object",
+        new=AsyncMock(return_value={"ContentLength": 1024}),
+    ), patch(
+        "app.api.v1.provas.r2_signed.get_object_head_bytes",
+        new=AsyncMock(return_value=FAKE_JPEG_HEAD),
+    ), patch("app.api.v1.provas.r2_delete", new=AsyncMock()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(
+                f"{PREFIX}/",
+                json={
+                    "nome": "Retry",
+                    "nro_requerimento": "REQ-RETRY",
+                    "cliente": "C",
+                    "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "MATRIZ",
+                    "object_key": "provas/2026/04/retry/arte.jpg",
+                },
+            )
+    assert resp.status_code == 201, resp.text
+    # Houve 2 commits (1 falhou + 1 sucesso) e 1 rollback do failover.
+    assert mock_db.commit.await_count == 2
+    mock_db.rollback.assert_awaited()
+    # Codigo publico no response existe e segue o formato.
+    assert resp.json()["prova"]["codigo_publico"].startswith("PRV-")
+
+
+async def test_create_prova_codigo_publico_collision_persistent_returns_502(
+    admin_user, vendedor_matriz, mock_db
+):
+    """AUD-W2V4-004: colisao persistente em idx_provas_codigo_publico nas
+    3 tentativas retorna 502 (sinaliza problema de entropia).
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = [
+        _scalar(None),
+        _scalar(vendedor_matriz),
+        _scalar(DEFAULT_TEMPLATE),
+    ]
+    erro_codigo = IntegrityError(
+        statement="INSERT ...",
+        params={},
+        orig=Exception(
+            "duplicate key value violates unique constraint "
+            '"idx_provas_codigo_publico"'
+        ),
+    )
+    mock_db.commit.side_effect = [erro_codigo, erro_codigo, erro_codigo]
+
+    with patch(
+        "app.api.v1.provas.r2_signed.head_object",
+        new=AsyncMock(return_value={"ContentLength": 1024}),
+    ), patch(
+        "app.api.v1.provas.r2_signed.get_object_head_bytes",
+        new=AsyncMock(return_value=FAKE_JPEG_HEAD),
+    ), patch("app.api.v1.provas.r2_delete", new=AsyncMock()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(
+                f"{PREFIX}/",
+                json={
+                    "nome": "Pers",
+                    "nro_requerimento": "REQ-PERS",
+                    "cliente": "C",
+                    "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "FILIAL",
+                    "object_key": "provas/2026/04/pers/arte.jpg",
+                },
+            )
+    assert resp.status_code == 502
+    assert "codigo publico" in resp.json()["detail"].lower()
+
+
+async def test_create_prova_unclassified_integrity_error_returns_502(
+    admin_user, vendedor_matriz, mock_db
+):
+    """AUD-W2V4-004: IntegrityError sem constraint name reconhecivel
+    (ex: FK quebrada, NOT NULL violado) cai no branch "outros" e
+    retorna 502 — mudanca de contrato proposital vs antes que
+    mapeava 409 generico (mensagem enganosa).
+    """
+    _setup(mock_db, admin=admin_user)
+    mock_db.execute.side_effect = [
+        _scalar(None),
+        _scalar(vendedor_matriz),
+        _scalar(DEFAULT_TEMPLATE),
+    ]
+    mock_db.commit.side_effect = IntegrityError(
+        statement="INSERT ...",
+        params={},
+        orig=Exception("foreign key constraint violated"),
+    )
+
+    with patch(
+        "app.api.v1.provas.r2_signed.head_object",
+        new=AsyncMock(return_value={"ContentLength": 1024}),
+    ), patch(
+        "app.api.v1.provas.r2_signed.get_object_head_bytes",
+        new=AsyncMock(return_value=FAKE_JPEG_HEAD),
+    ), patch("app.api.v1.provas.r2_delete", new=AsyncMock()):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(
+                f"{PREFIX}/",
+                json={
+                    "nome": "Uncls",
+                    "nro_requerimento": "REQ-UNCLS",
+                    "cliente": "C",
+                    "vendedor_id": str(vendedor_matriz.id),
+                    "rota": "LAM_MATRIZ",
+                    "object_key": "provas/2026/04/uncls/arte.jpg",
+                },
+            )
+    assert resp.status_code == 502
+    assert "persistir" in resp.json()["detail"].lower()
 
 
 async def test_create_prova_cleanup_r2_failure_does_not_mask_original_error(
