@@ -13,8 +13,11 @@ Caracteristicas:
   - Determinismo do prefixo dado o `criado_em`.
   - Nao-determinismo do sufixo via `secrets.choice` (CSPRNG).
   - Unicidade enforced pela coluna `provas_digitais.codigo_publico UNIQUE`
-    e pelo trigger `trg_provas_rota_imutavel`.
-  - Tamanho total fixo: 17 chars (`PRV-` + 4 + `-` + 2 + `-` + 6).
+    via o indice `idx_provas_codigo_publico` (CREATE UNIQUE INDEX da
+    migration 012). O trigger `trg_provas_rota_imutavel` NAO esta
+    relacionado a unicidade do codigo_publico — ele protege apenas a
+    coluna `rota` (corrigido em AUD-W2V4-003).
+  - Tamanho total fixo: 18 chars (`PRV-` + 4 + `-` + 2 + `-` + 6).
   - 31^6 ≈ 887 milhoes de combinacoes/mes — entropia adequada para o
     volume operacional + rate limiting do Componente 19 (Wave 3 v4.0).
 
