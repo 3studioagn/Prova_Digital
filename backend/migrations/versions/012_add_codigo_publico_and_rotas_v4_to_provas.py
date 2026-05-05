@@ -42,6 +42,32 @@ o backfill so roda em provas com codigo_publico IS NULL.
 Reversivel: downgrade dropa trigger + funcao + indexes + coluna. Os
 valores adicionados ao enum permanecem (limitacao do Postgres
 documentada).
+
+DIVERGENCIA REPO vs PRODUCAO (AUD-W2V4-M02):
+  Esta migration Alembic e ATOMIC — uma unica funcao `upgrade()` que
+  faz todas as 5 operacoes em sequencia. Em PRODUCAO (Supabase
+  rwxlpwmnkekzuurgthkr), foi aplicada via MCP `apply_migration` em
+  3 chunks:
+    `012a_alter_type_rota_enum_add_v4_values` (ALTER TYPE)
+    `012b_add_column_codigo_publico_nullable` (ADD COLUMN nullable)
+    `012c_codigo_publico_not_null_indexes_trigger` (NOT NULL +
+       indexes + trigger + UPDATE alembic_version='012')
+  O split foi necessario porque Postgres 12+ permite `ALTER TYPE
+  ADD VALUE IF NOT EXISTS` em transacao MAS nao permite USAR o valor
+  recem-adicionado na MESMA transacao. Como a migration pode ser
+  re-rodada e teoricamente ler valores recem-criados, o split por
+  precaucao em prod foi a escolha mais segura.
+
+  O `alembic_version='012'` foi setado manualmente apos o terceiro
+  chunk (passo 5 do `analysis.md` anexo Execucao). Isso significa:
+    - Repo: 1 entrada `012` em `alembic_version`.
+    - Producao: 3 entradas em `supabase_migrations.schema_migrations`
+      (`012a/b/c`) + 1 em `alembic_version` (`012`).
+  O estado FINAL e equivalente; mas o historico difere.
+
+  Ambiente fresh: `alembic upgrade head` aplica esta migration
+  atomic e produz o mesmo estado funcional. Idempotencia validada
+  em `backend/tests/test_migration_012.py` (AUD-W2V4-T03).
 """
 from __future__ import annotations
 
