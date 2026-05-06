@@ -774,3 +774,41 @@ git diff --stat development..wave2-v4/componente-08
 **Resumo final:** 1 CRITICAL · 3 ALTOS · 4 MÉDIOS · 5 BAIXOS · 3 INFOs = 16 achados.
 
 **Veredito:** REPROVADO E REFAZER (CONDICIONAL) — correções estimadas em ≤ 1h-2h. Após corrigir os 4 itens bloqueantes (figma-reference, analysis na branch, ≥15 testes Vitest, token de cor da arte), o C08 está pronto para PR para `main`.
+
+---
+
+## Apêndice — Status final por achado (2026-05-06, sessão de correção pós-auditoria)
+
+> **Esta seção é apêndice — o corpo original do relatório acima permanece intacto.**
+>
+> Sessão executada em `wave2-v4-c08/fixes/execution` (saiu de `wave2-v4-c08/fixes/plan` em `5c2e0bd`, que saiu de `wave2-v4-c08/audit` em `d90c672`). Plano: [fix-plan.md](fix-plan.md). Validação: [fix-validation.md](fix-validation.md).
+
+| ID | Status final | Commit | Critério objetivo de "resolvido" |
+|---|---|---|---|
+| **AUD-W2C08-001** (CRITICAL) | ✅ RESOLVIDO | `246a799` | `git ls-tree wave2-v4-c08/fixes/execution -- docs/wave2-v4-c08/figma-reference.png` retorna o blob. Layout coerente com analysis Seção 5. |
+| **AUD-W2C08-002** (ALTO) | ✅ RESOLVIDO | `d561ae4` (cherry-pick de `2f721cb`) | `docs/wave2-v4-c08/analysis.md` agora existe na branch da entrega. Hash bate com `bdba7649…`. Link `CHANGELOG.md:9159` resolve. |
+| **AUD-W2C08-003** (ALTO) | ✅ RESOLVIDO | `cd13026` (refactor) + `a93c10d` (testes) | 13 testes Vitest novos: 8 em `formatRota` (4 v4.0 + 2 legacy + null + sanity de exhaustividade) + 5 em `isPathActive` (exact + prefix + trailing-slash + false-positive + undefined). Total Vitest do projeto: 28 (era 15). |
+| **AUD-W2C08-004** (ALTO) | ✅ RESOLVIDO | `bbd47dd` | Token `--color-card-art-bg: #d9d9d9` em `globals.css`; `.artSlot` usa o novo token sem fallback. ADR-129 documenta. |
+| **AUD-W2C08-005** (MÉDIO) | ✅ RESOLVIDO | `c1b3696` | `metaGrid` agora 3×2 estrito (6 itens). `codigo_publico` migrou para `requerimentoLabel` como subtítulo (`Requerimento: NNN · PRV-...`). Apêndice no ADR-127. |
+| **AUD-W2C08-006** (MÉDIO) | ✅ RESOLVIDO | `c1b3696` (consolidado com 005) | Sem 7º item, responsivo `≤1100px` produz `repeat(2,1fr)` × 3 linhas balanceadas, sem célula órfã. |
+| **AUD-W2C08-007** (MÉDIO) | ✅ RESOLVIDO | `265893b` | `.title` agora `clamp(1.5rem, 2.5vw, 2.5rem)` — mínimo 24px em viewport tablet (era ~16-19px). |
+| **AUD-W2C08-008** (MÉDIO) | ✅ RESOLVIDO | `2e2b915` | Nova seção "Página de detalhe da prova: estrutura e extensão para Wave 3 (Componente 08 v4.0+)" em `CLAUDE.md`. Cobre 4 camadas para adicionar valor a `StatusProvaEnum` + flags Timeline + tratamento legacy + padrão de testes Vitest. |
+| **AUD-W2C08-009** (BAIXO) | ✅ RESOLVIDO (WONTFIX registrado) | `77ea648` | ADR-130 em DECISIONS.md justifica manter `object-fit: cover` (fidelidade Figma + token novo já mitiga problema percebido + `contain` introduziria letterbox assimétrico). Backlog técnico documentado. |
+| **AUD-W2C08-010** (BAIXO) | ✅ RESOLVIDO | `e87df19` | Função `formatStatus` removida; `STATUS_LABELS[prova.status]` direto no JSX. Import `type StatusProva` (órfão) também removido. |
+| **AUD-W2C08-011** (BAIXO) | ✅ RESOLVIDO | `041916b` | Tooltip nativo HTML `title` no span do em-dash quando `prova.rota === null`: "Prova legacy v3.0 — rota será definida pelo backfill da Wave 7". `formatRota` permanece pura. |
+| **AUD-W2C08-012** (BAIXO) | ✅ RESOLVIDO (consolidado em AUD-003) | `a93c10d` | 5 cenários de `isPathActive` cobertos pelo Vitest. |
+| **AUD-W2C08-013** (BAIXO) | ✅ TEMPLATE PRONTO | `23acba7` | `docs/wave2-v4-c08/smoke-validation.md` criado com 19 itens (15 originais + 4 novos pos-correções). Mario executa antes do PR final. Itens 4 e 5 (motorista/clicheria) podem ser SKIP por ausência desses perfis em produção. |
+| **AUD-W2C08-014** (INFO) | ✅ REGISTRADO | `27081ed` | ADR-131 em DECISIONS.md documenta distribuição 65% legacy como norma (não caso de borda). |
+| **AUD-W2C08-015** (INFO) | ✅ REGISTRADO | `27081ed` (consolidado com 014) | ADR-131 confirma escopo frontend-only respeitado (`git diff` sem backend/scripts). |
+| **AUD-W2C08-016** (INFO) | ✅ REGISTRADO | `27081ed` (consolidado com 014) | ADR-131 registra advisors sem novos alertas como baseline para próxima auditoria. |
+
+**Resumo final pós-correção:** 16/16 achados RESOLVIDOS · 0 DEFERIDOS · 0 NÃO RESOLVIDOS.
+
+**Decisões aplicadas dos defaults documentados no plano (§4.9):**
+- **B1** (CSS uncommitted no working tree): `git stash` preservou as mudanças experimentais (stash@{0}). Execução do Gate 2 sobre HEAD limpo `d90c672`. Mario pode recuperar com `git stash pop` quando quiser.
+- **B2** (object-fit AUD-009): WONTFIX, ADR-130. `cover` mantido.
+- **B3** (escopo Vitest AUD-003): 13 testes (8 formatRota + 5 isPathActive) sem expandir devDependencies. Smoke render de página deferred — pode ser adicionado em sessão futura se Mario quiser, com `@testing-library/react` + `jsdom`.
+
+**Estimativa real de duração da sessão de correção:** ~2h (aproximada).
+
+**Recomendação:** abrir nova sessão de auditoria independente para confirmar que (a) os 16 achados originais foram efetivamente resolvidos, (b) as correções não introduziram novos problemas, (c) a Wave 3 (Timeline expansível) continua viável, (d) a fidelidade visual contra `figma-reference.png` está mantida.

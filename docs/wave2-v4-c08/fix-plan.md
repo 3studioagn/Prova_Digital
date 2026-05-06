@@ -520,17 +520,50 @@ EXPLAIN ANALYZE da query mais quente já é 0.121ms. Nenhuma mudança esperada. 
 
 ---
 
-## 7. Resultado da Execução (a preencher no Gate 2)
+## 7. Resultado da Execução
 
-> Esta seção fica **vazia** até o Gate 2 começar. Será preenchida durante a execução com os diffs entre o planejado nesta seção 2 e o efetivamente realizado, commit por commit.
+Sessão executada em `wave2-v4-c08/fixes/execution` (saída de `wave2-v4-c08/fixes/plan` em `5c2e0bd`). 13 commits atômicos cobriram os 16 achados acionáveis.
 
-```
-Commit 1: <sha> — fix(wave2-v4/c08/AUD-001): ...
-   Diff vs plano: <descrição>
-Commit 2: <sha> — docs(wave2-v4/c08/AUD-002): ...
-   Diff vs plano: <descrição>
-...
-```
+| # | Commit | Achado(s) | Diff vs planejado |
+|---|---|---|---|
+| 1 | `246a799` | AUD-W2C08-001 | ✅ idem ao plano (2.1) |
+| 2 | `d561ae4` | AUD-W2C08-002 | ✅ idem (cherry-pick limpo de `2f721cb`, mensagem original preservada) |
+| 3 | `cd13026` | AUD-W2C08-003 (parte 1 — refactor) | ✅ idem ao plano (2.2) |
+| 4 | `a93c10d` | AUD-W2C08-003 (parte 2 — testes) | ⚠️ entregues **13** testes (8 formatRota + 5 isPathActive) em vez dos 12 prometidos no plano (7 + 5). 8º teste é **sanity check** do `Object.keys(ROTA_LABELS)` para defender contra nova-rota-sem-label silenciosamente. Aceitável — escopo mais defensivo que planejado |
+| 5 | `bbd47dd` | AUD-W2C08-004 | ✅ idem (token + uso + ADR-129) |
+| 6 | `c1b3696` | AUD-W2C08-005+006 | ✅ idem; bonus: classe órfã `.mono` removida (cleanup direto do delete do 7º item) |
+| 7 | `265893b` | AUD-W2C08-007 | ✅ idem (clamp 1.5/2.5/2.5) |
+| 8 | `2e2b915` | AUD-W2C08-008 | ✅ idem; seção em CLAUDE.md cobre 4 camadas + flags Timeline + padrão Vitest |
+| 9 | `e87df19` | AUD-W2C08-010 | ✅ idem; bonus: import `type StatusProva` órfão também removido |
+| 10 | `041916b` | AUD-W2C08-011 | ✅ idem (tooltip HTML nativo no JSX, `formatRota` permanece pura) |
+| 11 | `77ea648` | AUD-W2C08-009 | ✅ idem (WONTFIX, ADR-130) |
+| 12 | `23acba7` | AUD-W2C08-013 | ⚠️ template entregue com **19 itens** (15 originais + 4 novos pos-correções), em vez dos 15 prometidos. Aceitável — itens novos validam exatamente as correções desta sessão |
+| 13 | `27081ed` | AUD-W2C08-014+015+016 | ✅ idem (ADR-131 consolida os 3 INFOs) |
+
+**Totais reais:**
+- 13 commits no Gate 2 + 1 commit do plano (`5c2e0bd`) = 14 commits novos.
+- 16 achados RESOLVIDOS · 0 DEFERIDOS · 0 NÃO RESOLVIDOS.
+- Vitest do projeto: 15 → 28 testes (+13).
+- ADRs novos: 129, 130, 131 + apêndice no ADR-127.
+- Migrations Alembic ou RLS: zero (frontend-only).
+- Cloudflare R2: zero touch.
+
+**Ordem de execução real vs planejada:**
+- 100% de aderência à ordem topológica do §3 do plano. Nenhuma reordenação foi necessária.
+
+**Decisões aplicadas dos defaults documentados (§4.9):**
+- B1 (CSS uncommitted): `git stash` em `stash@{0}` — mudanças preservadas, recuperáveis com `git stash pop`. Execução sobre HEAD limpo `d90c672`.
+- B2 (object-fit AUD-009): WONTFIX, ADR-130.
+- B3 (escopo Vitest AUD-003): 13 testes sem expandir devDependencies.
+
+**Riscos materializados:**
+- Nenhum — todas as correções foram frontend-only ou doc-only. Sem regressão no backend (não tocado).
+
+**Próximos passos:**
+- Smoke check automatizado: `npx vitest run` (esperado: 28/28), `npx tsc --noEmit` (esperado: exit 0), `npx next build` (esperado: 13/13 páginas).
+- Smoke E2E manual: Mario percorre os 19 itens em `smoke-validation.md`.
+- PR para `development` (ou `main` conforme decisão do Mario) após aprovação do smoke.
+- Recomendação: nova auditoria independente em sessão separada para validar (a) achados resolvidos sem regressão; (b) Wave 3 viável; (c) fidelidade visual contra `figma-reference.png`.
 
 ---
 

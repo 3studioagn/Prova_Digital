@@ -9261,3 +9261,117 @@ Os seguintes itens permanecem como follow-up tecnico explicito (vide
   em 11.4 kB / 209 kB First Load.
 - Backend: nao tocado. Suite `test_provas_api.py` (21 testes do
   C08 v3.0) preservada — sem regressao esperada.
+
+---
+
+## v4.0 — Wave 2 — Componente 08 — Correcoes Pos-Auditoria
+**Data:** 2026-05-06
+**Branch:** `wave2-v4-c08/fixes/execution`
+**Documentos:** [audit-report.md](docs/wave2-v4-c08/audit-report.md) · [fix-plan.md](docs/wave2-v4-c08/fix-plan.md) · [fix-validation.md](docs/wave2-v4-c08/fix-validation.md) · [smoke-validation.md](docs/wave2-v4-c08/smoke-validation.md)
+**ADRs novos:** 129 (token `--color-card-art-bg`), 130 (object-fit cover WONTFIX), 131 (INFOs positivos pos-auditoria)
+**Apêndices:** ADR-127 ganha apendice pos-auditoria sobre `codigo_publico` no header.
+
+Sessao de correcao dirigida pelos 16 achados consolidados em
+`docs/wave2-v4-c08/audit-report.md` (1 CRITICAL · 3 ALTOS · 4 MÉDIOS ·
+5 BAIXOS · 3 INFOs). Resultado: **16/16 RESOLVIDOS · 0 DEFERIDOS · 0
+NAO RESOLVIDOS**.
+
+### Resolvidos por achado
+
+- **AUD-W2C08-001** (CRITICAL): `figma-reference.png` commitada em
+  `docs/wave2-v4-c08/` — referencia visual canonica preservada.
+- **AUD-W2C08-002** (ALTO): `analysis.md` cherry-pick para a branch
+  da entrega — link `CHANGELOG.md:9159` agora resolve.
+- **AUD-W2C08-003** (ALTO): refactor de `formatRota` (lib/types/prova.ts)
+  e `isPathActive` (lib/path-active.ts) para utilitarios puros
+  testaveis + 13 testes Vitest novos (8 formatRota cobrindo 4 v4.0 +
+  2 legacy + null + sanity de exhaustividade; 5 isPathActive cobrindo
+  exact + prefix + trailing-slash + false-positive + undefined).
+  Total Vitest do projeto: 28 (era 15).
+- **AUD-W2C08-004** (ALTO): novo token semantico
+  `--color-card-art-bg=#d9d9d9` em `globals.css`; `.artSlot` usa o
+  token sem fallback. ADR-129 documenta o desacoplamento de
+  `--color-card-surface`.
+- **AUD-W2C08-005** + **006** (MÉDIO): `codigo_publico` movido do
+  `.metaGrid` (que ficou com 7 itens fora do plano 3x2 do Figma) para
+  o `requerimentoLabel` no header (`Requerimento: NNN · PRV-...`).
+  Restaura simetria responsiva. Apendice no ADR-127.
+- **AUD-W2C08-007** (MÉDIO): `.title` ajustado para
+  `clamp(1.5rem, 2.5vw, 2.5rem)` — minimo 24px em viewport tablet
+  (era ~16-19px).
+- **AUD-W2C08-008** (MÉDIO): nova secao "Pagina de detalhe da prova:
+  estrutura e extensao para Wave 3" em `CLAUDE.md`. Cobre 4 camadas
+  para adicionar valor a `StatusProvaEnum` + flags Timeline + padrao
+  de testes Vitest.
+- **AUD-W2C08-009** (BAIXO): WONTFIX `object-fit: cover` registrado
+  em ADR-130 (fidelidade Figma + token novo ja mitiga + `contain`
+  introduziria letterbox assimetrico).
+- **AUD-W2C08-010** (BAIXO): wrapper trivial `formatStatus` removido;
+  `STATUS_LABELS[prova.status]` direto no JSX.
+- **AUD-W2C08-011** (BAIXO): tooltip nativo HTML `title` no em-dash
+  de prova legacy explicando "rota sera definida pelo backfill da
+  Wave 7".
+- **AUD-W2C08-012** (BAIXO): coberto por AUD-W2C08-003 (5 testes
+  Vitest de `isPathActive`).
+- **AUD-W2C08-013** (BAIXO): template `smoke-validation.md` criado
+  com 19 itens (15 originais + 4 novos pos-correcoes). Mario executa
+  antes do PR final.
+- **AUD-W2C08-014/015/016** (INFO): registrados em ADR-131 como
+  baseline para proxima auditoria.
+
+### Modificado
+- `frontend/src/lib/types/prova.ts`: novo export `formatRota` (movido
+  de `page.tsx`).
+- `frontend/src/lib/path-active.ts`: NOVO arquivo com helper
+  `isPathActive` (movido de `(dashboard)/layout.tsx`).
+- `frontend/src/app/(dashboard)/provas/[id]/page.tsx`: imports
+  refatorados; `formatStatus` removida; tooltip no em-dash legacy;
+  `codigo_publico` no header em vez do grid; 7o `metaItem` removido.
+- `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css`:
+  `.artSlot` usa `--color-card-art-bg`; novas classes
+  `.requerimentoSep` + `.codigoPublico`; classe orfa `.mono` removida;
+  `.title` clamp ajustado.
+- `frontend/src/app/(dashboard)/layout.tsx`: import de `isPathActive`
+  do `lib/`; funcao inline removida.
+- `frontend/src/app/globals.css`: token `--color-card-art-bg=#d9d9d9`
+  adicionado.
+
+### Adicionado
+- `frontend/src/lib/path-active.ts` (utilitario puro).
+- `frontend/src/lib/__tests__/path-active.test.ts` (5 testes).
+- `frontend/src/lib/types/__tests__/prova.test.ts` (8 testes).
+- `docs/wave2-v4-c08/figma-reference.png` (referencia visual canonica).
+- `docs/wave2-v4-c08/analysis.md` (cherry-pick — Gate 1 do C08).
+- `docs/wave2-v4-c08/fix-plan.md` (Gate 1 desta sessao de correcoes).
+- `docs/wave2-v4-c08/fix-validation.md` (Gate 2 — checklist + auto-critica).
+- `docs/wave2-v4-c08/smoke-validation.md` (template para Mario).
+- `CLAUDE.md`: secao "Pagina de detalhe da prova: estrutura e
+  extensao para Wave 3 (Componente 08 v4.0+)".
+- `DECISIONS.md`: ADRs 129, 130, 131 + apendice no ADR-127.
+
+### Pre-condicao operacional aplicada (defaults documentados no fix-plan §4.9)
+- **B1** — Working tree tinha mudancas CSS nao-commitadas que
+  agravavam AUD-W2C08-004 (`--color-card-surface=#e4e4e4` em vez do
+  HEAD `#d9d9d9`). Default aplicado: `git stash push` preservou as
+  mudancas em `stash@{0}` (mensagem
+  "wave2-v4-c08/fixes: working tree CSS tweaks pre-existentes
+  (preserved by Gate 2 setup)"). Execucao do Gate 2 sobre HEAD limpo
+  `d90c672`. Mario pode reaplicar com `git stash pop` quando quiser
+  (exige resolucao manual de conflito com AUD-W2C08-004 token novo).
+- **B2** — `object-fit: cover` mantido (ADR-130 WONTFIX).
+- **B3** — 13 testes Vitest sem expandir devDependencies.
+
+### Smoke E2E manual obrigatorio antes do PR final
+Mario percorre os 19 itens em `docs/wave2-v4-c08/smoke-validation.md`.
+Itens 4 (Motorista) e 5 (Clicheria) podem ser SKIP por ausencia
+desses perfis em producao.
+
+### Validacao automatizada (Gate 2)
+- `npx tsc --noEmit` em `frontend/`: a executar no smoke check final.
+- `npx next build` em `frontend/`: a executar no smoke check final.
+- `npx vitest run` em `frontend/`: 28 testes passando esperados
+  (15 middleware + 8 formatRota + 5 isPathActive).
+- Backend: nao tocado. Suite `test_provas_api.py` (21 testes do
+  C08 v3.0) preservada.
+- Advisors MCP (security + performance): sem novos alertas
+  esperados (validado pre-execucao).
