@@ -123,7 +123,10 @@
 }
 
 .title {
-  font-size: clamp(1rem, 2.5vw, 2.5rem);
+  /* AUD-W2C08-007: minimo 1.5rem (24px) para nao colapsar abaixo do
+     metaValue (1rem) em viewports tablet (768-1100px). Maximo 2.5rem
+     (40px) preservado, alinhado com a hierarquia tipografica do Figma. */
+  font-size: clamp(1.5rem, 2.5vw, 2.5rem);
   font-weight: 500;
   line-height: 1.05;
   color: var(--color-card-text);
