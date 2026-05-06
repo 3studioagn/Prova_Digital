@@ -5057,3 +5057,186 @@ ja bloqueia antes do request. Defesa em profundidade preservada.
     forçava escolha" foi resolvido por outra via aqui.
   - Smoke E2E manual obrigatorio antes do merge para `main` valida
     o novo fluxo (AUD-W2V4-T04).
+
+---
+
+## ADR-125 — `STATUS_LABELS["CRIADA"]` = "Aguardando vendedor"
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08)
+**Contexto:** O Figma do Mario para a pagina de detalhe (`/provas/[id]`)
+mostra o campo "Status" com valor "Aguardando vendedor" para uma prova
+em estado `CRIADA`. O label antigo era apenas "Criada" — descreve a
+transicao tecnica de insercao mas nao orienta o usuario sobre a acao
+pendente. Mario respondeu "e a mesma coisa" quando questionado, dando
+sinal verde para adotar o novo label.
+
+**Decisao:** mudanca **global** em `frontend/src/lib/types/prova.ts`:
+  - `STATUS_LABELS["CRIADA"] = "Aguardando vendedor"` (era "Criada").
+  - `STATUS_LABELS_SHORT["CRIADA"] = "Aguardando"` (era "Criada"),
+    para a coluna Status da listagem onde o espaco e limitado.
+
+A mudanca afeta 6 lugares fora do detalhe: `escanear/page.tsx`
+(label do status atual + transicoes), `provas/page.tsx` (filtro Status
++ tabela via `STATUS_LABELS_SHORT`), `provas/[id]/Timeline.tsx`
+(label do no), `relatorios/perspectivas/ReportGeral.tsx` (graficos +
+breakdown), `relatorios/StatusFilter.tsx` (opcoes do filtro). Em
+todos esses lugares, "Criada" passa a ser exibido como
+"Aguardando vendedor" (ou "Aguardando" curto). Semantica idêntica;
+apenas a UX-string muda.
+
+**Alternativas:**
+  - Criar `STATUS_LABELS_DETALHE` que sobrescreve só "CRIADA" no
+    detalhe, mantendo "Criada" em todos os outros lugares — rejeitado:
+    fragmenta o vocabulário e cria inconsistência cross-page para o
+    usuario.
+  - Mudar o enum no banco (`StatusProvaEnum.CRIADA` ->
+    `AGUARDANDO_VENDEDOR`) — rejeitado: quebra a Wave 3 v4.0 que
+    expandira a maquina de estados para 14 estados; muda contrato
+    com banco e auditoria; o nome do enum descreve a transicao
+    tecnica e nao precisa virar texto de UX.
+
+**Consequencias:**
+  - Reversivel em 1 linha caso Mario reconsidere.
+  - tsc --noEmit exit 0; next build 13/13 paginas; sem regressao.
+  - Documentado neste ADR para que futuros mantenedores entendam que
+    "Criada"/"Aguardando vendedor" representam o mesmo estado.
+
+---
+
+## ADR-126 — Rotas legacy v3.0 sem sufixo "(legada v3.0)"
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08)
+**Contexto:** O Figma mostra "Rota direta" como valor exemplo do campo
+"Rota". Antes desta entrega, `ROTA_LABELS["DIRETA"]` retornava
+"Filial (legada v3.0)" — informativo mas verboso, e desalinhado com a
+estetica limpa do Figma. Mario aprovou explicitamente: "vamos mudar os
+nomes das rotas para matriz, filial, lam. matriz, lam. filial — isso
+esta planejado nessa nova versao de backlog".
+
+**Decisao:** simplificar os labels dos 2 valores legacy:
+  - `ROTA_LABELS["PADRAO"] = "Padrao"` (era "Matriz (legada v3.0)").
+  - `ROTA_LABELS["DIRETA"] = "Direta"` (era "Filial (legada v3.0)").
+
+Os 4 valores v4.0 (`MATRIZ`, `LAM_MATRIZ`, `FILIAL`, `LAM_FILIAL`)
+permanecem inalterados ("Matriz", "Lam. Matriz", "Filial",
+"Lam. Filial").
+
+Consequencia esperada: provas legacy `rota=PADRAO` aparecem visualmente
+como "Padrao" (sem indicacao explicita de que sao legacy v3.0). A
+distincao continua disponivel via:
+  - O enum no banco (`PADRAO` vs `MATRIZ`).
+  - A Wave 7 (Componente 21) que fara o backfill final.
+  - Cobertura de testes (`test_rota_enum_drift.py`) que monitora as
+    duas familias.
+
+**Alternativas:**
+  - Manter sufixo "(legada v3.0)" — rejeitado: ruido visual em prol
+    de informacao que o admin nao precisa no fluxo cotidiano.
+  - Renomear `PADRAO` -> `"Matriz"` e `DIRETA` -> `"Filial"` — rejeitado:
+    mistura visualmente legacy e v4.0 (impossivel distinguir uma prova
+    `rota=PADRAO` de `rota=MATRIZ` apenas pela UI). "Padrao"/"Direta"
+    preserva ao menos o nome historico.
+
+**Consequencias:**
+  - Afeta 4 lugares fora do detalhe: `escanear/page.tsx`,
+    `provas/page.tsx` (filtro Rota + coluna), `provas/[id]/Timeline.tsx`
+    (badge de roteamento), `relatorios/RotaFilter.tsx` (filtro). O
+    `.replace("Rota ", "")` em `RotaFilter.tsx` continua sendo
+    no-op apos a mudanca (string nao tem prefix "Rota ").
+  - Compatibilidade com Wave 7 preservada: o backfill atualiza o
+    banco; quando uma prova legacy passar a `rota=MATRIZ`, o label
+    naturalmente vira "Matriz".
+  - tsc --noEmit exit 0; next build sem regressao.
+
+---
+
+## ADR-127 — Layout invertido do detalhe (arte esquerda · info direita) + grid 3x2 de metadata
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08)
+**Contexto:** O Figma do Mario inverte o layout que existia desde a
+Wave 2 v3.0 (info esq + arte dir, 1.4fr / 380px). Novo layout: arte
+esq (480px quadrado) + info dir (1fr). Hierarquia tipografica do
+header tambem muda — "Requerimento: NNN" pequeno acima do nome
+grande (antes o numero era titulo e o nome subtitulo). Metadata vira
+grid 3 colunas x 2 linhas: Cliente | Rota | Criada em / Vendedor |
+Ciclo Atual | Status (com Codigo aparecendo no slot 7 quando
+disponivel).
+
+**Decisao:** rewrite cirurgico em duas pecas:
+  - `frontend/src/app/(dashboard)/provas/[id]/page.tsx`: estrutura
+    JSX nova (arte primeiro, info depois), header com `<p>` pequeno
+    + `<h1>` grande + `<hr>`, `<MetadataGrid>` inline com 7 itens
+    (`Cliente`, `Rota`, `Criada em`, `Vendedor`, `Ciclo Atual`,
+    `Status`, `Codigo`), banner de cancelamento em row separado
+    quando presente, `<actionsRow>` com 2/3/4 botoes side-by-side.
+  - `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css`:
+    `.innerCardGrid` com `grid-template-columns: minmax(0, 480px)
+    minmax(0, 1fr)`; `.metaGrid` com `grid-template-columns:
+    repeat(3, minmax(0, 1fr))`; `.actionsRow` com flex e
+    `flex: 1 1 220px` por botao (modais position:fixed nao competem
+    por slot); responsivo <= 1100px reduz metaGrid para 2 colunas
+    e empilha o innerCardGrid.
+
+Card preto do historico AGORA E SEPARADO do innerCard branco (antes
+era aninhado dentro). Espelha o Figma e simplifica a hierarquia
+visual.
+
+Provas legacy `rota IS NULL` continuam exibindo "—" via `formatRota`
+(decisao consolidada no C06 — preservada).
+
+**Alternativas:**
+  - Criar componentes `<MetadataGrid>` + `<MetadataItem>` em arquivos
+    separados — rejeitado: complexidade incompatible com o uso
+    pontual; inline em `page.tsx` mantem a pagina simples (regra
+    "Don't add features beyond what the task requires").
+  - Usar CSS Grid em `.actionsRow` com `repeat(auto-fit, minmax(0, 1fr))`
+    para forcar largura igual — rejeitado: `auto-fit` colapsa para
+    `min-content` em alguns casos. `flex: 1 1 220px` deu
+    comportamento estavel para 2/3/4 botoes.
+
+**Consequencias:**
+  - `/provas/[id]` 11.4 kB / 209 kB First Load (era ~10 kB).
+  - tsc --noEmit exit 0; next build 13/13 paginas.
+  - Card branco principal contem APENAS info + arte + acoes;
+    historico passa a ser segunda secao independente abaixo.
+  - Smoke visual humano obrigatorio antes do merge (sem auth no dev
+    server, validacao programatica nao cobre o detalhe completo).
+
+---
+
+## ADR-128 — Active menu por prefix-match (destaque "Provas" em /provas/[id])
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08)
+**Contexto:** Antes do C08 v4.0, o item "Provas" do menu deixava de
+ficar destacado quando o usuario clicava em uma linha da listagem e
+chegava em `/provas/[id]` — porque a comparacao era estrita
+(`pathname === item.href`, com href = "/provas"). Mario explicitou:
+"a4, isso foi erro meu, essa parte vai continuar igual e destacando
+o 'provas'". A correcao do destaque e parte do redesign do
+Componente 08 v4.0.
+
+**Decisao:** introduzir helper `isPathActive(pathname, href)` em
+`frontend/src/app/(dashboard)/layout.tsx`:
+
+```ts
+function isPathActive(pathname: string, href: string | undefined): boolean {
+  if (!href) return false;
+  if (pathname === href) return true;
+  return pathname.startsWith(href + "/");
+}
+```
+
+A condicao `+ "/"` e essencial para evitar falsos positivos:
+`pathname=/provas-other` NAO ativa `href=/provas`.
+
+**Alternativas:**
+  - Usar `pathname.startsWith(href)` sem o separador — rejeitado:
+    ativaria `/provas-other` para `href=/provas`.
+  - Hardcoded por item (`provas` sabe que precisa cobrir `/provas/*`)
+    — rejeitado: nao escala para futuros sub-paths
+    (ex.: `/relatorios/[xxx]`, `/auditoria/[xxx]`).
+
+**Consequencias:**
+  - `/provas` continua ativo em `/provas` (exato).
+  - `/provas` agora tambem ativo em `/provas/abc-uuid` — comportamento
+    desejado.
+  - Mesma regra aplicada a TODOS os itens do menu — uniforme.
+  - Sem regressao em pages que sao exact-match (Dashboard, Nova prova,
+    Escanear, etc.) porque elas nao tem subpath.
+  - Middleware bundle inalterado.

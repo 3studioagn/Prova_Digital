@@ -9150,3 +9150,91 @@ Os seguintes itens permanecem como follow-up tecnico explicito (vide
   admin e desativado/promovido (item 7 — mitiga AUD-W1V4-103).
 - L-3..L-8 dos audit fixes anteriores (CHANGELOG linhas 8204-8214)
   continuam como follow-up.
+
+---
+
+## v4.0 — Wave 2 — Componente 08 (atualizacao v4.0)
+**Data:** 2026-05-06
+**Branch:** `wave2-v4/componente-08`
+**Documento canonico:** [docs/wave2-v4-c08/analysis.md](docs/wave2-v4-c08/analysis.md)
+**ADRs:** 125 (`STATUS_LABELS["CRIADA"]` -> "Aguardando vendedor"),
+126 (rotas legacy sem sufixo), 127 (layout invertido + grid 3x2),
+128 (active menu por prefix-match).
+
+### Adicionado
+- Helper `isPathActive(pathname, href)` em `(dashboard)/layout.tsx`
+  para destacar o item de menu correto quando o pathname e um
+  subpath (caso `/provas/[id]` -> destaca "Provas"). Cobre todos
+  os itens do menu uniformemente. ADR-128.
+
+### Modificado
+- `frontend/src/lib/types/prova.ts`:
+  - `STATUS_LABELS["CRIADA"]` agora "Aguardando vendedor"
+    (era "Criada"). `STATUS_LABELS_SHORT["CRIADA"]` agora
+    "Aguardando" (era "Criada"). ADR-125.
+  - `ROTA_LABELS["PADRAO"]` agora "Padrao" e
+    `ROTA_LABELS["DIRETA"]` agora "Direta" (eram
+    "Matriz (legada v3.0)" e "Filial (legada v3.0)"
+    respectivamente). ADR-126.
+- `frontend/src/app/(dashboard)/provas/[id]/page.tsx`: rewrite
+  cirurgico do JSX. Layout invertido (arte esquerda · info direita),
+  header tipografico com "Requerimento: NNN" pequeno + nome
+  grande + divisor, metadata em grid 3x2 (Cliente · Rota ·
+  Criada em / Vendedor · Ciclo Atual · Status), `Codigo` em mono
+  como item adicional, banner de cancelamento full-width quando
+  `motivo_cancelamento` presente, linha de acoes com 2/3/4 botoes
+  side-by-side via `flex: 1 1 220px`. Card preto do historico
+  agora e secao separada (antes aninhada dentro do innerCard
+  branco). ADR-127.
+- `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css`:
+  rewrite acompanhando o page.tsx. `.innerCardGrid` com
+  `grid-template-columns: minmax(0, 480px) minmax(0, 1fr)`;
+  novas classes `.requerimentoLabel`, `.divider`, `.metaGrid`,
+  `.metaItem`, `.metaLabel`, `.metaValue`, `.actionsRow`;
+  `.motivoCancelamento` virou banner em vez de linha inline;
+  responsivo <= 1100px reduz metaGrid para 2 colunas e empilha
+  innerCardGrid. ADR-127.
+- `frontend/src/app/(dashboard)/layout.tsx`: troca de
+  `pathname === item.href` por `isPathActive(pathname, item.href)`
+  (linhas 261 e 273). ADR-128.
+
+### Pre-condicao operacional (validar antes do merge)
+- C06 Audit Fixes Round 1 (HEAD `8aa75ac` em `development`) deve
+  ser mergeado em `main` antes desta entrega para evitar conflitos.
+  Round 2 da auditoria (`docs/wave2-v4/audit-report-round2.md`)
+  aprovou o C06 para merge condicional ao smoke E2E manual.
+
+### Smoke E2E manual obrigatorio antes do PR final (sem auth no preview programatico)
+1. 3Studio acessa `/provas/[id]` de prova com cada uma das 4 rotas
+   v4.0 + 2 legacy v3.0 (`PADRAO`/`DIRETA`) + 1 NULL — confirma
+   labels novos ("Padrao", "Direta", "—" para null).
+2. Status "CRIADA" exibido como "Aguardando vendedor".
+3. Vendedor acessa prova dele (200) e prova alheia (404 + redirect).
+4. Motorista acessa prova com status `COM_MOTORISTA*` (200).
+5. Clicheria acessa prova com status `*_CLICHERIA` (200).
+6. Status `REPROVADA_PELO_VENDEDOR` (admin) -> 4 botoes
+   (Visualizar | Baixar | Reiniciar | Cancelar).
+7. Status `CANCELADA` -> 2 botoes (Visualizar | Baixar).
+8. Status `RECEBIDA_PELA_CLICHERIA` -> 2 botoes.
+9. Demais status (admin) -> 3 botoes (Visualizar | Baixar | Cancelar).
+10. Modal "Visualizar etiqueta" abre, fecha com ESC, mostra PDF + QR
+    + payload copiavel.
+11. Historico vazio mostra empty state literal do Figma.
+12. Prova com 2 ciclos (existem em producao: max ciclo = 2) mostra
+    agrupamento por ciclo com label "Ciclo X".
+13. Sidebar destaca "Provas" em `/provas/[id]` (ADR-128).
+14. Mobile: `mobileNotice` aparece para viewport <= 768px.
+15. Lighthouse audit basico: contraste AA, labels ARIA, navegacao
+    por teclado.
+
+### Migrations aplicadas
+- Nenhuma. Esta entrega e frontend-only. `idx_movimentacoes_prova`
+  + `idx_movimentacoes_prova_data` ja existiam em producao
+  (validado via MCP no Gate 1).
+
+### Validacao automatizada
+- `npx tsc --noEmit` em `frontend/`: exit 0.
+- `npx next build` em `frontend/`: 13/13 paginas. `/provas/[id]`
+  em 11.4 kB / 209 kB First Load.
+- Backend: nao tocado. Suite `test_provas_api.py` (21 testes do
+  C08 v3.0) preservada — sem regressao esperada.
