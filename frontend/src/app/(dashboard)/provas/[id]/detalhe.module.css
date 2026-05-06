@@ -60,23 +60,26 @@
  * Wave 2 v4.0 / C08: layout invertido — arte a esquerda, info a direita
  * (alinhamento com Figma do Mario). Antes era info esq + arte dir.
  *
- * Padding lateral coerente com o ritmo das demais paginas; a arte
- * mantem aspect-ratio quadrado e ocupa coluna fixa de 480px.
+ * Iteracao pos-Figma (decisao do Mario): arte reduzida de 480px para
+ * 380px e gap de 2.75rem para 2rem, para que o bloco de info ocupe
+ * mais espaco e o conjunto fique mais "blocado" (sem ar excessivo
+ * entre arte e info — espelha a proporcao ~35/65 da imagem de
+ * referencia).
  */
 
 .innerCard {
   background: #ffffff;
   border-radius: var(--radius-card-xl);
-  padding: 2.5rem 2.75rem;
+  padding: 2.25rem 2.5rem;
   margin-bottom: 1rem;
 }
 
 .innerCardGrid {
   display: grid;
-  grid-template-columns: minmax(0, 480px) minmax(0, 1fr);
-  gap: 2.75rem;
+  grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+  gap: 2rem;
   align-items: start;
-  margin-bottom: 1.75rem;
+  margin-bottom: 1.5rem;
 }
 
 .mainInfo {
@@ -120,8 +123,8 @@
 .metaGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1.25rem 2rem;
-  margin-bottom: 1.75rem;
+  gap: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
 }
 
 .metaItem {
@@ -603,7 +606,7 @@
     grid-template-columns: 1fr;
   }
   .artSlot {
-    max-width: 480px;
+    max-width: 380px;
     justify-self: center;
     margin: 0 auto;
   }

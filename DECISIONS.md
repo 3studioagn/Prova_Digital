@@ -5167,14 +5167,19 @@ disponivel).
     `Status`, `Codigo`), banner de cancelamento em row separado
     quando presente, `<actionsRow>` com 2/3/4 botoes side-by-side.
   - `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css`:
-    `.innerCardGrid` com `grid-template-columns: minmax(0, 480px)
-    minmax(0, 1fr)`; `.metaGrid` com `grid-template-columns:
-    repeat(3, minmax(0, 1fr))`; `.actionsRow` com `flex-wrap: nowrap`
+    `.innerCardGrid` com `grid-template-columns: minmax(0, 380px)
+    minmax(0, 1fr)` + gap `2rem` (Mario explicitou que a arte estava
+    grande demais e o conjunto precisava ficar mais "blocado" —
+    reducao de 480px/2.75rem para 380px/2rem aproxima da proporcao
+    ~35/65 do Figma); `.metaGrid` com `grid-template-columns:
+    repeat(3, minmax(0, 1fr))` + gap `1rem 1.5rem` (apertado para
+    cumprir o "blocado"); `.actionsRow` com `flex-wrap: nowrap`
     + `flex: 1 1 0` por botao + `min-width: 0` + `white-space:
     nowrap` + truncamento com ellipsis (Mario explicitou que os
     botoes devem ficar na mesma linha, sem quebrar — modais
     position:fixed nao competem por slot); responsivo <= 1100px
-    reduz metaGrid para 2 colunas e empilha o innerCardGrid.
+    reduz metaGrid para 2 colunas, empilha o innerCardGrid e a
+    arte e centralizada com `max-width: 380px`.
 
 Card preto do historico AGORA E SEPARADO do innerCard branco (antes
 era aninhado dentro). Espelha o Figma e simplifica a hierarquia
