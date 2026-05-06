@@ -5364,3 +5364,38 @@ considerar uma das opcoes:
 **Consequencias:**
   - Status quo preservado.
   - Decisao registrada para evitar re-litigio em auditoria futura.
+
+---
+
+## ADR-131 — Observacoes positivas pos-auditoria C08 (AUD-014, 015, 016)
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08 — sessao de correcoes pos-auditoria)
+**Contexto:** A Fase 3 da auditoria registrou 3 achados INFO positivos
+que confirmam saude do sistema apos a entrega do C08. Sem acao
+operacional necessaria — registrados aqui para preservar o sinal
+historico.
+
+**AUD-W2C08-014 — Distribuicao em produção (65% provas legacy):**
+17 provas em produção, 11 legacy (`rota IS NULL`). Implicacao: o
+redesenho do detalhe e exercitado dominantemente em provas com
+`rota=NULL` ate a Wave 7 (Componente 21) fazer o backfill. O
+tratamento `formatRota(null)="—"` (ADR-126) e norma, nao caso de
+borda. AUD-W2C08-011 adicionou tooltip explicativo para tornar
+isso explicito.
+
+**AUD-W2C08-015 — Cloudflare R2 nao tocado:** validado via
+`git diff development..wave2-v4-c08/audit -- backend/ scripts/` (zero
+arquivos). Sem novos buckets, workers ou KV. Escopo frontend-only do
+C08 respeitado integralmente.
+
+**AUD-W2C08-016 — Advisors sem novos alertas:** apos C08, somente
+2 alertas pre-existentes na seguranca (alembic_version sem RLS
+policy — ADR-025; auth_leaked_password_protection — ADR-027) e 13
+INFO `unused_index` esperados em volume baixo. Nenhum novo alerta
+atribuivel ao C08 ou a esta sessao de correcoes.
+
+**Decisao:** registrar como observacao informativa (sem acao). Sinal
+positivo de saude do sistema.
+
+**Consequencias:**
+  - Confirma que o escopo do C08 foi respeitado (frontend-only).
+  - Proxima auditoria pode usar este ADR como baseline de comparacao.
