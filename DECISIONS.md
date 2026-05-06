@@ -5215,6 +5215,21 @@ Provas legacy `rota IS NULL` continuam exibindo "—" via `formatRota`
   - Smoke visual humano obrigatorio antes do merge (sem auth no dev
     server, validacao programatica nao cobre o detalhe completo).
 
+**Apendice pos-auditoria (2026-05-06, AUD-W2C08-005 + 006):** o auditor
+identificou que o `metaGrid` foi entregue com 7 itens (slot extra de
+`Codigo: PRV-AAAA-MM-NNNNNN`) — fora do plano 3x2 estabelecido pela
+imagem do Figma. Em viewports `<= 1100px` (responsivo `repeat(2,1fr)`),
+isso criava uma celula orfa na ultima linha, contradizendo o "blocado"
+pedido pelo Mario. **Decisao corretiva:** o `codigo_publico` foi movido
+do `metaGrid` para o `requerimentoLabel` (subtitulo do header), separado
+de `Requerimento: NNN` por ` · `, com tipografia mono em fonte menor.
+Justificativa: ambos sao identificadores secundarios da prova; agrupa-los
+no mesmo bloco semantico mantem o `metaGrid` 3x2 estrito (Cliente/Rota/
+Criada em + Vendedor/Ciclo Atual/Status), restaura simetria responsiva
+e preserva o codigo publico visivel sem competir com os atributos de
+ciclo de vida. A classe `.mono` ficou orfa apos a remocao e foi removida
+de `detalhe.module.css`.
+
 ---
 
 ## ADR-128 — Active menu por prefix-match (destaque "Provas" em /provas/[id])

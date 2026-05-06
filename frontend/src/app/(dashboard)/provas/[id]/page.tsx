@@ -190,6 +190,12 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                 <div className={styles.mainInfo}>
                   <p className={styles.requerimentoLabel}>
                     Requerimento: {prova.nro_requerimento}
+                    <span className={styles.requerimentoSep} aria-hidden="true">
+                      {" · "}
+                    </span>
+                    <span className={styles.codigoPublico}>
+                      {prova.codigo_publico}
+                    </span>
                   </p>
                   <h1 className={styles.title}>{prova.nome}</h1>
                   <hr className={styles.divider} />
@@ -227,14 +233,6 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                       <span className={styles.metaLabel}>Status:</span>
                       <span className={styles.metaValue}>
                         {formatStatus(prova.status)}
-                      </span>
-                    </div>
-                    <div className={styles.metaItem}>
-                      <span className={styles.metaLabel}>Codigo:</span>
-                      <span
-                        className={`${styles.metaValue} ${styles.mono}`}
-                      >
-                        {prova.codigo_publico}
                       </span>
                     </div>
                   </div>

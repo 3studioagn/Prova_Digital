@@ -92,6 +92,14 @@
  * Wave 2 v4.0 / C08: pequeno "Requerimento: NNN" acima do nome grande
  * (espelha hierarquia do Figma). Antes o nro de requerimento era titulo
  * e o nome subtitulo.
+ *
+ * Pos-auditoria (AUD-W2C08-005 + 006): codigo_publico (PRV-AAAA-MM-NNNNNN)
+ * passou a aparecer como subtitulo no proprio `requerimentoLabel`,
+ * separado por ` · `, em vez de ocupar um 7o slot no `.metaGrid` (que
+ * o Figma estabelece como 3x2 estrito). Isso restaura simetria do grid
+ * em desktop e em mobile-tablet (<= 1100px = repeat(2,1fr)) sem celula
+ * orfa, e mantem o codigo exposto no header semantico de identificacao
+ * da prova.
  */
 
 .requerimentoLabel {
@@ -100,6 +108,18 @@
   line-height: 1.2;
   color: var(--color-card-text-muted);
   margin-bottom: 0.4rem;
+}
+
+.requerimentoSep {
+  margin: 0 0.1rem;
+  color: var(--color-card-text-dim, var(--color-card-text-muted));
+}
+
+.codigoPublico {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  color: var(--color-card-text-muted);
 }
 
 .title {
@@ -149,12 +169,6 @@
   line-height: 1.3;
   min-width: 0;
   word-break: break-word;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-weight: 500;
-  letter-spacing: 0.02em;
 }
 
 /* Banner de cancelamento (full row sob o grid quando presente) */
