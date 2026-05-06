@@ -252,8 +252,14 @@
 
 /* ── Slot da arte ─────────────────────────────────────────────────── *
  * Wave 2 v4.0 / C08: agora a esquerda no grid. Aspect-ratio quadrado,
- * largura full da coluna (max 480px). Fundo cinza neutro como
+ * largura full da coluna (max 480px). Fundo cinza medio como
  * placeholder do Figma quando a arte nao carrega.
+ *
+ * AUD-W2C08-004: usa token semantico dedicado `--color-card-art-bg`
+ * (#d9d9d9, definido em globals.css) em vez de `--color-card-surface`.
+ * Garante contraste visivel contra o card branco (`.innerCard`)
+ * mesmo se outros componentes futuros mudarem `--color-card-surface`
+ * para um cinza mais claro.
  */
 
 .artSlot {
@@ -262,7 +268,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-card-surface, #d9d9d9);
+  background: var(--color-card-art-bg);
   border-radius: var(--radius-card-xl);
   overflow: hidden;
 }

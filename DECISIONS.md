@@ -5256,3 +5256,61 @@ A condicao `+ "/"` e essencial para evitar falsos positivos:
   - Sem regressao em pages que sao exact-match (Dashboard, Nova prova,
     Escanear, etc.) porque elas nao tem subpath.
   - Middleware bundle inalterado.
+
+---
+
+## ADR-129 — Token semantico dedicado `--color-card-art-bg` para `.artSlot`
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08 — sessao de correcoes pos-auditoria, AUD-W2C08-004)
+**Contexto:** A auditoria senior do C08 (`docs/wave2-v4-c08/audit-report.md`)
+identificou que `.artSlot` em `detalhe.module.css` usava
+`var(--color-card-surface, #d9d9d9)` — um token compartilhado com outros
+componentes (e.g. `.qrPayloadInput` no modal de etiqueta). O auditor
+notou que se em algum momento `--color-card-surface` for alterado para
+um cinza mais claro (e.g. `#e4e4e4`, valor que apareceu em mudancas
+nao-commitadas no working tree na entrada da sessao), o `.artSlot`
+ficaria visualmente quase invisivel contra o `.cardInner` do card
+branco principal — perdendo a funcao de placeholder visivel quando a
+arte ainda esta carregando ou quando o objeto R2 nao existe mais.
+
+A imagem do Figma do Mario (`docs/wave2-v4-c08/figma-reference.png`,
+preservada em AUD-W2C08-001) mostra um quadrado cinza medio claramente
+distinto do card branco — comportamento que precisa ser preservado por
+fidelidade visual.
+
+**Decisao:** introduzir token semantico dedicado em
+`frontend/src/app/globals.css` (`:root`):
+
+```css
+--color-card-art-bg: #d9d9d9;
+```
+
+`.artSlot` em `detalhe.module.css:259` passa a usar
+`background: var(--color-card-art-bg)` (sem fallback — o token sempre
+estara definido). O `--color-card-surface` permanece com valor proprio
+e segue sendo usado por `.qrPayloadInput` etc. — separacao semantica
+explicita.
+
+**Alternativas:**
+  - Manter `var(--color-card-surface, #d9d9d9)` e confiar que ninguem
+    vai mudar o token compartilhado — rejeitado: o estado do working
+    tree na entrada da sessao mostrava exatamente esse cenario
+    (mudanca para `#e4e4e4` agravando o achado). Acoplamento implicito
+    e fragil.
+  - Hardcodar `#d9d9d9` em `.artSlot` — rejeitado: nao escala, dificulta
+    futura mudanca de paleta consistente, e nao registra a intencao
+    semantica.
+  - Renomear `--color-card-surface` para `--color-card-input-bg` e
+    introduzir `--color-card-art-bg` separado — rejeitado: mudanca
+    cross-page exige refactor de todos os consumers atuais; fora do
+    escopo da sessao de correcoes pos-auditoria.
+
+**Consequencias:**
+  - Fidelidade visual contra Figma preservada em loading e em erro
+    de imagem.
+  - `--color-card-surface` pode ser ajustado no futuro sem afetar o
+    slot da arte — desacoplamento explicito.
+  - Token novo limita-se ao slot — nenhum outro componente passa a
+    depender dele, evitando re-emergencia do mesmo acoplamento sob
+    nova roupa.
+  - Sem regressao funcional. Smoke visual ratifica contra prova legacy
+    com arte ausente do R2.
