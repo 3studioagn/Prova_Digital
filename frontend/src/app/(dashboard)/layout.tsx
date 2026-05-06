@@ -79,6 +79,20 @@ function isNavItemVisible(item: NavItemSpec, user: UserLike | null): boolean {
   return evaluateRule(rule, user).acesso !== "negado";
 }
 
+/** Wave 2 v4.0 / C08: destaque do menu por prefix-match.
+ *
+ * O usuario espera que "Provas" continue ativo na pagina de detalhe
+ * (`/provas/[id]`). Antes a comparacao era estrita (`pathname === href`)
+ * e quebrava esse caso. Agora permitimos `pathname.startsWith(href + "/")`
+ * — cobre /provas/[id], futuro /relatorios/[xxx], etc., sem ativar
+ * /provas em /provas-other (porque exige separador `/`).
+ */
+function isPathActive(pathname: string, href: string | undefined): boolean {
+  if (!href) return false;
+  if (pathname === href) return true;
+  return pathname.startsWith(href + "/");
+}
+
 function NavEntry({
   item,
   active,
@@ -258,7 +272,7 @@ export default function DashboardLayout({
               <NavEntry
                 key={item.key}
                 item={item}
-                active={Boolean(item.href && pathname === item.href)}
+                active={isPathActive(pathname, item.href)}
               />
             ))}
           </nav>
@@ -270,7 +284,7 @@ export default function DashboardLayout({
               <NavEntry
                 key={item.key}
                 item={item}
-                active={Boolean(item.href && pathname === item.href)}
+                active={isPathActive(pathname, item.href)}
               />
             ))}
           </nav>
