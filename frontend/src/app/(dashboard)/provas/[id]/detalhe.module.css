@@ -2,8 +2,19 @@
   display: none;
 }
 
+/* Pos-correcoes Mario (apos AUD-W2C08): a coluna do conteudo da pagina
+   vira flex column de altura minima 100% do `.cardInner` pai (do
+   layout do dashboard). Assim o `.innerCard` (branco) pode ganhar
+   `flex: 1` e se estender verticalmente ate encostar no
+   `.timelineCard` (preto), espelhando a imagem do Figma onde o card
+   branco "pega ate em baixo no card de historico". O cardInner pai
+   continua provendo `overflow-y: auto` quando o conteudo for maior
+   que o viewport (sem regressao em mobile/tablet).
+*/
 .desktopOnly {
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
 /* ── Botao Voltar ─────────────────────────────────────────────────── */
@@ -72,6 +83,12 @@
   border-radius: var(--radius-card-xl);
   padding: 2.25rem 2.5rem;
   margin-bottom: 1rem;
+  /* Flex grow: ocupa todo o espaco vertical disponivel entre o botao
+     Voltar e o `.timelineCard`. Combinado com `align-items: center`
+     no `.innerCardGrid`, o conteudo (arte + info) fica centralizado
+     verticalmente no card crescido. Espelha a imagem do Figma onde
+     o card branco e claramente mais alto que o conteudo natural. */
+  flex: 1;
 }
 
 .innerCardGrid {
