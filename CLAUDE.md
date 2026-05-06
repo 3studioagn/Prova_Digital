@@ -521,3 +521,84 @@ policies operam sobre `vendedor_id` / `setor` / `status`, nao sobre
 
 **`codigo_publico`** NAO depende da rota — formato `PRV-AAAA-MM-NNNNNN`
 e estavel independente do enum.
+
+---
+
+## Pagina de detalhe da prova: estrutura e extensao para Wave 3 (Componente 08 v4.0+)
+
+A rota `/provas/[id]` e o ponto onde o usuario consulta uma prova
+individual. O C08 v4.0 entregou redesign visual + suporte para as 4
+rotas v4.0 + tratamento de provas legacy (`rota=NULL`). A Wave 3 v4.0
+expandira a maquina de estados de 10 para 14 valores em
+`StatusProvaEnum` (Componente 11) — esta secao orienta como adicionar
+um novo valor sem reescrever a Timeline ou os labels.
+
+### Arquivos da pagina (estado pos-AUD-W2C08)
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `frontend/src/app/(dashboard)/provas/[id]/page.tsx` | Header (`Requerimento: NNN · PRV-...`), grid 3x2 de metadata, banner de cancelamento, linha de acoes (`AdminActions`). |
+| `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css` | Estilos do card branco principal + card preto do historico + modais admin. Token `--color-card-art-bg` (ADR-129) garante slot da arte visivel. |
+| `frontend/src/app/(dashboard)/provas/[id]/Timeline.tsx` | Componente orientado a dados — derivado de `movimentacoes[]`. As 4 flags booleanas (`isReprovacao`, `isCancelamento`, `isTerminal`, `isRoteamento`) sao calculadas por comparacao direta com strings de `status_novo`. |
+| `frontend/src/app/(dashboard)/provas/[id]/AdminActions.tsx` | Botao Cancelar (status em `CANCELAVEIS`) + Reiniciar (`REPROVADA_PELO_VENDEDOR`) — usa `useAuthorization("provas.cancel")` / `provas.restart` da Matriz Wave 1 v4.0. |
+| `frontend/src/app/(dashboard)/provas/[id]/VisualizarEtiquetaModal.tsx` | Modal com PDF da etiqueta + QR code (binarios via fetch direto, nao apiFetch). |
+| `frontend/src/lib/types/prova.ts` | `StatusProva`, `Rota`, `STATUS_LABELS`, `STATUS_LABELS_SHORT`, `ROTA_LABELS`, helper puro `formatRota` (extraido em AUD-W2C08-003 — testado em `__tests__/prova.test.ts`). |
+| `frontend/src/lib/path-active.ts` | Helper puro `isPathActive` (extraido em AUD-W2C08-003 — testado em `__tests__/path-active.test.ts`). Consumido por `(dashboard)/layout.tsx`. |
+
+### Como adicionar valor a `StatusProvaEnum` (4 camadas)
+
+Toda adicao precisa sincronizar 4 camadas (mesmo padrao da secao
+`rota_enum`); sem todas, o sistema fica inconsistente.
+
+1. **Python `StatusProvaEnum`** em `backend/app/db/models.py`: adicionar
+   o membro com nome `UPPER_SNAKE_CASE` (e.g. `LAMINANDO_MATRIZ`).
+2. **PostgreSQL via Alembic**: nova migration com
+   `ALTER TYPE status_prova_enum ADD VALUE IF NOT EXISTS '<NOVO>';`
+   (Postgres 12+ permite em transacao com `IF NOT EXISTS`).
+3. **Tabela de transicoes** (Wave 3 v4.0 — Componente 11):
+   `state_machine.TRANSICOES` + `ATORES_POR_TRANSICAO` em
+   `backend/app/services/state_machine.py`. Adicionar linhas para
+   transicoes que ENTRAM e SAEM do novo estado, respeitando RN/RF.
+4. **TypeScript**: em `frontend/src/lib/types/prova.ts`:
+   - Adicionar valor a `StatusProva` (union literal).
+   - Adicionar entrada em `STATUS_LABELS` (label completo, e.g.
+     `"Laminando (matriz)"`).
+   - Adicionar entrada em `STATUS_LABELS_SHORT` (label curto para
+     listagem, e.g. `"Laminando"`).
+   - Adicionar valor em `STATUS_OPTIONS` (ordem canonica de exibicao).
+   - O `Record<StatusProva, string>` forca exhaustividade — se faltar
+     entrada, `tsc --noEmit` falha.
+
+### Quando expandir as flags em `Timeline.tsx`
+
+A Timeline ja e orientada a dados — adicionar um novo estado nao exige
+tocar o componente, **a menos que** o estado precise de cor/badge
+distinto. As 4 flags atuais derivam diretamente de `status_novo`:
+
+```ts
+isReprovacao: sNovo === "REPROVADA_PELO_VENDEDOR",
+isCancelamento: sNovo === "CANCELADA",
+isTerminal: sNovo === "RECEBIDA_PELA_CLICHERIA",
+isRoteamento: sNovo === "APROVADA_PELO_VENDEDOR",
+```
+
+Wave 3 v4.0 podera adicionar `isLaminacao` (cor/badge especial para
+LAMINANDO_MATRIZ + LAMINANDO_FILIAL) ou expandir `isRoteamento` para
+incluir transicoes de motorista (COM_MOTORISTA_MATRIZ etc.). Decisao
+fora do escopo do C08; quando ocorrer, atualizar tambem
+`timeline.module.css` com classe correspondente (e.g. `.nodeLaminacao`).
+
+### Tratamento de provas legacy (`rota IS NULL`)
+
+`formatRota(null)` retorna `"—"`. Ate Wave 7 (Componente 21) fazer o
+backfill, **65% das provas em producao** sao legacy v3.0 — o
+tratamento deve ser preservado em qualquer iteracao futura. AUD-W2C08-011
+adicionou `title` HTML no em-dash explicando que e prova legacy.
+
+### Testes Vitest da pagina
+
+Existem em `frontend/src/lib/__tests__/path-active.test.ts` (5 cenarios)
+e `frontend/src/lib/types/__tests__/prova.test.ts` (8 cenarios).
+Padrao: testar funcoes puras isoladas em `__tests__/<nome>.test.ts`,
+sem render do componente — Vitest config esta em `environment: node`
+(sem jsdom) para minimizar superficie instalada (Wave 1 v4.0 / AUD-W1V4-005).
