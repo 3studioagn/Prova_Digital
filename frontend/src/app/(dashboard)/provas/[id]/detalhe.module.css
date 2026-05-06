@@ -172,22 +172,29 @@
   margin-right: 0.25rem;
 }
 
-/* ── Linha de acoes (2/3/4 botoes side-by-side) ───────────────────── *
- * Wave 2 v4.0 / C08: flex com `flex: 1 1 220px` em cada botao garante
- * largura igual quando ha espaco e wrap suave em viewports estreitas.
+/* ── Linha de acoes (2/3/4 botoes side-by-side, sem quebra) ───────── *
+ * Wave 2 v4.0 / C08: `nowrap` garante todos os botoes na MESMA linha
+ * (decisao do Mario). `flex: 1 1 0` distribui largura igualmente entre
+ * os botoes presentes; `min-width: 0` permite compressao em viewports
+ * estreitas (entre 768px e 1100px); `white-space: nowrap` + truncamento
+ * com ellipsis evita quebra de texto interno.
+ *
  * Modais (.modalOverlay) sao position:fixed e nao competem por slots.
  */
 
 .actionsRow {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.75rem;
   width: 100%;
 }
 
 .actionsRow > button {
-  flex: 1 1 220px;
+  flex: 1 1 0;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .btnPrimary {

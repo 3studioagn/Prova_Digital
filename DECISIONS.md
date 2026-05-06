@@ -5169,10 +5169,12 @@ disponivel).
   - `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css`:
     `.innerCardGrid` com `grid-template-columns: minmax(0, 480px)
     minmax(0, 1fr)`; `.metaGrid` com `grid-template-columns:
-    repeat(3, minmax(0, 1fr))`; `.actionsRow` com flex e
-    `flex: 1 1 220px` por botao (modais position:fixed nao competem
-    por slot); responsivo <= 1100px reduz metaGrid para 2 colunas
-    e empilha o innerCardGrid.
+    repeat(3, minmax(0, 1fr))`; `.actionsRow` com `flex-wrap: nowrap`
+    + `flex: 1 1 0` por botao + `min-width: 0` + `white-space:
+    nowrap` + truncamento com ellipsis (Mario explicitou que os
+    botoes devem ficar na mesma linha, sem quebrar — modais
+    position:fixed nao competem por slot); responsivo <= 1100px
+    reduz metaGrid para 2 colunas e empilha o innerCardGrid.
 
 Card preto do historico AGORA E SEPARADO do innerCard branco (antes
 era aninhado dentro). Espelha o Figma e simplifica a hierarquia
@@ -5188,8 +5190,14 @@ Provas legacy `rota IS NULL` continuam exibindo "—" via `formatRota`
     "Don't add features beyond what the task requires").
   - Usar CSS Grid em `.actionsRow` com `repeat(auto-fit, minmax(0, 1fr))`
     para forcar largura igual — rejeitado: `auto-fit` colapsa para
-    `min-content` em alguns casos. `flex: 1 1 220px` deu
-    comportamento estavel para 2/3/4 botoes.
+    `min-content` em alguns casos. `flex` deu comportamento estavel
+    para 2/3/4 botoes.
+  - Manter `flex-wrap: wrap` com `flex: 1 1 220px` (proposta inicial
+    desta sessao) — rejeitado: Mario explicitou "os 3 botoes irao
+    ficar na mesma linha, sem quebrar linha". `nowrap` + `flex: 1 1 0`
+    + `min-width: 0` cumpre a regra mesmo em viewports apertadas
+    (a custo de truncamento com ellipsis no caso extremo de 4 botoes
+    em viewport 768-900px).
 
 **Consequencias:**
   - `/provas/[id]` 11.4 kB / 209 kB First Load (era ~10 kB).
