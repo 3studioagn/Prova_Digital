@@ -78,7 +78,7 @@
   display: grid;
   grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
   gap: 2rem;
-  align-items: start;
+  align-items: center;
   margin-bottom: 1.5rem;
 }
 
@@ -103,7 +103,7 @@
 }
 
 .title {
-  font-size: clamp(2rem, 3.6vw, 3.25rem);
+  font-size: clamp(1rem, 2.5vw, 2.5rem);
   font-weight: 500;
   line-height: 1.05;
   color: var(--color-card-text);
@@ -204,7 +204,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.95rem 1.5rem;
+  padding: 0.8rem 1.5rem;
   background: var(--color-accent);
   color: var(--color-card-text);
   border: none;
