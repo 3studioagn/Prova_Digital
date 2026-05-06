@@ -5,9 +5,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useProvaDetail } from "@/hooks/useProvaDetail";
 import {
-  ROTA_LABELS,
   STATUS_LABELS,
-  type Rota,
+  formatRota,
   type StatusProva,
 } from "@/lib/types/prova";
 import { AdminActions } from "./AdminActions";
@@ -25,15 +24,6 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-function formatRota(rota: Rota | null): string {
-  // Wave 2 v4.0 (Componente 06): `rota_projetada` foi removido — `prova.rota`
-  // ja vem persistido com a escolha do admin desde a criacao. Provas
-  // legadas v3.0 com rota=NULL exibem "—" ate a Wave 7 (Componente 21)
-  // fazer o backfill final.
-  if (rota) return ROTA_LABELS[rota];
-  return "—";
 }
 
 function formatStatus(status: StatusProva): string {

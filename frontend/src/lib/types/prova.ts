@@ -199,6 +199,21 @@ export const ROTA_LABELS: Record<Rota, string> = {
   DIRETA: "Direta",
 };
 
+/** Formata uma rota (ou ausencia dela) para exibicao na pagina de detalhe.
+ *
+ * Wave 2 v4.0 / C08 (Componente 06 ja consolidou a estrutura):
+ * `rota_projetada` foi removido — `prova.rota` ja vem persistido com a
+ * escolha do admin desde a criacao. Provas legadas v3.0 com `rota=NULL`
+ * exibem "—" ate a Wave 7 (Componente 21) fazer o backfill final.
+ *
+ * Extraido de `(dashboard)/provas/[id]/page.tsx` na sessao pos-auditoria
+ * (AUD-W2C08-003) para permitir teste unitario isolado via Vitest.
+ */
+export function formatRota(rota: Rota | null): string {
+  if (rota) return ROTA_LABELS[rota];
+  return "—";
+}
+
 /** Apenas as 4 rotas v4.0, na ordem do design (Mario): linha 1 = Matriz/Filial,
  * linha 2 = Lam. Matriz / Lam. Filial. */
 export const ROTA_CRIACAO_OPTIONS: readonly RotaCriacao[] = [

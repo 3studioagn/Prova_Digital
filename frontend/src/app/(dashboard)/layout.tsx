@@ -16,6 +16,7 @@ import {
   type Setor,
   type UserLike,
 } from "@/lib/access-matrix";
+import { isPathActive } from "@/lib/path-active";
 import {
   ChartIcon,
   CloseIcon,
@@ -77,20 +78,6 @@ function isNavItemVisible(item: NavItemSpec, user: UserLike | null): boolean {
   const rule = getRuleByKey(item.ruleKey);
   if (rule === null) return true;
   return evaluateRule(rule, user).acesso !== "negado";
-}
-
-/** Wave 2 v4.0 / C08: destaque do menu por prefix-match.
- *
- * O usuario espera que "Provas" continue ativo na pagina de detalhe
- * (`/provas/[id]`). Antes a comparacao era estrita (`pathname === href`)
- * e quebrava esse caso. Agora permitimos `pathname.startsWith(href + "/")`
- * — cobre /provas/[id], futuro /relatorios/[xxx], etc., sem ativar
- * /provas em /provas-other (porque exige separador `/`).
- */
-function isPathActive(pathname: string, href: string | undefined): boolean {
-  if (!href) return false;
-  if (pathname === href) return true;
-  return pathname.startsWith(href + "/");
 }
 
 function NavEntry({
