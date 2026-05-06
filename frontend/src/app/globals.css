@@ -31,6 +31,14 @@
   --color-card-text-muted: #575757;
   --color-card-text-dim: #868686;
   --color-card-border: #868686;
+  /* Wave 2 v4.0 / C08 (ADR-129): token semantico dedicado para o slot
+     da arte na pagina de detalhe. Cinza medio (#d9d9d9) intencionalmente
+     mais escuro que `--color-card-bg` para permanecer visivel quando a
+     imagem esta em loading ou falhou. Separa a semantica do
+     `--color-card-surface` (que e usado em outros componentes como o
+     input do payload do QR no modal de etiqueta — eles nao precisam
+     contrastar com o card branco). */
+  --color-card-art-bg: #d9d9d9;
 
   /* ── Acentos (comuns as duas superficies) ───────────────────────────────── */
   --color-accent: #ffcb5c;

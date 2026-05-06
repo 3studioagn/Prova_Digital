@@ -2,22 +2,25 @@
   display: none;
 }
 
-/* Wave 2 v4.0 (Componente 06): codigo_publico exibido em destaque
-   na lista de metadados (`PRV-AAAA-MM-NNNNNN`). */
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-}
-
+/* Pos-correcoes Mario (apos AUD-W2C08): a coluna do conteudo da pagina
+   vira flex column de altura minima 100% do `.cardInner` pai (do
+   layout do dashboard). Assim o `.innerCard` (branco) pode ganhar
+   `flex: 1` e se estender verticalmente ate encostar no
+   `.timelineCard` (preto), espelhando a imagem do Figma onde o card
+   branco "pega ate em baixo no card de historico". O cardInner pai
+   continua provendo `overflow-y: auto` quando o conteudo for maior
+   que o viewport (sem regressao em mobile/tablet).
+*/
 .desktopOnly {
-  display: contents;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
 }
 
 /* ── Botao Voltar ─────────────────────────────────────────────────── */
 
 .breadcrumb {
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 }
 
 .backBtn {
@@ -64,28 +67,47 @@
   margin-bottom: 1rem;
 }
 
-/* ── Card branco nested: envolve dados + arte + timeline preto ─────── *
- * Container unico que contem:
- *   (1) innerCardGrid — dados a esquerda, arte quadrada a direita
- *   (2) timelineCard — card preto com historico aninhado dentro
+/* ── Card branco principal ────────────────────────────────────────── *
+ * Wave 2 v4.0 / C08: layout invertido — arte a esquerda, info a direita
+ * (alinhamento com Figma do Mario). Antes era info esq + arte dir.
  *
- * Padding lateral mais enxuto que o card do dashboard para nao competir
- * visualmente com o wrapper externo.
+ * Iteracao pos-Figma (decisao do Mario): arte reduzida de 480px para
+ * 380px e gap de 2.75rem para 2rem, para que o bloco de info ocupe
+ * mais espaco e o conjunto fique mais "blocado" (sem ar excessivo
+ * entre arte e info — espelha a proporcao ~35/65 da imagem de
+ * referencia).
  */
 
 .innerCard {
   background: #ffffff;
   border-radius: var(--radius-card-xl);
-  padding: 2.75rem 3rem;
+  padding: 2.25rem 2.5rem;
   margin-bottom: 1rem;
+  /* Flex grow: ocupa todo o espaco vertical disponivel entre o botao
+     Voltar e o final do `.cardInner` pai. Espelha a imagem do Figma
+     onde o card branco e claramente mais alto que o conteudo natural.
+
+     Pos-correcoes Mario (apos AUD-W2C08): o `.timelineCard` agora e
+     ANINHADO dentro deste card branco (vide JSX). `display: flex;
+     flex-direction: column` empilha:
+       1. `.innerCardGrid` (arte + info + acoes) no topo
+       2. `.timelineCard` (historico preto) no rodape, ancorado via
+          `margin-top: auto` (vide regra dele abaixo).
+  */
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .innerCardGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 380px);
-  gap: 2.5rem;
+  /* Pos-correcoes Mario (visual refresh apos aninhamento): largura
+     da arte reduzida de 380px para 320px — proporcao mais fiel ao
+     Figma onde a arte ocupa ~25% do card branco (era ~29%). */
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+  gap: 2rem;
   align-items: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
 }
 
 .mainInfo {
@@ -94,74 +116,140 @@
   min-width: 0;
 }
 
-/* ── Header interno do card branco ────────────────────────────────── *
- * Hierarquia visual: numero MUITO bold e grande (peso 700), nome
- * abaixo com peso 600 e tamanho apenas ligeiramente menor — o Figma
- * trata os dois como um "titulo duplo" onde o numero e o principal e
- * o nome e o secundario de peso quase igual.
+/* ── Header tipografico ───────────────────────────────────────────── *
+ * Wave 2 v4.0 / C08: pequeno "Requerimento: NNN" acima do nome grande
+ * (espelha hierarquia do Figma). Antes o nro de requerimento era titulo
+ * e o nome subtitulo.
+ *
+ * Pos-auditoria (AUD-W2C08-005 + 006): codigo_publico (PRV-AAAA-MM-NNNNNN)
+ * passou a aparecer como subtitulo no proprio `requerimentoLabel`,
+ * separado por ` · `, em vez de ocupar um 7o slot no `.metaGrid` (que
+ * o Figma estabelece como 3x2 estrito). Isso restaura simetria do grid
+ * em desktop e em mobile-tablet (<= 1100px = repeat(2,1fr)) sem celula
+ * orfa, e mantem o codigo exposto no header semantico de identificacao
+ * da prova.
  */
 
-.title {
-  font-size: 2.8rem;
+.requerimentoLabel {
+  font-size: 0.95rem;
   font-weight: 400;
-  line-height: 1;
-  color: var(--color-card-text);
-  letter-spacing: -0.025em;
+  line-height: 1.2;
+  color: var(--color-card-text-muted);
   margin-bottom: 0.4rem;
 }
 
-.subtitle {
-  font-size: 4rem;
-  font-weight: 400;
+.requerimentoSep {
+  margin: 0 0.1rem;
+  color: var(--color-card-text-dim, var(--color-card-text-muted));
+}
+
+.codigoPublico {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  color: var(--color-card-text-muted);
+}
+
+.title {
+  /* AUD-W2C08-007: minimo 1.5rem (24px) para nao colapsar abaixo do
+     metaValue (1rem) em viewports tablet (768-1100px). Maximo 2.5rem
+     (40px) preservado, alinhado com a hierarquia tipografica do Figma. */
+  font-size: clamp(1.5rem, 2.5vw, 2.5rem);
+  font-weight: 500;
   line-height: 1.05;
   color: var(--color-card-text);
   letter-spacing: -0.02em;
+  margin: 0 0 1.25rem;
+}
+
+.divider {
+  height: 1px;
+  background: var(--color-card-divider, rgba(0, 0, 0, 0.08));
+  border: none;
+  margin: 0 0 1.5rem;
+}
+
+/* ── Grid de metadata 3x2 ─────────────────────────────────────────── */
+
+.metaGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem 1.5rem;
   margin-bottom: 1.5rem;
 }
 
-/* ── Lista de metadata compacta ───────────────────────────────────── */
-
-.metadata {
+.metaItem {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  margin-bottom: 1.75rem;
+  gap: 0.2rem;
+  min-width: 0;
 }
 
-.metadataItem {
-  font-size: 0.95rem;
+.metaLabel {
+  font-size: 0.8rem;
+  font-weight: 400;
   color: var(--color-card-text-muted);
-  margin: 0;
-
+  text-transform: none;
+  letter-spacing: 0;
 }
 
-.metadataItem strong {
+.metaValue {
+  font-size: 1.05rem;
   font-weight: 500;
-  color: var(--color-card-text-muted);
+  color: var(--color-card-text);
+  line-height: 1.3;
+  min-width: 0;
+  word-break: break-word;
 }
 
+/* Banner de cancelamento (full row sob o grid quando presente) */
 .motivoCancelamento {
-  color: var(--color-danger) !important;
+  margin-top: 0.5rem;
+  padding: 0.75rem 0.95rem;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
+  border-radius: var(--radius-card-lg);
+  color: var(--color-danger);
+  font-size: 0.95rem;
   font-style: italic;
 }
 
 .motivoCancelamento strong {
-  color: var(--color-danger) !important;
+  font-style: normal;
+  font-weight: 600;
+  margin-right: 0.25rem;
 }
 
-/* ── Botoes de acao ───────────────────────────────────────────────── */
+/* ── Linha de acoes (2/3/4 botoes side-by-side, sem quebra) ───────── *
+ * Wave 2 v4.0 / C08: `nowrap` garante todos os botoes na MESMA linha
+ * (decisao do Mario). `flex: 1 1 0` distribui largura igualmente entre
+ * os botoes presentes; `min-width: 0` permite compressao em viewports
+ * estreitas (entre 768px e 1100px); `white-space: nowrap` + truncamento
+ * com ellipsis evita quebra de texto interno.
+ *
+ * Modais (.modalOverlay) sao position:fixed e nao competem por slots.
+ */
 
-.actions {
+.actionsRow {
   display: flex;
-  gap: 0.9rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.actionsRow > button {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .btnPrimary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.1rem 2.5rem;
+  padding: 0.8rem 1.5rem;
   background: var(--color-accent);
   color: var(--color-card-text);
   border: none;
@@ -171,7 +259,6 @@
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s ease;
-  min-width: 180px;
 }
 
 .btnPrimary:hover:not(:disabled) {
@@ -187,7 +274,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.85rem 1.5rem;
+  padding: 0.95rem 1.5rem;
   background: #000000;
   color: #ffffff;
   border: none;
@@ -197,7 +284,6 @@
   font-weight: 500;
   cursor: pointer;
   transition: opacity 0.15s ease;
-  min-width: 180px;
 }
 
 .btnSecondary:hover:not(:disabled) {
@@ -209,24 +295,33 @@
   cursor: not-allowed;
 }
 
+/* ── Slot da arte ─────────────────────────────────────────────────── *
+ * Wave 2 v4.0 / C08: agora a esquerda no grid. Aspect-ratio quadrado,
+ * largura full da coluna (max 480px). Fundo cinza medio como
+ * placeholder do Figma quando a arte nao carrega.
+ *
+ * AUD-W2C08-004: usa token semantico dedicado `--color-card-art-bg`
+ * (#d9d9d9, definido em globals.css) em vez de `--color-card-surface`.
+ * Garante contraste visivel contra o card branco (`.innerCard`)
+ * mesmo se outros componentes futuros mudarem `--color-card-surface`
+ * para um cinza mais claro.
+ */
 
 .artSlot {
+  width: 100%;
+  aspect-ratio: 1 / 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 90%;
-  aspect-ratio: 1 / 1;
-  justify-self: end;
-  background: var(--color-card-surface);
+  background: var(--color-card-art-bg);
   border-radius: var(--radius-card-xl);
   overflow: hidden;
 }
 
 .artImg {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  border-radius: calc(var(--radius-card-lg) - 8px);
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .artPlaceholder {
@@ -245,52 +340,39 @@
   font-style: italic;
 }
 
+/* ── Card preto do historico (aninhado dentro do .innerCard branco) ──
+ * Pos-correcoes Mario (apos AUD-W2C08): o card preto agora e filho
+ * direto do `.innerCard` (que virou flex column). `margin-top: auto`
+ * empurra este card para o rodape do card branco — o conteudo de cima
+ * (arte + info + acoes) preserva posicao natural enquanto este card
+ * ocupa o espaco restante na parte inferior.
+ */
 
 .timelineCard {
   background: #000000;
   border-radius: var(--radius-card-xl);
   padding: 2rem 2.5rem 2.25rem;
   color: #ffffff;
+  margin-top: auto;
 }
 
 .timelineTitle {
-  font-size: 1.875rem;
-  font-weight: 600;
+  font-size: clamp(1.5rem, 2.4vw, 1.875rem);
+  font-weight: 500;
   color: #ffffff;
   margin-bottom: 1.25rem;
   letter-spacing: -0.015em;
 }
 
-/* Classes de timeline movidas para timeline.module.css (Wave 3 Lote B — C12) */
+/* Classes da timeline em si ficam em timeline.module.css. */
 
-/* ── Acoes administrativas (Wave 3 Lote C — C13/C14) ────────────────── */
-
-.adminSection {
-  margin-top: 1.5rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--color-card-divider);
-}
-
-.adminDivider {
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-card-text-muted);
-  margin-bottom: 0.75rem;
-}
-
-.adminButtons {
-  display: flex;
-  gap: 0.9rem;
-  flex-wrap: wrap;
-}
+/* ── Botao Cancelar (admin destrutiva) ────────────────────────────── */
 
 .btnDanger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.85rem 1.5rem;
+  padding: 0.95rem 1.5rem;
   background: var(--color-danger);
   color: #ffffff;
   border: none;
@@ -300,7 +382,6 @@
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s ease;
-  min-width: 180px;
 }
 
 .btnDanger:hover:not(:disabled) {
@@ -312,7 +393,7 @@
   cursor: not-allowed;
 }
 
-/* ── Modal de confirmacao admin ──────────────────────────────────────── */
+/* ── Modal de confirmacao admin (cancelar/reiniciar) ──────────────── */
 
 .adminModalContent {
   width: 100%;
@@ -371,6 +452,7 @@
   gap: 0.75rem;
 }
 
+/* ── Modal de etiqueta ────────────────────────────────────────────── */
 
 .modalOverlay {
   position: fixed;
@@ -575,7 +657,32 @@
   color: #000;
 }
 
-/* ── Mobile ───────────────────────────────────────────────────────── */
+/* ── Responsivo ───────────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .innerCardGrid {
+    grid-template-columns: 1fr;
+  }
+  .artSlot {
+    max-width: 320px;
+    justify-self: center;
+    margin: 0 auto;
+  }
+  .innerCard {
+    padding: 2rem;
+  }
+  .metaGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 1.5rem;
+  }
+  .modalGrid {
+    grid-template-columns: 1fr;
+  }
+  .modalQrImg {
+    width: 220px;
+    height: 220px;
+  }
+}
 
 @media (max-width: 768px) {
   .desktopOnly {
@@ -595,34 +702,5 @@
     color: var(--color-card-text-muted);
     max-width: 320px;
     line-height: 1.4;
-  }
-}
-
-@media (max-width: 1100px) {
-  .innerCardGrid {
-    grid-template-columns: 1fr;
-  }
-  .artSlot {
-    width: 100%;
-    max-width: 380px;
-    aspect-ratio: 1 / 1;
-    justify-self: center;
-    margin: 0 auto;
-  }
-  .innerCard {
-    padding: 2rem;
-  }
-  .title {
-    font-size: 2.75rem;
-  }
-  .subtitle {
-    font-size: 2rem;
-  }
-  .modalGrid {
-    grid-template-columns: 1fr;
-  }
-  .modalQrImg {
-    width: 220px;
-    height: 220px;
   }
 }

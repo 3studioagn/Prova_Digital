@@ -24,6 +24,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **v4.0 W2 — C06 Visual Refresh v2** | ✅ **COMPLETO** | Segundo refresh visual da pagina `/nova-prova` apos feedback do Mario com novo print Figma (frontend-only, zero backend touch). **Diagnostico v2**: a v1 (mesmo dia) ainda nao alinhava — usava layout 2-col (380px ficha + 1fr `EtiquetaPreview` SVG) que deixava o box branco com so 380px; `.canvas::before` com `inset: calc(-1 * var(--card-padding))` desenhava pattern de pontos vazando POR FORA do `.canvas` simulando "card branco sumiu"; topbar `position: absolute` sem `.pageHeader` (fora do padrao das outras paginas); composto `segment(2) + switch(laminacao)` em vez dos 4 botoes diretos do design; dropzone com `min-height: 64px`. **Estrutura nova**: 1 box branco unico `.ficha { flex: 1; padding: 2.25rem 2.75rem; radius: --radius-card-xl }` preenche tudo abaixo do `.pageHeader` (espelho de `/usuarios` — h1 grande a esquerda + botao "Cadastrar prova" amarelo a direita); 2 fieldRow grid 2-col (Nome/Req, Cliente/Vendedor) com inputs 48px; segment de 4 botoes diretos (Matriz \| Filial \| Lam. Matriz \| Lam. Filial) com pill preto animado via `framer-motion` `layoutId="rota-pill"` (spring bounce 0.2 · 350ms); dropzone com classe dedicada `.anexoField { flex: 1 }` que cresce ate o limite inferior do box (sem `min-height` rigido — acompanha o espaco disponivel sem transbordar). **Removidos** (~340 linhas entre TS+CSS): `EtiquetaPreview` SVG inteiro (216 linhas) + helpers (`truncar`, `vendedorSelecionado`/`vendedorNome`); `.canvas::before` pattern de pontos; `.topbar position: absolute`; `.layout` 2-col + `.center` + `.etiquetaWrap`/`Paper`/`Svg`; `.fichaTitle` (titulo migrou para `.pageTitle` no header); composto `Origem` type + `deriveRota()` helper + `rotaDerivada` useMemo (`FormState` agora armazena `rota: RotaCriacao` direto); `.toggleRow`/`.switch*`/`.segmentIcon`/`.anexoHead`/`.anexoMeta` rules; hint "imutavel apos cadastro"; pasta `frontend/public/etiqueta/` (logos orfaos apos remocao do `EtiquetaPreview`). **ADRs 118, 120, 121 marcados SUPERSEDIDO**. **Validacao**: tsc 0 · `next build` 13/13 · `/nova-prova` em **6.79 kB / 209 kB** (era ~9.18 kB / 211 kB — -2.39 kB / -2 kB First Load por causa da remocao do SVG inline). Smoke visual confirmado pelo Mario antes do commit. | — |
 | **v4.0 W2 — C06 Visual Refresh** | ✅ **COMPLETO** (superseded por Visual Refresh v2) | Refresh visual completo da pagina `/nova-prova` (frontend-only, zero backend touch). **Diagnostico**: a entrega anterior tinha `.canvas` com `height: calc(100vh - 64px)`, `padding: 12px` e `background: #fafaf7` que conflitavam com o `.cardInner` do layout — efeito de "retangulo flutuante" sem preencher o box do card. **Correcoes estruturais**: `.canvas { height: 100% }` puro (igual `/dashboard`); topbar virou `position: absolute; top: 0; right: 0` (botao "Cadastrar prova" flutua no canto superior, ficha estende ate a mesma linha); ficha com `justify-content: center` (conteudo verticalmente centralizado); layout 2 colunas `380px 1fr` (era 3 colunas com cards laterais). **Tokens canonicos**: substituicao de TODAS as cores/tipografias/radius hardcoded por `var(--color-accent)`, `var(--color-card-surface)`, `var(--color-card-text)`, `var(--radius-pill)`, `clamp(...)`. **Tipografia Title Case** (NOME→Nome, REQUERIMENTO→Requerimento, ROTA→Rota, ANEXO→Anexo, ORIGEM→Origem); removido `text-transform: uppercase` + `letter-spacing` agressivo dos labels. **Removidos** (~340 linhas entre TS+CSS): timestamp pill, botao "Salvar rascunho", eyebrow "FICHA DE CADASTRO", footer "ORIGEM/STATUS", cards laterais "Unidade selecionada"+"Cole imagem", `RotaVisualization` SVG decorativo, `VIZ_NODES`+`buildVizPath`+`VizPoint`+`UNIDADES_INFO`+`MatrizIcon`+`FilialIcon`+`OrigemNodeIcon`+`LaminationIcon`+`QR_DOTS`+`FinderPattern`+`ROTA_BADGE_LABELS_PREVIEW`+`ROTA_BADGE_W_PREVIEW`. **EtiquetaPreview** (ADR-120): substitui o SVG decorativo por uma replica fiel da etiqueta 90×57mm que sai impressa, espelhando `etiqueta_service.py` mm-a-mm — logos reais (`logo_3studio.svg` + `logo_studio_e_arte.svg`) copiados de `backend/app/services/etiqueta_assets/` para `frontend/public/etiqueta/`; campos Nome/Requerimento/Vendedor com live update (truncados se necessario para nao quebrar o SVG); QR como placeholder vazio (apenas o quadrado com cantos arredondados); rodape com ano + "Etiqueta de rastreio". Sem codigo publico (PRV) e sem badge da rota no preview — esses ficam apenas no PDF impresso real. **Type safety** (ADR-122): adicionado `AllowedImageType` type literal + `isAllowedImageType` type guard em `lib/types/prova.ts`; eliminados todos os `as` agressivos em `page.tsx` e `useCreateProva.ts` (substituidos por `instanceof HTMLInputElement \| HTMLTextAreaElement \| HTMLSelectElement` checks e o type guard); apenas `as const` literais permanecem. **Animacoes**: Framer Motion stagger entre topbar/ficha/visualizacao na entrada (ENTER_EASE = `[0.32, 0.72, 0, 1]`), `AnimatePresence` no crossfade form↔sucesso (200ms), respeito a `prefers-reduced-motion`. **Sem touch**: backend, RLS, migrations, RBAC, hooks compartilhados, layout dashboard, `useCreateProva` (so 1 linha mudada para usar o helper). **Validacao**: `npx tsc --noEmit` exit 0; `npx next build` 13/13 paginas; `/nova-prova` em ~9 kB / 211 kB First Load (era 6.34 kB / 169 kB — overhead Framer Motion + EtiquetaPreview SVG). ADRs 120-122. | — |
 | **v4.0 W2 — C06 Audit Fixes** | ✅ **COMPLETO** | Auditoria sênior independente pos-Wave 2 v4.0 (2026-05-05, commit `1b47290` em `wave2-v4/audit`). Veredito: REPROVADO E REFAZER — 2 CRITICAL bloqueantes (AUD-W2V4-001 reinicio zera rota disparando trigger SQLSTATE 22023; AUD-W2V4-002 branch development build-broken com helper `isAllowedImageType` uncommitted). Findings: **3 CRITICAL · 7 HIGH · 4 MEDIUM · 8 LOW · 4 INFO = 26 totais**. Sessao de correcao 2026-05-05 (`wave2-v4/fixes/execution`) corrigiu **22/22 acionaveis em 15 commits atomicos** + 4 INFO confirmados/registrados. **CRITICAL**: AUD-001+A01+006+007 (state_machine reinicio agora preserva `rota_antes` em vez de zerar — completa modificacao cirurgica do ADR-119; commit `cbd6506`); AUD-002+D01+D02 (commit dos 3 frontend uncommitted + nota anexo Visual Refresh v1; tsc + next build re-validados; commit `1a88ab8`). **HIGH**: AUD-T01 (suite `test_imutabilidade_rota.py` 5 cenarios banco real — Wave 7 readiness automatizada); AUD-T02 (suite `test_rota_enum_drift.py` 5 testes confrontando Python↔Postgres↔TS↔Pydantic — confirma zero drift atual); AUD-T03 (suite `test_migration_012.py` 3 testes upgrade/downgrade/idempotencia); AUD-A02+M03 (default `INITIAL_FORM.rota=""` + texto auxiliar restaurado — mitigacao "Confusao operacional" Backlog v4.0 §6); AUD-M01 (`schema.sql` reescrito refletindo `alembic_version=012` + 3 chunks MCP); AUD-003 (docstring `codigo_publico_service` corrigida — trigger nao protege codigo). **MEDIUM**: AUD-004 (handler `criar_prova` com retry 3x em colisao de `idx_provas_codigo_publico` + classificacao por constraint_name); AUD-005 (docstring `validar_payload_qr` documenta contrato polimorfico segundo campo); AUD-M02 (CLAUDE.md + docstring migration 012 documentam divergencia 3 chunks MCP); AUD-T04 (smoke E2E manual obrigatorio antes do merge — 11 itens de checklist). **LOW**: AUD-S01 (gerar_payload_qr rejeita identificador com `\|`); AUD-007 (audit log de reinicio agora grava `rota_depois=rota_antes.value`); AUD-P03 (`lru_cache` em `_check_assets`; cache de bytes WONTFIX-parcial); AUD-M04 (bloco "Pos-supersedimento" no ADR-120); AUD-T05 (200 → 10k amostras unicidade); AUD-D01+D02 (anexo + re-validacao). **INFO**: S02/S03/P01/P02 confirmados/follow-up. **Validacao**: backend pytest **805 passed + 9 skipped** (era 795 + 0; +19 novos -- 2 AUD-001 + 5 T01 + 5 T02 + 3 T03 + 3 AUD-004 + 1 S01); 9 skipped sao integrados sem `INTEGRATION_DATABASE_URL`. tsc --noEmit exit 0; next build 13/13 paginas; `/nova-prova` 6.84 kB / 209 kB. Advisors MCP sem novos alertas. ADRs novos: ADR-123 (reinicio preserva rota completa modificacao cirurgica do ADR-119) + ADR-124 (default vazio + texto auxiliar — substitui mitigacao descartada em ADR-118 SUPERSEDIDO). Recomendacao final: **PR pronto para merge condicional** (smoke E2E manual obrigatorio + nova auditoria independente em sessao separada apos merge para validar resolucao + ausencia de regressao + Wave 7 viavel). | — |
+| **v4.0 W2 — C08 Visualizacao de Prova (atualizacao v4.0)** | ✅ **COMPLETO** (aguarda smoke visual humano + PR) | Componente 08 (atualizacao v4.0) — Visualizacao de Prova com Redesign + Suporte a Exibicao de Rota. Gate-based two-stage com 4 ambiguidades visuais resolvidas pelo Mario (A1: `STATUS_LABELS["CRIADA"]` -> "Aguardando vendedor" global; A2: `actionsRow` com 2/3/4 botoes side-by-side via `flex: 1 1 220px`; A3: rotas legacy `PADRAO`/`DIRETA` perdem sufixo "(legada v3.0)" e viram "Padrao"/"Direta"; A4: `isPathActive` por prefix-match destaca "Provas" em `/provas/[id]`). Frontend-only — zero touch em backend, RLS, migrations. Layout invertido (arte esquerda 480px · info direita 1fr) + header com "Requerimento: NNN" pequeno + nome grande + divisor + grid 3x2 de metadata (Cliente · Rota · Criada em / Vendedor · Ciclo Atual · Status) + Codigo em mono como item adicional + banner full-width de cancelamento + linha de acoes. Card preto do historico passa a ser secao separada (era aninhada no innerCard branco). Timeline.tsx **nao tocada** — ja era orientada a dados (preparada para Wave 3 v4.0). AdminActions.tsx **nao tocada** — `useAuthorization` integrado desde Wave 1 v4.0. **Validacao**: tsc --noEmit exit 0; next build 13/13 paginas; `/provas/[id]` em **11.4 kB / 209 kB** First Load (era ~10 kB — overhead pelo import de `STATUS_LABELS`/`StatusProva` e novos seletores CSS). Advisors MCP sem novos alertas. ADRs 125-128. Smoke visual humano obrigatorio antes do PR (preview programatico nao tem auth). | — |
 
 **Estado atual do banco de producao:**
 - `alembic_version = 012` (migration 012 aplicada na Wave 2 v4.0, 2026-05-04 — ADRs 115-119). Wave 6 nao criou Alembic. Wave 1 v4.0 nao criou Alembic.
@@ -520,3 +521,84 @@ policies operam sobre `vendedor_id` / `setor` / `status`, nao sobre
 
 **`codigo_publico`** NAO depende da rota — formato `PRV-AAAA-MM-NNNNNN`
 e estavel independente do enum.
+
+---
+
+## Pagina de detalhe da prova: estrutura e extensao para Wave 3 (Componente 08 v4.0+)
+
+A rota `/provas/[id]` e o ponto onde o usuario consulta uma prova
+individual. O C08 v4.0 entregou redesign visual + suporte para as 4
+rotas v4.0 + tratamento de provas legacy (`rota=NULL`). A Wave 3 v4.0
+expandira a maquina de estados de 10 para 14 valores em
+`StatusProvaEnum` (Componente 11) — esta secao orienta como adicionar
+um novo valor sem reescrever a Timeline ou os labels.
+
+### Arquivos da pagina (estado pos-AUD-W2C08)
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `frontend/src/app/(dashboard)/provas/[id]/page.tsx` | Header (`Requerimento: NNN · PRV-...`), grid 3x2 de metadata, banner de cancelamento, linha de acoes (`AdminActions`). |
+| `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css` | Estilos do card branco principal + card preto do historico + modais admin. Token `--color-card-art-bg` (ADR-129) garante slot da arte visivel. |
+| `frontend/src/app/(dashboard)/provas/[id]/Timeline.tsx` | Componente orientado a dados — derivado de `movimentacoes[]`. As 4 flags booleanas (`isReprovacao`, `isCancelamento`, `isTerminal`, `isRoteamento`) sao calculadas por comparacao direta com strings de `status_novo`. |
+| `frontend/src/app/(dashboard)/provas/[id]/AdminActions.tsx` | Botao Cancelar (status em `CANCELAVEIS`) + Reiniciar (`REPROVADA_PELO_VENDEDOR`) — usa `useAuthorization("provas.cancel")` / `provas.restart` da Matriz Wave 1 v4.0. |
+| `frontend/src/app/(dashboard)/provas/[id]/VisualizarEtiquetaModal.tsx` | Modal com PDF da etiqueta + QR code (binarios via fetch direto, nao apiFetch). |
+| `frontend/src/lib/types/prova.ts` | `StatusProva`, `Rota`, `STATUS_LABELS`, `STATUS_LABELS_SHORT`, `ROTA_LABELS`, helper puro `formatRota` (extraido em AUD-W2C08-003 — testado em `__tests__/prova.test.ts`). |
+| `frontend/src/lib/path-active.ts` | Helper puro `isPathActive` (extraido em AUD-W2C08-003 — testado em `__tests__/path-active.test.ts`). Consumido por `(dashboard)/layout.tsx`. |
+
+### Como adicionar valor a `StatusProvaEnum` (4 camadas)
+
+Toda adicao precisa sincronizar 4 camadas (mesmo padrao da secao
+`rota_enum`); sem todas, o sistema fica inconsistente.
+
+1. **Python `StatusProvaEnum`** em `backend/app/db/models.py`: adicionar
+   o membro com nome `UPPER_SNAKE_CASE` (e.g. `LAMINANDO_MATRIZ`).
+2. **PostgreSQL via Alembic**: nova migration com
+   `ALTER TYPE status_prova_enum ADD VALUE IF NOT EXISTS '<NOVO>';`
+   (Postgres 12+ permite em transacao com `IF NOT EXISTS`).
+3. **Tabela de transicoes** (Wave 3 v4.0 — Componente 11):
+   `state_machine.TRANSICOES` + `ATORES_POR_TRANSICAO` em
+   `backend/app/services/state_machine.py`. Adicionar linhas para
+   transicoes que ENTRAM e SAEM do novo estado, respeitando RN/RF.
+4. **TypeScript**: em `frontend/src/lib/types/prova.ts`:
+   - Adicionar valor a `StatusProva` (union literal).
+   - Adicionar entrada em `STATUS_LABELS` (label completo, e.g.
+     `"Laminando (matriz)"`).
+   - Adicionar entrada em `STATUS_LABELS_SHORT` (label curto para
+     listagem, e.g. `"Laminando"`).
+   - Adicionar valor em `STATUS_OPTIONS` (ordem canonica de exibicao).
+   - O `Record<StatusProva, string>` forca exhaustividade — se faltar
+     entrada, `tsc --noEmit` falha.
+
+### Quando expandir as flags em `Timeline.tsx`
+
+A Timeline ja e orientada a dados — adicionar um novo estado nao exige
+tocar o componente, **a menos que** o estado precise de cor/badge
+distinto. As 4 flags atuais derivam diretamente de `status_novo`:
+
+```ts
+isReprovacao: sNovo === "REPROVADA_PELO_VENDEDOR",
+isCancelamento: sNovo === "CANCELADA",
+isTerminal: sNovo === "RECEBIDA_PELA_CLICHERIA",
+isRoteamento: sNovo === "APROVADA_PELO_VENDEDOR",
+```
+
+Wave 3 v4.0 podera adicionar `isLaminacao` (cor/badge especial para
+LAMINANDO_MATRIZ + LAMINANDO_FILIAL) ou expandir `isRoteamento` para
+incluir transicoes de motorista (COM_MOTORISTA_MATRIZ etc.). Decisao
+fora do escopo do C08; quando ocorrer, atualizar tambem
+`timeline.module.css` com classe correspondente (e.g. `.nodeLaminacao`).
+
+### Tratamento de provas legacy (`rota IS NULL`)
+
+`formatRota(null)` retorna `"—"`. Ate Wave 7 (Componente 21) fazer o
+backfill, **65% das provas em producao** sao legacy v3.0 — o
+tratamento deve ser preservado em qualquer iteracao futura. AUD-W2C08-011
+adicionou `title` HTML no em-dash explicando que e prova legacy.
+
+### Testes Vitest da pagina
+
+Existem em `frontend/src/lib/__tests__/path-active.test.ts` (5 cenarios)
+e `frontend/src/lib/types/__tests__/prova.test.ts` (8 cenarios).
+Padrao: testar funcoes puras isoladas em `__tests__/<nome>.test.ts`,
+sem render do componente — Vitest config esta em `environment: node`
+(sem jsdom) para minimizar superficie instalada (Wave 1 v4.0 / AUD-W1V4-005).

@@ -147,9 +147,14 @@ export interface ProvaListResponse {
   pages: number;
 }
 
-/** Labels pt-BR completos — usados no detalhe da prova (Componente 08). */
+/** Labels pt-BR completos — usados no detalhe da prova (Componente 08).
+ *
+ * Wave 2 v4.0 / Componente 08: `CRIADA` virou "Aguardando vendedor" — o
+ * label antigo "Criada" descreve apenas a transicao tecnica de insercao;
+ * "Aguardando vendedor" e mais claro para o usuario sobre a acao
+ * pendente. Decisao do Mario (ADR-125). */
 export const STATUS_LABELS: Record<StatusProva, string> = {
-  CRIADA: "Criada",
+  CRIADA: "Aguardando vendedor",
   RETIRADA_PELO_VENDEDOR: "Retirada pelo vendedor",
   APROVADA_PELO_VENDEDOR: "Aprovada pelo vendedor",
   DE_VOLTA_3STUDIO: "De volta a 3Studio",
@@ -165,7 +170,7 @@ export const STATUS_LABELS: Record<StatusProva, string> = {
  * Status tem espaco limitado e o Figma pede versao abreviada. Preserva a
  * distintividade de todos os 10 estados. */
 export const STATUS_LABELS_SHORT: Record<StatusProva, string> = {
-  CRIADA: "Criada",
+  CRIADA: "Aguardando",
   RETIRADA_PELO_VENDEDOR: "Retirada",
   APROVADA_PELO_VENDEDOR: "Aprovada",
   DE_VOLTA_3STUDIO: "Na 3Studio",
@@ -179,18 +184,35 @@ export const STATUS_LABELS_SHORT: Record<StatusProva, string> = {
 
 /** Labels pt-BR para as rotas (Wave 2 v4.0).
  *
- * Os 4 valores v4.0 tem labels human-readable claros. Legacy (PADRAO/
- * DIRETA) recebem sufixo "(legada)" para nao confundir o admin com
- * provas v3.0 ainda nao backfilled (Wave 7 / Componente 21).
+ * Wave 2 v4.0 / Componente 08: o sufixo "(legada v3.0)" foi removido
+ * dos labels de PADRAO/DIRETA. Decisao do Mario (ADR-126): o sufixo era
+ * informativo demais para a UX do detalhe — bastam os nomes "Padrao" e
+ * "Direta". A distincao legacy continua disponivel via o enum no banco
+ * (Wave 7 fara o backfill final).
  */
 export const ROTA_LABELS: Record<Rota, string> = {
   MATRIZ: "Matriz",
   LAM_MATRIZ: "Lam. Matriz",
   FILIAL: "Filial",
   LAM_FILIAL: "Lam. Filial",
-  PADRAO: "Matriz (legada v3.0)",
-  DIRETA: "Filial (legada v3.0)",
+  PADRAO: "Padrao",
+  DIRETA: "Direta",
 };
+
+/** Formata uma rota (ou ausencia dela) para exibicao na pagina de detalhe.
+ *
+ * Wave 2 v4.0 / C08 (Componente 06 ja consolidou a estrutura):
+ * `rota_projetada` foi removido — `prova.rota` ja vem persistido com a
+ * escolha do admin desde a criacao. Provas legadas v3.0 com `rota=NULL`
+ * exibem "—" ate a Wave 7 (Componente 21) fazer o backfill final.
+ *
+ * Extraido de `(dashboard)/provas/[id]/page.tsx` na sessao pos-auditoria
+ * (AUD-W2C08-003) para permitir teste unitario isolado via Vitest.
+ */
+export function formatRota(rota: Rota | null): string {
+  if (rota) return ROTA_LABELS[rota];
+  return "—";
+}
 
 /** Apenas as 4 rotas v4.0, na ordem do design (Mario): linha 1 = Matriz/Filial,
  * linha 2 = Lam. Matriz / Lam. Filial. */

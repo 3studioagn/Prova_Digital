@@ -16,6 +16,7 @@ import {
   type Setor,
   type UserLike,
 } from "@/lib/access-matrix";
+import { isPathActive } from "@/lib/path-active";
 import {
   ChartIcon,
   CloseIcon,
@@ -258,7 +259,7 @@ export default function DashboardLayout({
               <NavEntry
                 key={item.key}
                 item={item}
-                active={Boolean(item.href && pathname === item.href)}
+                active={isPathActive(pathname, item.href)}
               />
             ))}
           </nav>
@@ -270,7 +271,7 @@ export default function DashboardLayout({
               <NavEntry
                 key={item.key}
                 item={item}
-                active={Boolean(item.href && pathname === item.href)}
+                active={isPathActive(pathname, item.href)}
               />
             ))}
           </nav>

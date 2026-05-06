@@ -5057,3 +5057,368 @@ ja bloqueia antes do request. Defesa em profundidade preservada.
     forçava escolha" foi resolvido por outra via aqui.
   - Smoke E2E manual obrigatorio antes do merge para `main` valida
     o novo fluxo (AUD-W2V4-T04).
+
+---
+
+## ADR-125 — `STATUS_LABELS["CRIADA"]` = "Aguardando vendedor"
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08)
+**Contexto:** O Figma do Mario para a pagina de detalhe (`/provas/[id]`)
+mostra o campo "Status" com valor "Aguardando vendedor" para uma prova
+em estado `CRIADA`. O label antigo era apenas "Criada" — descreve a
+transicao tecnica de insercao mas nao orienta o usuario sobre a acao
+pendente. Mario respondeu "e a mesma coisa" quando questionado, dando
+sinal verde para adotar o novo label.
+
+**Decisao:** mudanca **global** em `frontend/src/lib/types/prova.ts`:
+  - `STATUS_LABELS["CRIADA"] = "Aguardando vendedor"` (era "Criada").
+  - `STATUS_LABELS_SHORT["CRIADA"] = "Aguardando"` (era "Criada"),
+    para a coluna Status da listagem onde o espaco e limitado.
+
+A mudanca afeta 6 lugares fora do detalhe: `escanear/page.tsx`
+(label do status atual + transicoes), `provas/page.tsx` (filtro Status
++ tabela via `STATUS_LABELS_SHORT`), `provas/[id]/Timeline.tsx`
+(label do no), `relatorios/perspectivas/ReportGeral.tsx` (graficos +
+breakdown), `relatorios/StatusFilter.tsx` (opcoes do filtro). Em
+todos esses lugares, "Criada" passa a ser exibido como
+"Aguardando vendedor" (ou "Aguardando" curto). Semantica idêntica;
+apenas a UX-string muda.
+
+**Alternativas:**
+  - Criar `STATUS_LABELS_DETALHE` que sobrescreve só "CRIADA" no
+    detalhe, mantendo "Criada" em todos os outros lugares — rejeitado:
+    fragmenta o vocabulário e cria inconsistência cross-page para o
+    usuario.
+  - Mudar o enum no banco (`StatusProvaEnum.CRIADA` ->
+    `AGUARDANDO_VENDEDOR`) — rejeitado: quebra a Wave 3 v4.0 que
+    expandira a maquina de estados para 14 estados; muda contrato
+    com banco e auditoria; o nome do enum descreve a transicao
+    tecnica e nao precisa virar texto de UX.
+
+**Consequencias:**
+  - Reversivel em 1 linha caso Mario reconsidere.
+  - tsc --noEmit exit 0; next build 13/13 paginas; sem regressao.
+  - Documentado neste ADR para que futuros mantenedores entendam que
+    "Criada"/"Aguardando vendedor" representam o mesmo estado.
+
+---
+
+## ADR-126 — Rotas legacy v3.0 sem sufixo "(legada v3.0)"
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08)
+**Contexto:** O Figma mostra "Rota direta" como valor exemplo do campo
+"Rota". Antes desta entrega, `ROTA_LABELS["DIRETA"]` retornava
+"Filial (legada v3.0)" — informativo mas verboso, e desalinhado com a
+estetica limpa do Figma. Mario aprovou explicitamente: "vamos mudar os
+nomes das rotas para matriz, filial, lam. matriz, lam. filial — isso
+esta planejado nessa nova versao de backlog".
+
+**Decisao:** simplificar os labels dos 2 valores legacy:
+  - `ROTA_LABELS["PADRAO"] = "Padrao"` (era "Matriz (legada v3.0)").
+  - `ROTA_LABELS["DIRETA"] = "Direta"` (era "Filial (legada v3.0)").
+
+Os 4 valores v4.0 (`MATRIZ`, `LAM_MATRIZ`, `FILIAL`, `LAM_FILIAL`)
+permanecem inalterados ("Matriz", "Lam. Matriz", "Filial",
+"Lam. Filial").
+
+Consequencia esperada: provas legacy `rota=PADRAO` aparecem visualmente
+como "Padrao" (sem indicacao explicita de que sao legacy v3.0). A
+distincao continua disponivel via:
+  - O enum no banco (`PADRAO` vs `MATRIZ`).
+  - A Wave 7 (Componente 21) que fara o backfill final.
+  - Cobertura de testes (`test_rota_enum_drift.py`) que monitora as
+    duas familias.
+
+**Alternativas:**
+  - Manter sufixo "(legada v3.0)" — rejeitado: ruido visual em prol
+    de informacao que o admin nao precisa no fluxo cotidiano.
+  - Renomear `PADRAO` -> `"Matriz"` e `DIRETA` -> `"Filial"` — rejeitado:
+    mistura visualmente legacy e v4.0 (impossivel distinguir uma prova
+    `rota=PADRAO` de `rota=MATRIZ` apenas pela UI). "Padrao"/"Direta"
+    preserva ao menos o nome historico.
+
+**Consequencias:**
+  - Afeta 4 lugares fora do detalhe: `escanear/page.tsx`,
+    `provas/page.tsx` (filtro Rota + coluna), `provas/[id]/Timeline.tsx`
+    (badge de roteamento), `relatorios/RotaFilter.tsx` (filtro). O
+    `.replace("Rota ", "")` em `RotaFilter.tsx` continua sendo
+    no-op apos a mudanca (string nao tem prefix "Rota ").
+  - Compatibilidade com Wave 7 preservada: o backfill atualiza o
+    banco; quando uma prova legacy passar a `rota=MATRIZ`, o label
+    naturalmente vira "Matriz".
+  - tsc --noEmit exit 0; next build sem regressao.
+
+---
+
+## ADR-127 — Layout invertido do detalhe (arte esquerda · info direita) + grid 3x2 de metadata
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08)
+**Contexto:** O Figma do Mario inverte o layout que existia desde a
+Wave 2 v3.0 (info esq + arte dir, 1.4fr / 380px). Novo layout: arte
+esq (480px quadrado) + info dir (1fr). Hierarquia tipografica do
+header tambem muda — "Requerimento: NNN" pequeno acima do nome
+grande (antes o numero era titulo e o nome subtitulo). Metadata vira
+grid 3 colunas x 2 linhas: Cliente | Rota | Criada em / Vendedor |
+Ciclo Atual | Status (com Codigo aparecendo no slot 7 quando
+disponivel).
+
+**Decisao:** rewrite cirurgico em duas pecas:
+  - `frontend/src/app/(dashboard)/provas/[id]/page.tsx`: estrutura
+    JSX nova (arte primeiro, info depois), header com `<p>` pequeno
+    + `<h1>` grande + `<hr>`, `<MetadataGrid>` inline com 7 itens
+    (`Cliente`, `Rota`, `Criada em`, `Vendedor`, `Ciclo Atual`,
+    `Status`, `Codigo`), banner de cancelamento em row separado
+    quando presente, `<actionsRow>` com 2/3/4 botoes side-by-side.
+  - `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css`:
+    `.innerCardGrid` com `grid-template-columns: minmax(0, 380px)
+    minmax(0, 1fr)` + gap `2rem` + `align-items: center` (Mario
+    explicitou que a arte estava grande demais e o conjunto
+    precisava ficar mais "blocado" — reducao de 480px/2.75rem para
+    380px/2rem aproxima da proporcao ~35/65 do Figma; iteracao
+    seguinte trocou `align-items: start` por `center` para
+    alinhar info ao centro vertical da arte); `.metaGrid` com
+    `grid-template-columns: repeat(3, minmax(0, 1fr))` + gap
+    `1rem 1.5rem` (apertado para cumprir o "blocado");
+    `.actionsRow` com `flex-wrap: nowrap` + `flex: 1 1 0` por
+    botao + `min-width: 0` + `white-space: nowrap` + truncamento
+    com ellipsis (Mario explicitou que os botoes devem ficar na
+    mesma linha, sem quebrar — modais position:fixed nao
+    competem por slot); responsivo <= 1100px reduz metaGrid para
+    2 colunas, empilha o innerCardGrid e a arte e centralizada
+    com `max-width: 380px`.
+
+Card preto do historico AGORA E SEPARADO do innerCard branco (antes
+era aninhado dentro). Espelha o Figma e simplifica a hierarquia
+visual.
+
+Provas legacy `rota IS NULL` continuam exibindo "—" via `formatRota`
+(decisao consolidada no C06 — preservada).
+
+**Alternativas:**
+  - Criar componentes `<MetadataGrid>` + `<MetadataItem>` em arquivos
+    separados — rejeitado: complexidade incompatible com o uso
+    pontual; inline em `page.tsx` mantem a pagina simples (regra
+    "Don't add features beyond what the task requires").
+  - Usar CSS Grid em `.actionsRow` com `repeat(auto-fit, minmax(0, 1fr))`
+    para forcar largura igual — rejeitado: `auto-fit` colapsa para
+    `min-content` em alguns casos. `flex` deu comportamento estavel
+    para 2/3/4 botoes.
+  - Manter `flex-wrap: wrap` com `flex: 1 1 220px` (proposta inicial
+    desta sessao) — rejeitado: Mario explicitou "os 3 botoes irao
+    ficar na mesma linha, sem quebrar linha". `nowrap` + `flex: 1 1 0`
+    + `min-width: 0` cumpre a regra mesmo em viewports apertadas
+    (a custo de truncamento com ellipsis no caso extremo de 4 botoes
+    em viewport 768-900px).
+
+**Consequencias:**
+  - `/provas/[id]` 11.4 kB / 209 kB First Load (era ~10 kB).
+  - tsc --noEmit exit 0; next build 13/13 paginas.
+  - Card branco principal contem APENAS info + arte + acoes;
+    historico passa a ser segunda secao independente abaixo.
+  - Smoke visual humano obrigatorio antes do merge (sem auth no dev
+    server, validacao programatica nao cobre o detalhe completo).
+
+**Apendice pos-auditoria (2026-05-06, AUD-W2C08-005 + 006):** o auditor
+identificou que o `metaGrid` foi entregue com 7 itens (slot extra de
+`Codigo: PRV-AAAA-MM-NNNNNN`) — fora do plano 3x2 estabelecido pela
+imagem do Figma. Em viewports `<= 1100px` (responsivo `repeat(2,1fr)`),
+isso criava uma celula orfa na ultima linha, contradizendo o "blocado"
+pedido pelo Mario. **Decisao corretiva:** o `codigo_publico` foi movido
+do `metaGrid` para o `requerimentoLabel` (subtitulo do header), separado
+de `Requerimento: NNN` por ` · `, com tipografia mono em fonte menor.
+Justificativa: ambos sao identificadores secundarios da prova; agrupa-los
+no mesmo bloco semantico mantem o `metaGrid` 3x2 estrito (Cliente/Rota/
+Criada em + Vendedor/Ciclo Atual/Status), restaura simetria responsiva
+e preserva o codigo publico visivel sem competir com os atributos de
+ciclo de vida. A classe `.mono` ficou orfa apos a remocao e foi removida
+de `detalhe.module.css`.
+
+**Apendice 2 pos-auditoria (2026-05-06, feedback visual do Mario):** apos
+analise mais detalhada da imagem do Figma, **a decisao original deste
+ADR sobre "card preto SEPARADO do innerCard branco" estava ERRADA**. O
+Mario identificou que na imagem o card branco e o **container externo**
+que **engloba** o card preto do historico. **Decisao corretiva 2:**
+- JSX: o `<section className={styles.timelineCard}>` agora e ANINHADO
+  dentro do `<section className={styles.innerCard}>` (filho direto,
+  irmao do `.innerCardGrid`). Volta para a estrutura aninhada que
+  existia no C08 v3.0, antes da reescrita do C08 v4.0.
+- CSS: `.innerCard` ganha `display: flex; flex-direction: column` para
+  empilhar o `.innerCardGrid` no topo + `.timelineCard` no rodape.
+  `.timelineCard` ganha `margin-top: auto` para ser empurrado para o
+  rodape do card branco (combinado com `flex: 1` do `.innerCard`,
+  produz o efeito da imagem do Figma onde o card branco se estende
+  e a timeline fica ancorada na parte inferior).
+Justificativa: a imagem do Figma efetivamente mostra o card branco
+como container externo. Reaninhar simplifica a hierarquia visual e
+faz o card preto compartilhar o "scroll context" do card branco —
+relevante quando a timeline crescer com muitas movimentacoes. Sem
+regressao no comportamento responsivo (`@media max-width: 1100px`
+ja stack a o `.innerCardGrid` em 1 coluna; o card preto aninhado
+continua aparecendo no fluxo natural).
+
+---
+
+## ADR-128 — Active menu por prefix-match (destaque "Provas" em /provas/[id])
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08)
+**Contexto:** Antes do C08 v4.0, o item "Provas" do menu deixava de
+ficar destacado quando o usuario clicava em uma linha da listagem e
+chegava em `/provas/[id]` — porque a comparacao era estrita
+(`pathname === item.href`, com href = "/provas"). Mario explicitou:
+"a4, isso foi erro meu, essa parte vai continuar igual e destacando
+o 'provas'". A correcao do destaque e parte do redesign do
+Componente 08 v4.0.
+
+**Decisao:** introduzir helper `isPathActive(pathname, href)` em
+`frontend/src/app/(dashboard)/layout.tsx`:
+
+```ts
+function isPathActive(pathname: string, href: string | undefined): boolean {
+  if (!href) return false;
+  if (pathname === href) return true;
+  return pathname.startsWith(href + "/");
+}
+```
+
+A condicao `+ "/"` e essencial para evitar falsos positivos:
+`pathname=/provas-other` NAO ativa `href=/provas`.
+
+**Alternativas:**
+  - Usar `pathname.startsWith(href)` sem o separador — rejeitado:
+    ativaria `/provas-other` para `href=/provas`.
+  - Hardcoded por item (`provas` sabe que precisa cobrir `/provas/*`)
+    — rejeitado: nao escala para futuros sub-paths
+    (ex.: `/relatorios/[xxx]`, `/auditoria/[xxx]`).
+
+**Consequencias:**
+  - `/provas` continua ativo em `/provas` (exato).
+  - `/provas` agora tambem ativo em `/provas/abc-uuid` — comportamento
+    desejado.
+  - Mesma regra aplicada a TODOS os itens do menu — uniforme.
+  - Sem regressao em pages que sao exact-match (Dashboard, Nova prova,
+    Escanear, etc.) porque elas nao tem subpath.
+  - Middleware bundle inalterado.
+
+---
+
+## ADR-129 — Token semantico dedicado `--color-card-art-bg` para `.artSlot`
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08 — sessao de correcoes pos-auditoria, AUD-W2C08-004)
+**Contexto:** A auditoria senior do C08 (`docs/wave2-v4-c08/audit-report.md`)
+identificou que `.artSlot` em `detalhe.module.css` usava
+`var(--color-card-surface, #d9d9d9)` — um token compartilhado com outros
+componentes (e.g. `.qrPayloadInput` no modal de etiqueta). O auditor
+notou que se em algum momento `--color-card-surface` for alterado para
+um cinza mais claro (e.g. `#e4e4e4`, valor que apareceu em mudancas
+nao-commitadas no working tree na entrada da sessao), o `.artSlot`
+ficaria visualmente quase invisivel contra o `.cardInner` do card
+branco principal — perdendo a funcao de placeholder visivel quando a
+arte ainda esta carregando ou quando o objeto R2 nao existe mais.
+
+A imagem do Figma do Mario (`docs/wave2-v4-c08/figma-reference.png`,
+preservada em AUD-W2C08-001) mostra um quadrado cinza medio claramente
+distinto do card branco — comportamento que precisa ser preservado por
+fidelidade visual.
+
+**Decisao:** introduzir token semantico dedicado em
+`frontend/src/app/globals.css` (`:root`):
+
+```css
+--color-card-art-bg: #d9d9d9;
+```
+
+`.artSlot` em `detalhe.module.css:259` passa a usar
+`background: var(--color-card-art-bg)` (sem fallback — o token sempre
+estara definido). O `--color-card-surface` permanece com valor proprio
+e segue sendo usado por `.qrPayloadInput` etc. — separacao semantica
+explicita.
+
+**Alternativas:**
+  - Manter `var(--color-card-surface, #d9d9d9)` e confiar que ninguem
+    vai mudar o token compartilhado — rejeitado: o estado do working
+    tree na entrada da sessao mostrava exatamente esse cenario
+    (mudanca para `#e4e4e4` agravando o achado). Acoplamento implicito
+    e fragil.
+  - Hardcodar `#d9d9d9` em `.artSlot` — rejeitado: nao escala, dificulta
+    futura mudanca de paleta consistente, e nao registra a intencao
+    semantica.
+  - Renomear `--color-card-surface` para `--color-card-input-bg` e
+    introduzir `--color-card-art-bg` separado — rejeitado: mudanca
+    cross-page exige refactor de todos os consumers atuais; fora do
+    escopo da sessao de correcoes pos-auditoria.
+
+**Consequencias:**
+  - Fidelidade visual contra Figma preservada em loading e em erro
+    de imagem.
+  - `--color-card-surface` pode ser ajustado no futuro sem afetar o
+    slot da arte — desacoplamento explicito.
+  - Token novo limita-se ao slot — nenhum outro componente passa a
+    depender dele, evitando re-emergencia do mesmo acoplamento sob
+    nova roupa.
+  - Sem regressao funcional. Smoke visual ratifica contra prova legacy
+    com arte ausente do R2.
+
+---
+
+## ADR-130 — `object-fit: cover` em `.artImg` mantido (WONTFIX)
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08 — sessao de correcoes pos-auditoria, AUD-W2C08-009)
+**Contexto:** O auditor recomendou consultar Mario sobre se
+`object-fit: cover` em `.artImg` (slot quadrado da arte na pagina de
+detalhe) corta indevidamente artes retangulares (etiquetas costumam
+ser 8.5"x11"). Alternativa seria `object-fit: contain` (preserva
+proporcao, deixa "letterbox" cinza nas laterais).
+
+**Decisao:** **manter `cover`** (WONTFIX nesta sessao). Razoes:
+  1. O slot e intencionalmente quadrado para fidelidade visual com o
+     Figma do Mario (ADR-127 nao discutiu o `object-fit`, mas a imagem
+     de referencia mostra um quadrado preenchido — `cover` e o
+     comportamento esperado).
+  2. `contain` introduz letterbox cinza assimetrico em artes 8.5"x11",
+     que pode parecer mal-enquadramento mais que feature.
+  3. O token novo `--color-card-art-bg` (ADR-129) ja garante que o
+     fundo do slot e visivel quando a imagem nao esta carregada — esse
+     era o problema real percebido em produção.
+
+Caso futuramente o Mario queira ver artes retangulares sem corte,
+considerar uma das opcoes:
+  - Trocar para `object-fit: contain` + ajustar token de fundo.
+  - Adicionar botao "Ver em tamanho real" abrindo modal com imagem
+    sem `object-fit` (full-resolution).
+
+**Alternativas:**
+  - Aplicar `object-fit: contain` agora — rejeitado: ver razoes acima.
+    Backlog tecnico para sessao futura se Mario reportar.
+
+**Consequencias:**
+  - Status quo preservado.
+  - Decisao registrada para evitar re-litigio em auditoria futura.
+
+---
+
+## ADR-131 — Observacoes positivas pos-auditoria C08 (AUD-014, 015, 016)
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08 — sessao de correcoes pos-auditoria)
+**Contexto:** A Fase 3 da auditoria registrou 3 achados INFO positivos
+que confirmam saude do sistema apos a entrega do C08. Sem acao
+operacional necessaria — registrados aqui para preservar o sinal
+historico.
+
+**AUD-W2C08-014 — Distribuicao em produção (65% provas legacy):**
+17 provas em produção, 11 legacy (`rota IS NULL`). Implicacao: o
+redesenho do detalhe e exercitado dominantemente em provas com
+`rota=NULL` ate a Wave 7 (Componente 21) fazer o backfill. O
+tratamento `formatRota(null)="—"` (ADR-126) e norma, nao caso de
+borda. AUD-W2C08-011 adicionou tooltip explicativo para tornar
+isso explicito.
+
+**AUD-W2C08-015 — Cloudflare R2 nao tocado:** validado via
+`git diff development..wave2-v4-c08/audit -- backend/ scripts/` (zero
+arquivos). Sem novos buckets, workers ou KV. Escopo frontend-only do
+C08 respeitado integralmente.
+
+**AUD-W2C08-016 — Advisors sem novos alertas:** apos C08, somente
+2 alertas pre-existentes na seguranca (alembic_version sem RLS
+policy — ADR-025; auth_leaked_password_protection — ADR-027) e 13
+INFO `unused_index` esperados em volume baixo. Nenhum novo alerta
+atribuivel ao C08 ou a esta sessao de correcoes.
+
+**Decisao:** registrar como observacao informativa (sem acao). Sinal
+positivo de saude do sistema.
+
+**Consequencias:**
+  - Confirma que o escopo do C08 foi respeitado (frontend-only).
+  - Proxima auditoria pode usar este ADR como baseline de comparacao.

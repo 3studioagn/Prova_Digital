@@ -9150,3 +9150,228 @@ Os seguintes itens permanecem como follow-up tecnico explicito (vide
   admin e desativado/promovido (item 7 — mitiga AUD-W1V4-103).
 - L-3..L-8 dos audit fixes anteriores (CHANGELOG linhas 8204-8214)
   continuam como follow-up.
+
+---
+
+## v4.0 — Wave 2 — Componente 08 (atualizacao v4.0)
+**Data:** 2026-05-06
+**Branch:** `wave2-v4/componente-08`
+**Documento canonico:** [docs/wave2-v4-c08/analysis.md](docs/wave2-v4-c08/analysis.md)
+**ADRs:** 125 (`STATUS_LABELS["CRIADA"]` -> "Aguardando vendedor"),
+126 (rotas legacy sem sufixo), 127 (layout invertido + grid 3x2),
+128 (active menu por prefix-match).
+
+### Adicionado
+- Helper `isPathActive(pathname, href)` em `(dashboard)/layout.tsx`
+  para destacar o item de menu correto quando o pathname e um
+  subpath (caso `/provas/[id]` -> destaca "Provas"). Cobre todos
+  os itens do menu uniformemente. ADR-128.
+
+### Modificado
+- `frontend/src/lib/types/prova.ts`:
+  - `STATUS_LABELS["CRIADA"]` agora "Aguardando vendedor"
+    (era "Criada"). `STATUS_LABELS_SHORT["CRIADA"]` agora
+    "Aguardando" (era "Criada"). ADR-125.
+  - `ROTA_LABELS["PADRAO"]` agora "Padrao" e
+    `ROTA_LABELS["DIRETA"]` agora "Direta" (eram
+    "Matriz (legada v3.0)" e "Filial (legada v3.0)"
+    respectivamente). ADR-126.
+- `frontend/src/app/(dashboard)/provas/[id]/page.tsx`: rewrite
+  cirurgico do JSX. Layout invertido (arte esquerda · info direita),
+  header tipografico com "Requerimento: NNN" pequeno + nome
+  grande + divisor, metadata em grid 3x2 (Cliente · Rota ·
+  Criada em / Vendedor · Ciclo Atual · Status), `Codigo` em mono
+  como item adicional, banner de cancelamento full-width quando
+  `motivo_cancelamento` presente, linha de acoes com 2/3/4 botoes
+  side-by-side. Card preto do historico agora e secao separada
+  (antes aninhada dentro do innerCard branco). ADR-127.
+- `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css`:
+  rewrite acompanhando o page.tsx. Estado final apos iteracoes
+  pos-Figma: `.innerCardGrid` com `grid-template-columns: minmax(0,
+  380px) minmax(0, 1fr)` + gap `2rem` + `align-items: center`;
+  `.metaGrid` com `repeat(3, minmax(0, 1fr))` + gap `1rem 1.5rem`;
+  `.actionsRow` com `flex-wrap: nowrap` + `flex: 1 1 0` +
+  `min-width: 0` + `white-space: nowrap` + ellipsis. Novas classes
+  `.requerimentoLabel`, `.divider`, `.metaGrid`, `.metaItem`,
+  `.metaLabel`, `.metaValue`, `.actionsRow`; `.motivoCancelamento`
+  virou banner em vez de linha inline; responsivo <= 1100px reduz
+  metaGrid para 2 colunas, empilha innerCardGrid e a arte e
+  centralizada com `max-width: 380px`. ADR-127.
+- `frontend/src/app/(dashboard)/layout.tsx`: troca de
+  `pathname === item.href` por `isPathActive(pathname, item.href)`
+  (linhas 261 e 273). ADR-128.
+
+### Pre-condicao operacional (validar antes do merge)
+- C06 Audit Fixes Round 1 (HEAD `8aa75ac` em `development`) deve
+  ser mergeado em `main` antes desta entrega para evitar conflitos.
+  Round 2 da auditoria (`docs/wave2-v4/audit-report-round2.md`)
+  aprovou o C06 para merge condicional ao smoke E2E manual.
+
+### Smoke E2E manual obrigatorio antes do PR final (sem auth no preview programatico)
+1. 3Studio acessa `/provas/[id]` de prova com cada uma das 4 rotas
+   v4.0 + 2 legacy v3.0 (`PADRAO`/`DIRETA`) + 1 NULL — confirma
+   labels novos ("Padrao", "Direta", "—" para null).
+2. Status "CRIADA" exibido como "Aguardando vendedor".
+3. Vendedor acessa prova dele (200) e prova alheia (404 + redirect).
+4. Motorista acessa prova com status `COM_MOTORISTA*` (200).
+5. Clicheria acessa prova com status `*_CLICHERIA` (200).
+6. Status `REPROVADA_PELO_VENDEDOR` (admin) -> 4 botoes
+   (Visualizar | Baixar | Reiniciar | Cancelar).
+7. Status `CANCELADA` -> 2 botoes (Visualizar | Baixar).
+8. Status `RECEBIDA_PELA_CLICHERIA` -> 2 botoes.
+9. Demais status (admin) -> 3 botoes (Visualizar | Baixar | Cancelar).
+10. Modal "Visualizar etiqueta" abre, fecha com ESC, mostra PDF + QR
+    + payload copiavel.
+11. Historico vazio mostra empty state literal do Figma.
+12. Prova com 2 ciclos (existem em producao: max ciclo = 2) mostra
+    agrupamento por ciclo com label "Ciclo X".
+13. Sidebar destaca "Provas" em `/provas/[id]` (ADR-128).
+14. Mobile: `mobileNotice` aparece para viewport <= 768px.
+15. Lighthouse audit basico: contraste AA, labels ARIA, navegacao
+    por teclado.
+
+### Iteracoes pos-Figma (mesma sessao, ajustes finos pelo Mario)
+1. `actionsRow` passa a `flex-wrap: nowrap` + `flex: 1 1 0` +
+   `min-width: 0` + `white-space: nowrap` + ellipsis. Mario
+   explicitou: "os 3 botoes irao ficar na mesma linha, sem
+   quebrar linha". (commit `a2174e3`)
+2. Arte reduzida de 480px para 380px + gap 2.75rem -> 2rem +
+   metaGrid gap 1.25rem 2rem -> 1rem 1.5rem + innerCard padding
+   2.5rem 2.75rem -> 2.25rem 2.5rem. Mario explicitou: "preciso
+   que a imagem seja um pouco menor para o conteudo com os
+   detalhes e as infos da prova ficarem maior. ... E importante
+   que tudo fique blocado, igual esta na imagem do figma".
+   (commit `fd2bb24`)
+3. `align-items: start` -> `center` no `.innerCardGrid`. Mario
+   explicitou: "as infos da prova e os detalhes fiquem alinhados
+   no centro vertical da imagem". Inclui ajustes manuais do
+   Mario na mesma sessao em `.title` (font-size clamp(1rem,
+   2.5vw, 2.5rem) — antes 2rem/3.6vw/3.25rem) e `.btnPrimary`
+   (padding 0.8rem 1.5rem — antes 0.95rem 1.5rem). (commit
+   `80388da`)
+
+### Migrations aplicadas
+- Nenhuma. Esta entrega e frontend-only. `idx_movimentacoes_prova`
+  + `idx_movimentacoes_prova_data` ja existiam em producao
+  (validado via MCP no Gate 1).
+
+### Validacao automatizada
+- `npx tsc --noEmit` em `frontend/`: exit 0.
+- `npx next build` em `frontend/`: 13/13 paginas. `/provas/[id]`
+  em 11.4 kB / 209 kB First Load.
+- Backend: nao tocado. Suite `test_provas_api.py` (21 testes do
+  C08 v3.0) preservada — sem regressao esperada.
+
+---
+
+## v4.0 — Wave 2 — Componente 08 — Correcoes Pos-Auditoria
+**Data:** 2026-05-06
+**Branch:** `wave2-v4-c08/fixes/execution`
+**Documentos:** [audit-report.md](docs/wave2-v4-c08/audit-report.md) · [fix-plan.md](docs/wave2-v4-c08/fix-plan.md) · [fix-validation.md](docs/wave2-v4-c08/fix-validation.md) · [smoke-validation.md](docs/wave2-v4-c08/smoke-validation.md)
+**ADRs novos:** 129 (token `--color-card-art-bg`), 130 (object-fit cover WONTFIX), 131 (INFOs positivos pos-auditoria)
+**Apêndices:** ADR-127 ganha apendice pos-auditoria sobre `codigo_publico` no header.
+
+Sessao de correcao dirigida pelos 16 achados consolidados em
+`docs/wave2-v4-c08/audit-report.md` (1 CRITICAL · 3 ALTOS · 4 MÉDIOS ·
+5 BAIXOS · 3 INFOs). Resultado: **16/16 RESOLVIDOS · 0 DEFERIDOS · 0
+NAO RESOLVIDOS**.
+
+### Resolvidos por achado
+
+- **AUD-W2C08-001** (CRITICAL): `figma-reference.png` commitada em
+  `docs/wave2-v4-c08/` — referencia visual canonica preservada.
+- **AUD-W2C08-002** (ALTO): `analysis.md` cherry-pick para a branch
+  da entrega — link `CHANGELOG.md:9159` agora resolve.
+- **AUD-W2C08-003** (ALTO): refactor de `formatRota` (lib/types/prova.ts)
+  e `isPathActive` (lib/path-active.ts) para utilitarios puros
+  testaveis + 13 testes Vitest novos (8 formatRota cobrindo 4 v4.0 +
+  2 legacy + null + sanity de exhaustividade; 5 isPathActive cobrindo
+  exact + prefix + trailing-slash + false-positive + undefined).
+  Total Vitest do projeto: 28 (era 15).
+- **AUD-W2C08-004** (ALTO): novo token semantico
+  `--color-card-art-bg=#d9d9d9` em `globals.css`; `.artSlot` usa o
+  token sem fallback. ADR-129 documenta o desacoplamento de
+  `--color-card-surface`.
+- **AUD-W2C08-005** + **006** (MÉDIO): `codigo_publico` movido do
+  `.metaGrid` (que ficou com 7 itens fora do plano 3x2 do Figma) para
+  o `requerimentoLabel` no header (`Requerimento: NNN · PRV-...`).
+  Restaura simetria responsiva. Apendice no ADR-127.
+- **AUD-W2C08-007** (MÉDIO): `.title` ajustado para
+  `clamp(1.5rem, 2.5vw, 2.5rem)` — minimo 24px em viewport tablet
+  (era ~16-19px).
+- **AUD-W2C08-008** (MÉDIO): nova secao "Pagina de detalhe da prova:
+  estrutura e extensao para Wave 3" em `CLAUDE.md`. Cobre 4 camadas
+  para adicionar valor a `StatusProvaEnum` + flags Timeline + padrao
+  de testes Vitest.
+- **AUD-W2C08-009** (BAIXO): WONTFIX `object-fit: cover` registrado
+  em ADR-130 (fidelidade Figma + token novo ja mitiga + `contain`
+  introduziria letterbox assimetrico).
+- **AUD-W2C08-010** (BAIXO): wrapper trivial `formatStatus` removido;
+  `STATUS_LABELS[prova.status]` direto no JSX.
+- **AUD-W2C08-011** (BAIXO): tooltip nativo HTML `title` no em-dash
+  de prova legacy explicando "rota sera definida pelo backfill da
+  Wave 7".
+- **AUD-W2C08-012** (BAIXO): coberto por AUD-W2C08-003 (5 testes
+  Vitest de `isPathActive`).
+- **AUD-W2C08-013** (BAIXO): template `smoke-validation.md` criado
+  com 19 itens (15 originais + 4 novos pos-correcoes). Mario executa
+  antes do PR final.
+- **AUD-W2C08-014/015/016** (INFO): registrados em ADR-131 como
+  baseline para proxima auditoria.
+
+### Modificado
+- `frontend/src/lib/types/prova.ts`: novo export `formatRota` (movido
+  de `page.tsx`).
+- `frontend/src/lib/path-active.ts`: NOVO arquivo com helper
+  `isPathActive` (movido de `(dashboard)/layout.tsx`).
+- `frontend/src/app/(dashboard)/provas/[id]/page.tsx`: imports
+  refatorados; `formatStatus` removida; tooltip no em-dash legacy;
+  `codigo_publico` no header em vez do grid; 7o `metaItem` removido.
+- `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css`:
+  `.artSlot` usa `--color-card-art-bg`; novas classes
+  `.requerimentoSep` + `.codigoPublico`; classe orfa `.mono` removida;
+  `.title` clamp ajustado.
+- `frontend/src/app/(dashboard)/layout.tsx`: import de `isPathActive`
+  do `lib/`; funcao inline removida.
+- `frontend/src/app/globals.css`: token `--color-card-art-bg=#d9d9d9`
+  adicionado.
+
+### Adicionado
+- `frontend/src/lib/path-active.ts` (utilitario puro).
+- `frontend/src/lib/__tests__/path-active.test.ts` (5 testes).
+- `frontend/src/lib/types/__tests__/prova.test.ts` (8 testes).
+- `docs/wave2-v4-c08/figma-reference.png` (referencia visual canonica).
+- `docs/wave2-v4-c08/analysis.md` (cherry-pick — Gate 1 do C08).
+- `docs/wave2-v4-c08/fix-plan.md` (Gate 1 desta sessao de correcoes).
+- `docs/wave2-v4-c08/fix-validation.md` (Gate 2 — checklist + auto-critica).
+- `docs/wave2-v4-c08/smoke-validation.md` (template para Mario).
+- `CLAUDE.md`: secao "Pagina de detalhe da prova: estrutura e
+  extensao para Wave 3 (Componente 08 v4.0+)".
+- `DECISIONS.md`: ADRs 129, 130, 131 + apendice no ADR-127.
+
+### Pre-condicao operacional aplicada (defaults documentados no fix-plan §4.9)
+- **B1** — Working tree tinha mudancas CSS nao-commitadas que
+  agravavam AUD-W2C08-004 (`--color-card-surface=#e4e4e4` em vez do
+  HEAD `#d9d9d9`). Default aplicado: `git stash push` preservou as
+  mudancas em `stash@{0}` (mensagem
+  "wave2-v4-c08/fixes: working tree CSS tweaks pre-existentes
+  (preserved by Gate 2 setup)"). Execucao do Gate 2 sobre HEAD limpo
+  `d90c672`. Mario pode reaplicar com `git stash pop` quando quiser
+  (exige resolucao manual de conflito com AUD-W2C08-004 token novo).
+- **B2** — `object-fit: cover` mantido (ADR-130 WONTFIX).
+- **B3** — 13 testes Vitest sem expandir devDependencies.
+
+### Smoke E2E manual obrigatorio antes do PR final
+Mario percorre os 19 itens em `docs/wave2-v4-c08/smoke-validation.md`.
+Itens 4 (Motorista) e 5 (Clicheria) podem ser SKIP por ausencia
+desses perfis em producao.
+
+### Validacao automatizada (Gate 2)
+- `npx tsc --noEmit` em `frontend/`: a executar no smoke check final.
+- `npx next build` em `frontend/`: a executar no smoke check final.
+- `npx vitest run` em `frontend/`: 28 testes passando esperados
+  (15 middleware + 8 formatRota + 5 isPathActive).
+- Backend: nao tocado. Suite `test_provas_api.py` (21 testes do
+  C08 v3.0) preservada.
+- Advisors MCP (security + performance): sem novos alertas
+  esperados (validado pre-execucao).
