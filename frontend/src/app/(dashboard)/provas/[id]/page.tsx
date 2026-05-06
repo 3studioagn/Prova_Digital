@@ -199,7 +199,14 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                     </div>
                     <div className={styles.metaItem}>
                       <span className={styles.metaLabel}>Rota:</span>
-                      <span className={styles.metaValue}>
+                      <span
+                        className={styles.metaValue}
+                        title={
+                          prova.rota === null
+                            ? "Prova legacy v3.0 — rota sera definida pelo backfill da Wave 7"
+                            : undefined
+                        }
+                      >
                         {formatRota(prova.rota)}
                       </span>
                     </div>
