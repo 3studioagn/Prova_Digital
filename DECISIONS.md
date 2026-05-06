@@ -5230,6 +5230,29 @@ e preserva o codigo publico visivel sem competir com os atributos de
 ciclo de vida. A classe `.mono` ficou orfa apos a remocao e foi removida
 de `detalhe.module.css`.
 
+**Apendice 2 pos-auditoria (2026-05-06, feedback visual do Mario):** apos
+analise mais detalhada da imagem do Figma, **a decisao original deste
+ADR sobre "card preto SEPARADO do innerCard branco" estava ERRADA**. O
+Mario identificou que na imagem o card branco e o **container externo**
+que **engloba** o card preto do historico. **Decisao corretiva 2:**
+- JSX: o `<section className={styles.timelineCard}>` agora e ANINHADO
+  dentro do `<section className={styles.innerCard}>` (filho direto,
+  irmao do `.innerCardGrid`). Volta para a estrutura aninhada que
+  existia no C08 v3.0, antes da reescrita do C08 v4.0.
+- CSS: `.innerCard` ganha `display: flex; flex-direction: column` para
+  empilhar o `.innerCardGrid` no topo + `.timelineCard` no rodape.
+  `.timelineCard` ganha `margin-top: auto` para ser empurrado para o
+  rodape do card branco (combinado com `flex: 1` do `.innerCard`,
+  produz o efeito da imagem do Figma onde o card branco se estende
+  e a timeline fica ancorada na parte inferior).
+Justificativa: a imagem do Figma efetivamente mostra o card branco
+como container externo. Reaninhar simplifica a hierarquia visual e
+faz o card preto compartilhar o "scroll context" do card branco —
+relevante quando a timeline crescer com muitas movimentacoes. Sem
+regressao no comportamento responsivo (`@media max-width: 1100px`
+ja stack a o `.innerCardGrid` em 1 coluna; o card preto aninhado
+continua aparecendo no fluxo natural).
+
 ---
 
 ## ADR-128 — Active menu por prefix-match (destaque "Provas" em /provas/[id])

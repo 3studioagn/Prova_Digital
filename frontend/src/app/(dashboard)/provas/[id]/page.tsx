@@ -267,15 +267,19 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                   </div>
                 </div>
               </div>
-            </section>
 
-            {/* Wave 2 v4.0 / C08: card preto SEPARADO (nao mais aninhado),
-                espelha o Figma do Mario. Empty state literal preservado. */}
-            <section className={styles.timelineCard}>
-              <h2 className={styles.timelineTitle}>
-                Historico de movimentacoes
-              </h2>
-              <Timeline movimentacoes={movimentacoes} prova={prova} />
+              {/* Pos-correcoes Mario (apos AUD-W2C08): o card preto do
+                  historico agora e ANINHADO dentro do .innerCard branco
+                  (espelha o Figma com mais fidelidade — o card branco
+                  e o container externo que engloba arte+info+timeline).
+                  CSS usa flex column + margin-top: auto para ancorar
+                  no rodape do card branco. */}
+              <section className={styles.timelineCard}>
+                <h2 className={styles.timelineTitle}>
+                  Historico de movimentacoes
+                </h2>
+                <Timeline movimentacoes={movimentacoes} prova={prova} />
+              </section>
             </section>
 
             <VisualizarEtiquetaModal
