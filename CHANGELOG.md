@@ -9183,17 +9183,20 @@ Os seguintes itens permanecem como follow-up tecnico explicito (vide
   Criada em / Vendedor · Ciclo Atual · Status), `Codigo` em mono
   como item adicional, banner de cancelamento full-width quando
   `motivo_cancelamento` presente, linha de acoes com 2/3/4 botoes
-  side-by-side via `flex: 1 1 220px`. Card preto do historico
-  agora e secao separada (antes aninhada dentro do innerCard
-  branco). ADR-127.
+  side-by-side. Card preto do historico agora e secao separada
+  (antes aninhada dentro do innerCard branco). ADR-127.
 - `frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css`:
-  rewrite acompanhando o page.tsx. `.innerCardGrid` com
-  `grid-template-columns: minmax(0, 480px) minmax(0, 1fr)`;
-  novas classes `.requerimentoLabel`, `.divider`, `.metaGrid`,
-  `.metaItem`, `.metaLabel`, `.metaValue`, `.actionsRow`;
-  `.motivoCancelamento` virou banner em vez de linha inline;
-  responsivo <= 1100px reduz metaGrid para 2 colunas e empilha
-  innerCardGrid. ADR-127.
+  rewrite acompanhando o page.tsx. Estado final apos iteracoes
+  pos-Figma: `.innerCardGrid` com `grid-template-columns: minmax(0,
+  380px) minmax(0, 1fr)` + gap `2rem` + `align-items: center`;
+  `.metaGrid` com `repeat(3, minmax(0, 1fr))` + gap `1rem 1.5rem`;
+  `.actionsRow` com `flex-wrap: nowrap` + `flex: 1 1 0` +
+  `min-width: 0` + `white-space: nowrap` + ellipsis. Novas classes
+  `.requerimentoLabel`, `.divider`, `.metaGrid`, `.metaItem`,
+  `.metaLabel`, `.metaValue`, `.actionsRow`; `.motivoCancelamento`
+  virou banner em vez de linha inline; responsivo <= 1100px reduz
+  metaGrid para 2 colunas, empilha innerCardGrid e a arte e
+  centralizada com `max-width: 380px`. ADR-127.
 - `frontend/src/app/(dashboard)/layout.tsx`: troca de
   `pathname === item.href` por `isPathActive(pathname, item.href)`
   (linhas 261 e 273). ADR-128.
@@ -9226,6 +9229,26 @@ Os seguintes itens permanecem como follow-up tecnico explicito (vide
 14. Mobile: `mobileNotice` aparece para viewport <= 768px.
 15. Lighthouse audit basico: contraste AA, labels ARIA, navegacao
     por teclado.
+
+### Iteracoes pos-Figma (mesma sessao, ajustes finos pelo Mario)
+1. `actionsRow` passa a `flex-wrap: nowrap` + `flex: 1 1 0` +
+   `min-width: 0` + `white-space: nowrap` + ellipsis. Mario
+   explicitou: "os 3 botoes irao ficar na mesma linha, sem
+   quebrar linha". (commit `a2174e3`)
+2. Arte reduzida de 480px para 380px + gap 2.75rem -> 2rem +
+   metaGrid gap 1.25rem 2rem -> 1rem 1.5rem + innerCard padding
+   2.5rem 2.75rem -> 2.25rem 2.5rem. Mario explicitou: "preciso
+   que a imagem seja um pouco menor para o conteudo com os
+   detalhes e as infos da prova ficarem maior. ... E importante
+   que tudo fique blocado, igual esta na imagem do figma".
+   (commit `fd2bb24`)
+3. `align-items: start` -> `center` no `.innerCardGrid`. Mario
+   explicitou: "as infos da prova e os detalhes fiquem alinhados
+   no centro vertical da imagem". Inclui ajustes manuais do
+   Mario na mesma sessao em `.title` (font-size clamp(1rem,
+   2.5vw, 2.5rem) — antes 2rem/3.6vw/3.25rem) e `.btnPrimary`
+   (padding 0.8rem 1.5rem — antes 0.95rem 1.5rem). (commit
+   `80388da`)
 
 ### Migrations aplicadas
 - Nenhuma. Esta entrega e frontend-only. `idx_movimentacoes_prova`
