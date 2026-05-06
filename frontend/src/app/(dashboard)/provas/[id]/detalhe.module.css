@@ -101,7 +101,10 @@
 
 .innerCardGrid {
   display: grid;
-  grid-template-columns: minmax(0, 380px) minmax(0, 1fr);
+  /* Pos-correcoes Mario (visual refresh apos aninhamento): largura
+     da arte reduzida de 380px para 320px — proporcao mais fiel ao
+     Figma onde a arte ocupa ~25% do card branco (era ~29%). */
+  grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
   gap: 2rem;
   align-items: center;
   margin-bottom: 1.5rem;
@@ -661,7 +664,7 @@
     grid-template-columns: 1fr;
   }
   .artSlot {
-    max-width: 380px;
+    max-width: 320px;
     justify-self: center;
     margin: 0 auto;
   }
