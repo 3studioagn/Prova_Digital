@@ -5329,3 +5329,38 @@ explicita.
     nova roupa.
   - Sem regressao funcional. Smoke visual ratifica contra prova legacy
     com arte ausente do R2.
+
+---
+
+## ADR-130 — `object-fit: cover` em `.artImg` mantido (WONTFIX)
+**Data:** 2026-05-06 (Wave 2 v4.0 / Componente 08 — sessao de correcoes pos-auditoria, AUD-W2C08-009)
+**Contexto:** O auditor recomendou consultar Mario sobre se
+`object-fit: cover` em `.artImg` (slot quadrado da arte na pagina de
+detalhe) corta indevidamente artes retangulares (etiquetas costumam
+ser 8.5"x11"). Alternativa seria `object-fit: contain` (preserva
+proporcao, deixa "letterbox" cinza nas laterais).
+
+**Decisao:** **manter `cover`** (WONTFIX nesta sessao). Razoes:
+  1. O slot e intencionalmente quadrado para fidelidade visual com o
+     Figma do Mario (ADR-127 nao discutiu o `object-fit`, mas a imagem
+     de referencia mostra um quadrado preenchido — `cover` e o
+     comportamento esperado).
+  2. `contain` introduz letterbox cinza assimetrico em artes 8.5"x11",
+     que pode parecer mal-enquadramento mais que feature.
+  3. O token novo `--color-card-art-bg` (ADR-129) ja garante que o
+     fundo do slot e visivel quando a imagem nao esta carregada — esse
+     era o problema real percebido em produção.
+
+Caso futuramente o Mario queira ver artes retangulares sem corte,
+considerar uma das opcoes:
+  - Trocar para `object-fit: contain` + ajustar token de fundo.
+  - Adicionar botao "Ver em tamanho real" abrindo modal com imagem
+    sem `object-fit` (full-resolution).
+
+**Alternativas:**
+  - Aplicar `object-fit: contain` agora — rejeitado: ver razoes acima.
+    Backlog tecnico para sessao futura se Mario reportar.
+
+**Consequencias:**
+  - Status quo preservado.
+  - Decisao registrada para evitar re-litigio em auditoria futura.
