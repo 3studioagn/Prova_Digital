@@ -4,11 +4,7 @@ import { useCallback, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useProvaDetail } from "@/hooks/useProvaDetail";
-import {
-  STATUS_LABELS,
-  formatRota,
-  type StatusProva,
-} from "@/lib/types/prova";
+import { STATUS_LABELS, formatRota } from "@/lib/types/prova";
 import { AdminActions } from "./AdminActions";
 import { VisualizarEtiquetaModal } from "./VisualizarEtiquetaModal";
 import { Timeline } from "./Timeline";
@@ -24,10 +20,6 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-function formatStatus(status: StatusProva): string {
-  return STATUS_LABELS[status];
 }
 
 /** Icone seta esquerda SVG inline para o botao Voltar.
@@ -232,7 +224,7 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                     <div className={styles.metaItem}>
                       <span className={styles.metaLabel}>Status:</span>
                       <span className={styles.metaValue}>
-                        {formatStatus(prova.status)}
+                        {STATUS_LABELS[prova.status]}
                       </span>
                     </div>
                   </div>
