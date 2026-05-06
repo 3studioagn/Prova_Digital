@@ -6,7 +6,9 @@ import { createClient } from "@/lib/supabase/client";
 import { useProvaDetail } from "@/hooks/useProvaDetail";
 import {
   ROTA_LABELS,
+  STATUS_LABELS,
   type Rota,
+  type StatusProva,
 } from "@/lib/types/prova";
 import { AdminActions } from "./AdminActions";
 import { VisualizarEtiquetaModal } from "./VisualizarEtiquetaModal";
@@ -34,8 +36,12 @@ function formatRota(rota: Rota | null): string {
   return "—";
 }
 
-/** Ícone seta esquerda SVG inline para o botão Voltar.
- * Evita tocar em `components/icons.tsx` (fora do escopo desta sessão). */
+function formatStatus(status: StatusProva): string {
+  return STATUS_LABELS[status];
+}
+
+/** Icone seta esquerda SVG inline para o botao Voltar.
+ * Evita tocar em `components/icons.tsx` (fora do escopo desta sessao). */
 function ArrowLeftIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg
@@ -86,8 +92,6 @@ export default function ProvaDetalhePage({ params }: PageProps) {
   const handleDownloadEtiqueta = useCallback(async () => {
     const token = await getToken();
     if (!token) {
-      // Sem token: feedback imediato + redireciona fluxo para login
-      // (o middleware ja trata o redirect no proximo navigate).
       alert("Sessao expirada. Faca login novamente.");
       return;
     }
@@ -99,7 +103,6 @@ export default function ProvaDetalhePage({ params }: PageProps) {
         { headers: { Authorization: `Bearer ${token}` } },
       );
       if (!resp.ok) {
-        // Tenta ler o detail do backend (422 de gerar_pdf, 502 de DB).
         let detail: string | null = null;
         try {
           const body = await resp.json();
@@ -119,11 +122,6 @@ export default function ProvaDetalhePage({ params }: PageProps) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (err) {
-      // M1 (auditoria Wave 2 — Sessao 20): feedback explicito em caso
-      // de falha. Antes o catch era silencioso (comentario "noop"), o
-      // que deixava o usuario confuso quando o botao "Baixar etiqueta"
-      // nao fazia nada. Usa alert() nativo como fallback — nao ha
-      // sistema de toast no projeto ainda.
       const msg =
         err instanceof Error
           ? err.message
@@ -165,63 +163,9 @@ export default function ProvaDetalhePage({ params }: PageProps) {
 
         {!loading && !error && prova && (
           <>
-            {/* Card branco principal: envolve dados + arte no topo E o
-                card preto do historico abaixo, tudo em um unico container. */}
             <section className={styles.innerCard}>
               <div className={styles.innerCardGrid}>
-                <div className={styles.mainInfo}>
-                  <h1 className={styles.title}>{prova.nro_requerimento}</h1>
-                  <h2 className={styles.subtitle}>{prova.nome}</h2>
-
-                  <div className={styles.metadata}>
-                    <p className={styles.metadataItem}>
-                      <strong>Cliente:</strong> {prova.cliente}
-                    </p>
-                    <p className={styles.metadataItem}>
-                      <strong>Vendedor:</strong> {prova.vendedor_nome}
-                    </p>
-                    <p className={styles.metadataItem}>
-                      <strong>Código:</strong>{" "}
-                      <span className={styles.mono}>{prova.codigo_publico}</span>
-                    </p>
-                    <p className={styles.metadataItem}>
-                      <strong>Rota:</strong> {formatRota(prova.rota)}
-                    </p>
-                    <p className={styles.metadataItem}>
-                      <strong>Ciclo Atual:</strong> {prova.ciclo_atual}
-                    </p>
-                    <p className={styles.metadataItem}>
-                      <strong>Criada em:</strong> {formatDate(prova.created_at)}
-                    </p>
-                    {prova.motivo_cancelamento && (
-                      <p
-                        className={`${styles.metadataItem} ${styles.motivoCancelamento}`}
-                      >
-                        <strong>Motivo do cancelamento:</strong>{" "}
-                        {prova.motivo_cancelamento}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className={styles.actions}>
-                    <button
-                      type="button"
-                      className={styles.btnPrimary}
-                      onClick={() => setEtiquetaModalOpen(true)}
-                    >
-                      Visualizar etiqueta
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.btnSecondary}
-                      onClick={handleDownloadEtiqueta}
-                    >
-                      Baixar etiqueta
-                    </button>
-                    <AdminActions prova={prova} onActionComplete={reload} />
-                  </div>
-                </div>
-
+                {/* Wave 2 v4.0 / C08: arte AGORA NA ESQUERDA (alinhamento Figma do Mario). */}
                 <div className={styles.artSlot}>
                   {imagemError && (
                     <div className={styles.artPlaceholder}>
@@ -252,15 +196,99 @@ export default function ProvaDetalhePage({ params }: PageProps) {
                     </div>
                   )}
                 </div>
-              </div>
 
-              {/* Card preto ANINHADO dentro do innerCard branco */}
-              <section className={styles.timelineCard}>
-                <h2 className={styles.timelineTitle}>
-                  Historico de movimentacoes
-                </h2>
-                <Timeline movimentacoes={movimentacoes} prova={prova} />
-              </section>
+                <div className={styles.mainInfo}>
+                  <p className={styles.requerimentoLabel}>
+                    Requerimento: {prova.nro_requerimento}
+                  </p>
+                  <h1 className={styles.title}>{prova.nome}</h1>
+                  <hr className={styles.divider} />
+
+                  <div className={styles.metaGrid}>
+                    <div className={styles.metaItem}>
+                      <span className={styles.metaLabel}>Cliente:</span>
+                      <span className={styles.metaValue}>{prova.cliente}</span>
+                    </div>
+                    <div className={styles.metaItem}>
+                      <span className={styles.metaLabel}>Rota:</span>
+                      <span className={styles.metaValue}>
+                        {formatRota(prova.rota)}
+                      </span>
+                    </div>
+                    <div className={styles.metaItem}>
+                      <span className={styles.metaLabel}>Criada em:</span>
+                      <span className={styles.metaValue}>
+                        {formatDate(prova.created_at)}
+                      </span>
+                    </div>
+                    <div className={styles.metaItem}>
+                      <span className={styles.metaLabel}>Vendedor:</span>
+                      <span className={styles.metaValue}>
+                        {prova.vendedor_nome}
+                      </span>
+                    </div>
+                    <div className={styles.metaItem}>
+                      <span className={styles.metaLabel}>Ciclo Atual:</span>
+                      <span className={styles.metaValue}>
+                        {prova.ciclo_atual}
+                      </span>
+                    </div>
+                    <div className={styles.metaItem}>
+                      <span className={styles.metaLabel}>Status:</span>
+                      <span className={styles.metaValue}>
+                        {formatStatus(prova.status)}
+                      </span>
+                    </div>
+                    <div className={styles.metaItem}>
+                      <span className={styles.metaLabel}>Codigo:</span>
+                      <span
+                        className={`${styles.metaValue} ${styles.mono}`}
+                      >
+                        {prova.codigo_publico}
+                      </span>
+                    </div>
+                  </div>
+
+                  {prova.motivo_cancelamento && (
+                    <div className={styles.motivoCancelamento}>
+                      <strong>Motivo do cancelamento:</strong>
+                      {prova.motivo_cancelamento}
+                    </div>
+                  )}
+
+                  {/* Wave 2 v4.0 / C08: linha de acoes com 2/3/4 botoes
+                      side-by-side (decisao A2 do Mario). AdminActions adiciona
+                      Cancelar (sempre que admin + status cancelavel) e/ou
+                      Reiniciar (apenas em REPROVADA). Modais sao position:
+                      fixed e nao competem por slots. */}
+                  <div className={styles.actionsRow}>
+                    <button
+                      type="button"
+                      className={styles.btnPrimary}
+                      onClick={() => setEtiquetaModalOpen(true)}
+                    >
+                      Visualizar etiqueta
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.btnSecondary}
+                      onClick={handleDownloadEtiqueta}
+                    >
+                      Baixar etiqueta
+                    </button>
+                    <AdminActions prova={prova} onActionComplete={reload} />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Wave 2 v4.0 / C08: card preto SEPARADO (nao mais aninhado),
+                espelha o Figma do Mario. Empty state literal preservado. */}
+            <section className={styles.timelineCard}>
+              <h2 className={styles.timelineTitle}>
+                Historico de movimentacoes
+              </h2>
+              <Timeline movimentacoes={movimentacoes} prova={prova} />
             </section>
 
             <VisualizarEtiquetaModal
