@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db.models import LocalizacaoEnum, RotaEnum, SetorEnum, StatusProvaEnum
 
@@ -305,23 +305,44 @@ class ImagemUrlResponse(BaseModel):
 
 
 class ScanRequest(BaseModel):
-    """Payload recebido de `POST /api/v1/provas/scan` (Componente 10).
+    """Payload recebido de `POST /api/v1/provas/scan` (Componente 10 v4.0).
 
-    Vem do frontend `/escanear` apos o html5-qrcode decodificar a imagem
-    da camera. O `payload` ja vem como string UTF-8 — a lib devolve o
-    conteudo literal do QR Code que foi gerado pelo backend no Componente 06.
+    Aceita **EXATAMENTE UM** dos 2 caminhos de identificacao:
 
-    Validacao Pydantic aqui cobre apenas o formato estrutural (prefixo
-    correto + 3 campos separados por `|`). A verificacao do hash contra
-    `provas_digitais.qr_code_hash` acontece no handler via
-    `qrcode_service.validar_payload_qr` (constant-time).
+      1. `payload`: string completa do QR Code (ex: `3SD|PRV-...|hash[:16]`).
+         Caminho da camera (Componente 10 v4.0).
+      2. `codigo`: codigo publico legivel (ex: `PRV-2026-05-K3T9XB`).
+         Caminho da digitacao manual (Componente 19 — fallback).
+
+    Wave 3 v4.0 (Componente 10): a Wave 2 v4.0 / ADR-116 introduziu o
+    `codigo_publico` como segundo campo do payload do QR. Esta sessao
+    estende `ScanRequest` para aceitar tanto o `payload` completo quanto
+    o `codigo` isolado, preparando o contrato compartilhado camera ↔
+    digitacao manual exigido por DAT v3.0 §8.1 (idempotencia).
+
+    Validacao:
+      - Pydantic verifica formato estrutural do `payload` quando presente.
+      - Pydantic verifica `codigo` nao-vazio quando presente.
+      - `model_validator` exige XOR (exatamente um dos dois).
+      - Verificacao final do hash (caminho `payload`) acontece no handler
+        via `qrcode_service.validar_payload_qr` (constant-time).
+      - Validacao do formato do `codigo` (regex `PRV-AAAA-MM-NNNNNN`)
+        acontece no handler via `validar_formato_codigo_publico` apos
+        SELECT, mesma estrategia que o hash do payload — evita timing
+        attacks que distinguam "formato invalido" de "fora do scope".
+
+    A camada de servico do frontend (`identificarProvaPorPayload` ou
+    `identificarProvaPorCodigo`) escolhe qual campo enviar.
     """
 
-    payload: str = Field(..., min_length=1, max_length=256)
+    payload: str | None = Field(None, min_length=1, max_length=256)
+    codigo: str | None = Field(None, min_length=1, max_length=64)
 
     @field_validator("payload")
     @classmethod
-    def _valida_payload(cls, v: str) -> str:
+    def _valida_payload(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
         v = v.strip()
         if not v:
             raise ValueError("Payload vazio")
@@ -343,15 +364,43 @@ class ScanRequest(BaseModel):
             raise ValueError(
                 "QR Code mal formado (esperado 3 campos separados por '|')"
             )
-        _prefix, nro_req, hash_trunc = parts
-        if not nro_req.strip():
-            raise ValueError("Numero de requerimento vazio no QR Code")
+        _prefix, identificador, hash_trunc = parts
+        if not identificador.strip():
+            raise ValueError("Identificador vazio no QR Code")
         if len(hash_trunc) != HASH_TRUNCADO_LEN:
             raise ValueError(
                 f"Hash truncado com tamanho invalido "
                 f"(esperado {HASH_TRUNCADO_LEN} chars)"
             )
         return v
+
+    @field_validator("codigo")
+    @classmethod
+    def _valida_codigo(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("Codigo vazio")
+        return v
+
+    @model_validator(mode="after")
+    def _exige_exatamente_um(self) -> "ScanRequest":
+        """Wave 3 v4.0: exige XOR entre `payload` (camera) e `codigo` (manual).
+
+        Aceitar ambos seria ambiguo (qual o campo autoritativo?). Aceitar
+        nenhum nao identifica nada. A camera SO envia `payload`; a
+        digitacao manual SO envia `codigo`. O handler decide o lookup
+        com base em qual campo veio preenchido.
+        """
+        tem_payload = self.payload is not None
+        tem_codigo = self.codigo is not None
+        if tem_payload == tem_codigo:
+            raise ValueError(
+                "Forneca exatamente um de: 'payload' (camera) ou 'codigo' "
+                "(digitacao manual)."
+            )
+        return self
 
 
 class ScanResponse(BaseModel):

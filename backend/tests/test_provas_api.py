@@ -2382,8 +2382,13 @@ async def test_scan_audit_log_contem_acao_e_status_atual(
     vendedor_matriz, mock_db
 ):
     """Verifica que o audit_log e chamado com `acao="escanear_prova"` e
-    inclui `nro_requerimento` + `status_atual` + `transicoes_permitidas`
-    em `detalhes_json`."""
+    inclui `origem`, `nro_requerimento`, `codigo_publico`, `status_atual`
+    + `transicoes_permitidas` em `detalhes_json`.
+
+    Wave 3 v4.0 (C10): payload com nro_req `REQ-SCAN-...` cai no fallback
+    legacy `_por_nro_req` (nao casa o regex PRV-...). `origem='camera'`
+    porque o caminho do `payload` e camera por definicao.
+    """
     _setup(mock_db, user=vendedor_matriz)
     nro_req = "REQ-SCAN-AU-01"
     full_hash, payload = _gerar_hash_e_payload(nro_req)
@@ -2410,11 +2415,265 @@ async def test_scan_audit_log_contem_acao_e_status_atual(
     assert kwargs["acao"] == "escanear_prova"
     assert kwargs["usuario_id"] == vendedor_matriz.id
     assert kwargs["prova_id"] == prova.id
+    # Wave 3 v4.0: novos campos
+    assert kwargs["detalhes"]["origem"] == "camera"
+    assert kwargs["detalhes"]["codigo_publico"] == prova.codigo_publico
+    # Campos preservados
     assert kwargs["detalhes"]["nro_requerimento"] == nro_req
     assert kwargs["detalhes"]["status_atual"] == "CRIADA"
     assert kwargs["detalhes"]["transicoes_permitidas"] == [
         "RETIRADA_PELO_VENDEDOR"
     ]
+
+
+# ─── Wave 3 v4.0 (Componente 10) — caminhos polimorficos ────────────
+
+
+async def test_scan_camera_v4_qr_com_codigo_publico_resolve_pelo_codigo(
+    vendedor_matriz, mock_db
+):
+    """Wave 3 v4.0 (C10): provas v4.0+ tem QR Code com `codigo_publico`
+    no segundo campo (`3SD|PRV-...|hash[:16]`). O scan detecta o formato
+    PRV via `validar_formato_codigo_publico` e usa
+    `_carregar_prova_por_codigo_publico_com_scoping`.
+
+    Antes desta entrega, o scan procurava por `nro_requerimento` mesmo
+    quando o segundo campo era um codigo PRV — bug em producao para
+    provas v4.0 (R-1 do analysis.md).
+    """
+    _setup(mock_db, user=vendedor_matriz)
+    codigo_publico = "PRV-2026-05-K3T9XB"
+    prova_uuid = uuid.uuid4()
+    full_hash = qrcode_service.gerar_hash(prova_uuid, "REQ-V4-001")
+    payload = qrcode_service.gerar_payload_qr(codigo_publico, full_hash)
+
+    prova = _make_prova_com_hash(
+        nro_requerimento="REQ-V4-001",
+        codigo_publico=codigo_publico,
+        qr_code_hash=full_hash,
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.CRIADA,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200, resp.json()
+    data = resp.json()
+    assert data["prova"]["codigo_publico"] == codigo_publico
+    assert data["transicoes_permitidas"] == ["RETIRADA_PELO_VENDEDOR"]
+
+
+async def test_scan_camera_legacy_qr_continua_funcionando_via_fallback(
+    vendedor_matriz, mock_db
+):
+    """Wave 3 v4.0 (C10): provas legacy v3.0 tem QR antigo cujo segundo
+    campo e o `nro_requerimento`. O scan detecta que o formato NAO e
+    `PRV-AAAA-MM-NNNNNN` e cai no fallback `_por_nro_req`. Garantia de
+    compatibilidade ate Wave 7 / C21 regerar etiquetas.
+    """
+    _setup(mock_db, user=vendedor_matriz)
+    nro_req = "456987"  # estilo legacy v3.0 — livre, numero do RPC
+    full_hash, payload = _gerar_hash_e_payload(nro_req)
+    prova = _make_prova_com_hash(
+        nro_requerimento=nro_req,
+        qr_code_hash=full_hash,
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.CRIADA,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+
+    assert resp.status_code == 200, resp.json()
+    assert resp.json()["prova"]["nro_requerimento"] == nro_req
+
+
+async def test_scan_manual_codigo_publico_resolve_pela_coluna(
+    vendedor_matriz, mock_db
+):
+    """Wave 3 v4.0 (C10): caminho de **digitacao manual** (Componente
+    19, contrato pronto agora). Usuario digita `PRV-AAAA-MM-NNNNNN`,
+    backend lookup por `codigo_publico`. Sem hash a validar.
+    """
+    _setup(mock_db, user=vendedor_matriz)
+    codigo_publico = "PRV-2026-05-9PQYW2"
+    prova = _make_prova_com_hash(
+        nro_requerimento="qualquer-coisa",
+        codigo_publico=codigo_publico,
+        qr_code_hash="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.CRIADA,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"codigo": codigo_publico})
+
+    assert resp.status_code == 200, resp.json()
+    assert resp.json()["prova"]["codigo_publico"] == codigo_publico
+
+
+async def test_scan_manual_codigo_formato_invalido_retorna_404_generico(
+    admin_user, mock_db
+):
+    """Wave 3 v4.0 (C10): codigo digitado em formato invalido (nao casa
+    `PRV-AAAA-MM-NNNNNN`) retorna 404 generico **sem ir ao banco** —
+    proteja contra enumeracao via timing differential (DAT §8.2).
+
+    Mensagem identica a "prova nao encontrada" para nao distinguir
+    "formato invalido" de "fora do scope" — alinhado a ADR-049.
+    """
+    _setup(mock_db, user=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"codigo": "abc-bad"})
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Prova nao encontrada"
+    # NUNCA chega ao banco
+    mock_db.execute.assert_not_called()
+
+
+async def test_scan_manual_codigo_valido_mas_inexistente_retorna_404(
+    admin_user, mock_db
+):
+    """Wave 3 v4.0 (C10): codigo bem formado (`PRV-...`) mas que nao
+    existe no banco retorna 404 com a mesma mensagem generica."""
+    _setup(mock_db, user=admin_user)
+    # Mock retorna None (nada encontrado)
+    mock_result = MagicMock()
+    mock_result.first.return_value = None
+    mock_db.execute.return_value = mock_result
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/scan", json={"codigo": "PRV-2026-05-NOPENO"}
+        )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Prova nao encontrada"
+
+
+async def test_scan_manual_e_camera_nao_podem_vir_juntos(admin_user, mock_db):
+    """Wave 3 v4.0 (C10): `model_validator` exige XOR — fornecer ambos
+    `payload` e `codigo` retorna 422 com mensagem clara.
+    """
+    _setup(mock_db, user=admin_user)
+    full_hash, payload = _gerar_hash_e_payload("REQ-X-001")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/scan",
+            json={"payload": payload, "codigo": "PRV-2026-05-K3T9XB"},
+        )
+    assert resp.status_code == 422
+
+
+async def test_scan_sem_payload_nem_codigo_retorna_422(admin_user, mock_db):
+    """Wave 3 v4.0 (C10): body sem nenhum dos 2 campos retorna 422."""
+    _setup(mock_db, user=admin_user)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={})
+    assert resp.status_code == 422
+
+
+async def test_scan_manual_audit_log_origem_manual(vendedor_matriz, mock_db):
+    """Wave 3 v4.0 (C10): audit_log do caminho manual grava
+    `detalhes['origem'] = 'manual'`."""
+    _setup(mock_db, user=vendedor_matriz)
+    codigo_publico = "PRV-2026-05-AAAAAA"
+    prova = _make_prova_com_hash(
+        nro_requerimento="any",
+        codigo_publico=codigo_publico,
+        qr_code_hash="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.CRIADA,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    with patch(
+        "app.api.v1.provas.log_audit", new_callable=AsyncMock
+    ) as mock_log:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+            resp = await ac.post(f"{PREFIX}/scan", json={"codigo": codigo_publico})
+
+    assert resp.status_code == 200
+    kwargs = mock_log.call_args.kwargs
+    assert kwargs["detalhes"]["origem"] == "manual"
+    assert kwargs["detalhes"]["codigo_publico"] == codigo_publico
+
+
+async def test_scan_manual_codigo_fora_do_scope_retorna_404_generico(
+    vendedor_matriz, mock_db
+):
+    """Wave 3 v4.0 (C10): vendedor tenta digitar codigo de prova de
+    OUTRO vendedor → RLS no SELECT filtra (linha nao volta) → 404
+    generico. Mesma mensagem que codigo inexistente."""
+    _setup(mock_db, user=vendedor_matriz)
+    # Mock retorna None — RLS filtrou ou prova nao existe (indistinguivel)
+    mock_result = MagicMock()
+    mock_result.first.return_value = None
+    mock_db.execute.return_value = mock_result
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/scan", json={"codigo": "PRV-2026-05-OUTRO9"}
+        )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Prova nao encontrada"
+
+
+async def test_scan_manual_db_error_retorna_502(admin_user, mock_db):
+    """Wave 3 v4.0 (C10): erro de DB no caminho manual cai no
+    handler 502."""
+    _setup(mock_db, user=admin_user)
+    mock_db.execute.side_effect = RuntimeError("DB indisponivel")
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/scan", json={"codigo": "PRV-2026-05-K3T9XB"}
+        )
+    assert resp.status_code == 502
+
+
+async def test_scan_camera_v4_qr_hash_invalido_retorna_422_apos_lookup(
+    vendedor_matriz, mock_db
+):
+    """Wave 3 v4.0 (C10): caminho camera com codigo_publico no payload —
+    se o hash truncado nao bate (QR adulterado), 422 apos o SELECT
+    (mesma protecao da v3.0, agora aplicada ao novo caminho)."""
+    _setup(mock_db, user=vendedor_matriz)
+    codigo_publico = "PRV-2026-05-HASHBAD"
+    prova_uuid = uuid.uuid4()
+    full_hash_correto = qrcode_service.gerar_hash(prova_uuid, "REQ-V4-HASH")
+    payload_correto = qrcode_service.gerar_payload_qr(codigo_publico, full_hash_correto)
+    # Adultera o hash
+    parts = payload_correto.split("|")
+    parts[2] = "0123456789abcdef"  # 16 chars, formato OK, mas hash errado
+    payload_adulterado = "|".join(parts)
+
+    prova = _make_prova_com_hash(
+        nro_requerimento="REQ-V4-HASH",
+        codigo_publico=codigo_publico,
+        qr_code_hash=full_hash_correto,
+        vendedor_id=vendedor_matriz.id,
+        status_prova=StatusProvaEnum.CRIADA,
+    )
+    mock_db.execute.side_effect = [
+        _detail_row(prova, vendedor_matriz.nome, vendedor_matriz.localizacao),
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload_adulterado})
+    assert resp.status_code == 422
+    assert "QR Code nao corresponde" in resp.json()["detail"]
 
 
 # ═══════════════════════════════════════════════════════════════════════
