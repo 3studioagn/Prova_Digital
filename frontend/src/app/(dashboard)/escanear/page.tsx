@@ -25,25 +25,17 @@ import styles from "./escanear.module.css";
 /* ──────────────────────────────────────────────────────────────────────
  * Pagina /escanear — Wave 3 v4.0, Componente 10 (atualizacao v4.0).
  *
- * Iteracao 2 (pos-Mario apontar discrepancias visuais com o Figma).
+ * Iteracao 3 (pos-Mario fornecer link do Figma + extracao via MCP).
+ * Specs canonicos extraidos de:
+ *   - file kqOrPgP07y6y1SV7BUlEBs
+ *   - frame Camera node 206:87
+ *   - frame Manual node 240:6448
  *
- * Estrategia desta entrega (analysis.md §1):
- *   - Apenas IDENTIFICACAO: scan + lookup → redireciona para /provas/[id].
- *   - O fluxo de assinatura/transicao migra para a pagina de detalhe na
- *     proxima entrega da wave (C11 v4.0).
- *
- * Estrutura visual fiel as 2 imagens de referencia
- * (docs/wave3-v4-c10/figma-reference-*.png):
- *
- *   .pageWrapper
- *     .wrapper (CINZA CLARO arredondado, engloba TUDO)
- *       .header (h1 + subtitulo)
- *       .tabsRow (centraliza .tabs)
- *       .innerCard (BRANCO arredondado)
- *         [camera] CameraPanel (preview slot CINZA com brackets +
- *                  qrMockCard BRANCO + sidebar)
- *         [manual] ManualPanel (centralizado vertical com input + CTA)
- *         .innerFooter (divisor + Ultima leitura | Ver historico)
+ * Estrategia desta entrega:
+ *   - Apenas IDENTIFICACAO: scan/digitacao → /provas/[id].
+ *   - Tab Manual usa formato real PRV-AAAA-MM-NNNNNN (Q4 do Mario)
+ *     com estilizacao 100% Figma (JetBrains Mono, cores #9a9a9a/#757575,
+ *     bg #fafafa, border #e3e3e3, rounded 12px).
  *
  * RBAC (Wave 1 v4.0): rule key "scanner", todos os 4 perfis = full.
  * ──────────────────────────────────────────────────────────────────── */
@@ -76,7 +68,6 @@ export default function EscanearPage() {
     return data.session?.access_token ?? null;
   }, []);
 
-  // ── Camera lifecycle ─────────────────────────────────────────────
   const handleDetect = useCallback((payload: string) => {
     setCameraState({ kind: "identifying", payload });
   }, []);
@@ -168,7 +159,6 @@ export default function EscanearPage() {
     setCameraState({ kind: "idle" });
   }, []);
 
-  // Defesa proativa RBAC (M-1 fix Wave 1 v4.0).
   if (auth.loading) return null;
   if (!auth.hasAccess) {
     return <Restricted ruleKey="scanner" profile={auth.profile} />;
@@ -239,7 +229,7 @@ function ScannerTabs({
           className={`${styles.tab} ${tab === "camera" ? styles.tabActive : ""}`}
           onClick={onCamera}
         >
-          <CameraIcon width={18} height={18} aria-hidden="true" />
+          <CameraIcon width={20} height={20} aria-hidden="true" />
           <span>Camera</span>
         </button>
         <button
@@ -249,7 +239,7 @@ function ScannerTabs({
           className={`${styles.tab} ${tab === "manual" ? styles.tabActive : ""}`}
           onClick={onManual}
         >
-          <KeyIcon width={18} height={18} aria-hidden="true" />
+          <KeyIcon width={20} height={20} aria-hidden="true" />
           <span>Manual</span>
         </button>
       </div>
@@ -281,23 +271,25 @@ function CameraPanel({
 
   return (
     <div className={styles.cameraPanel}>
-      {/* Lado esquerdo: previewSlot CINZA com brackets externos +
-          qrMockCard BRANCO no centro (ou camera live no estado scanning). */}
+      {/* Lado esquerdo: previewSlot com gradient + brackets amarelos
+          envolvendo o mini-card branco com QR mock (estado idle) ou a
+          camera live (estado scanning). */}
       <div className={styles.previewSlot}>
-        <span className={styles.bracketTopLeft} aria-hidden="true" />
-        <span className={styles.bracketTopRight} aria-hidden="true" />
-        <span className={styles.bracketBottomLeft} aria-hidden="true" />
-        <span className={styles.bracketBottomRight} aria-hidden="true" />
-
         {state.kind === "scanning" ? (
-          <CameraLive divId={scanner.divId} ready={scanner.ready} />
+          <div className={styles.qrMockBox}>
+            <CameraLive divId={scanner.divId} ready={scanner.ready} />
+            <Brackets />
+          </div>
         ) : (
-          <QRMockCard />
+          <div className={styles.qrMockBox}>
+            <QRMockCard />
+            <Brackets />
+          </div>
         )}
         <p className={styles.previewHint}>Centralize o QR Code no quadro</p>
       </div>
 
-      {/* Lado direito: titulo + descricao + CTA contextual. */}
+      {/* Lado direito: titulo + descricao + CTA "Abrir camera". */}
       <div className={styles.cameraSidebar}>
         <h2 className={styles.panelTitle}>{titulo}</h2>
         <p className={styles.panelDescription}>{descricao}</p>
@@ -319,11 +311,11 @@ function CameraPanel({
 
         <button
           type="button"
-          className={`${styles.primaryButton} ${styles.ctaLarge}`}
+          className={styles.cameraCta}
           onClick={ctaHandler}
           disabled={ctaDisabled}
         >
-          <CameraIcon width={18} height={18} aria-hidden="true" />
+          <CameraIcon width={20} height={20} aria-hidden="true" />
           <span>{ctaLabel}</span>
         </button>
       </div>
@@ -384,6 +376,19 @@ function _resolverTextoCamera(
   }
 }
 
+/** 4 brackets amarelos (#f5c518) com inset -10px do parent.
+ * Posicionados absolutamente; o parent precisa de position relative. */
+function Brackets() {
+  return (
+    <>
+      <span className={styles.bracketTopLeft} aria-hidden="true" />
+      <span className={styles.bracketTopRight} aria-hidden="true" />
+      <span className={styles.bracketBottomLeft} aria-hidden="true" />
+      <span className={styles.bracketBottomRight} aria-hidden="true" />
+    </>
+  );
+}
+
 function CameraLive({ divId, ready }: { divId: string; ready: boolean }) {
   return (
     <div className={styles.cameraLiveWrapper}>
@@ -393,48 +398,116 @@ function CameraLive({ divId, ready }: { divId: string; ready: boolean }) {
   );
 }
 
-/** Mini-card branco com sombra contendo o QR mock decorativo
- * (faixa amarela superior + grade decorativa + quadradinho amarelo central).
- * Estado idle do `previewSlot`. Substitudo por <CameraLive /> em scanning. */
+/** Mini-card branco com sombra + faixa amarela superior + SVG QR 120x120
+ * centralizado. Specs Figma: 300x300, border 1px #ececec, rounded 16px,
+ * shadow `0 12px 36px -12px rgba(0,0,0,0.18)`. */
 function QRMockCard() {
   return (
     <div className={styles.qrMockCard} aria-hidden="true">
       <div className={styles.qrMockYellowBar} />
-      <div className={styles.qrMockGrid}>
-        {Array.from({ length: 49 }, (_, i) => {
-          const isCenter = i === 24; // centro da grade 7x7
-          if (isCenter) {
-            return <span key={i} className={styles.qrMockYellowCenter} />;
-          }
-          return (
-            <span
-              key={i}
-              className={
-                _qrMockCell(i) ? styles.qrMockCellOn : styles.qrMockCellOff
-              }
-            />
-          );
-        })}
-      </div>
+      <QRIconSvg className={styles.qrMockSvg} />
     </div>
   );
 }
 
-// Padrao deterministico para o mock do QR — apenas decorativo.
-function _qrMockCell(i: number): boolean {
-  const row = Math.floor(i / 7);
-  const col = i % 7;
-  // Finder patterns nos 3 cantos (TL, TR, BL).
-  const tl = row < 3 && col < 3;
-  const tr = row < 3 && col > 3;
-  const bl = row > 3 && col < 3;
-  if (tl || tr || bl) {
-    if (row === 0 || row === 2 || col === 0 || col === 2) return true;
-    if (row === 1 && col === 1) return true;
-    return tr && (row === 1 || col === 5);
-  }
-  // Centro com pseudo-padrao deterministico.
-  return (i * 7 + 3) % 5 < 2;
+/** Icone SVG do QR Code — replica decorativa do Figma (120x120).
+ * Black blocks + 1 quadrado amarelo central. Apenas decorativo. */
+function QRIconSvg({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 120 120"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      role="presentation"
+    >
+      {/* Finder pattern top-left (3 squares) */}
+      <rect x="0" y="0" width="35" height="35" fill="#000" />
+      <rect x="5" y="5" width="25" height="25" fill="#fff" />
+      <rect x="10" y="10" width="15" height="15" fill="#000" />
+
+      {/* Finder pattern top-right */}
+      <rect x="85" y="0" width="35" height="35" fill="#000" />
+      <rect x="90" y="5" width="25" height="25" fill="#fff" />
+      <rect x="95" y="10" width="15" height="15" fill="#000" />
+
+      {/* Finder pattern bottom-left */}
+      <rect x="0" y="85" width="35" height="35" fill="#000" />
+      <rect x="5" y="90" width="25" height="25" fill="#fff" />
+      <rect x="10" y="95" width="15" height="15" fill="#000" />
+
+      {/* Center yellow square — destaque do Figma */}
+      <rect x="50" y="50" width="20" height="20" fill="#f5c518" />
+
+      {/* Random data dots — visual filler. */}
+      <rect x="40" y="5" width="5" height="5" fill="#000" />
+      <rect x="50" y="5" width="5" height="5" fill="#000" />
+      <rect x="65" y="5" width="5" height="5" fill="#000" />
+      <rect x="75" y="5" width="5" height="5" fill="#000" />
+      <rect x="40" y="15" width="5" height="5" fill="#000" />
+      <rect x="55" y="15" width="5" height="5" fill="#000" />
+      <rect x="75" y="15" width="5" height="5" fill="#000" />
+      <rect x="45" y="25" width="5" height="5" fill="#000" />
+      <rect x="60" y="25" width="5" height="5" fill="#000" />
+      <rect x="70" y="25" width="5" height="5" fill="#000" />
+
+      <rect x="5" y="40" width="5" height="5" fill="#000" />
+      <rect x="20" y="40" width="5" height="5" fill="#000" />
+      <rect x="30" y="40" width="5" height="5" fill="#000" />
+      <rect x="40" y="40" width="5" height="5" fill="#000" />
+      <rect x="80" y="40" width="5" height="5" fill="#000" />
+      <rect x="90" y="40" width="5" height="5" fill="#000" />
+      <rect x="100" y="40" width="5" height="5" fill="#000" />
+      <rect x="115" y="40" width="5" height="5" fill="#000" />
+
+      <rect x="10" y="50" width="5" height="5" fill="#000" />
+      <rect x="25" y="50" width="5" height="5" fill="#000" />
+      <rect x="40" y="50" width="5" height="5" fill="#000" />
+      <rect x="80" y="50" width="5" height="5" fill="#000" />
+      <rect x="95" y="50" width="5" height="5" fill="#000" />
+      <rect x="115" y="50" width="5" height="5" fill="#000" />
+
+      <rect x="0" y="60" width="5" height="5" fill="#000" />
+      <rect x="15" y="60" width="5" height="5" fill="#000" />
+      <rect x="30" y="60" width="5" height="5" fill="#000" />
+      <rect x="40" y="60" width="5" height="5" fill="#000" />
+      <rect x="80" y="60" width="5" height="5" fill="#000" />
+      <rect x="100" y="60" width="5" height="5" fill="#000" />
+      <rect x="110" y="60" width="5" height="5" fill="#000" />
+
+      <rect x="5" y="70" width="5" height="5" fill="#000" />
+      <rect x="20" y="70" width="5" height="5" fill="#000" />
+      <rect x="40" y="70" width="5" height="5" fill="#000" />
+      <rect x="80" y="70" width="5" height="5" fill="#000" />
+      <rect x="90" y="70" width="5" height="5" fill="#000" />
+      <rect x="105" y="70" width="5" height="5" fill="#000" />
+
+      <rect x="40" y="85" width="5" height="5" fill="#000" />
+      <rect x="55" y="85" width="5" height="5" fill="#000" />
+      <rect x="70" y="85" width="5" height="5" fill="#000" />
+      <rect x="80" y="85" width="5" height="5" fill="#000" />
+      <rect x="100" y="85" width="5" height="5" fill="#000" />
+      <rect x="115" y="85" width="5" height="5" fill="#000" />
+
+      <rect x="45" y="95" width="5" height="5" fill="#000" />
+      <rect x="60" y="95" width="5" height="5" fill="#000" />
+      <rect x="80" y="95" width="5" height="5" fill="#000" />
+      <rect x="95" y="95" width="5" height="5" fill="#000" />
+      <rect x="110" y="95" width="5" height="5" fill="#000" />
+
+      <rect x="40" y="105" width="5" height="5" fill="#000" />
+      <rect x="50" y="105" width="5" height="5" fill="#000" />
+      <rect x="75" y="105" width="5" height="5" fill="#000" />
+      <rect x="85" y="105" width="5" height="5" fill="#000" />
+      <rect x="100" y="105" width="5" height="5" fill="#000" />
+      <rect x="115" y="105" width="5" height="5" fill="#000" />
+
+      <rect x="45" y="115" width="5" height="5" fill="#000" />
+      <rect x="65" y="115" width="5" height="5" fill="#000" />
+      <rect x="80" y="115" width="5" height="5" fill="#000" />
+      <rect x="95" y="115" width="5" height="5" fill="#000" />
+    </svg>
+  );
 }
 
 interface ManualPanelProps {
@@ -445,6 +518,8 @@ interface ManualPanelProps {
 }
 
 function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
+  // Wave 3 v4.0 (C10): formato real PRV-AAAA-MM-NNNNNN com estilizacao
+  // 100% Figma (JetBrains Mono, cores #9a9a9a/#757575, bg #fafafa).
   const isLoading = state.kind === "identifying";
   const isError = state.kind === "error";
   const trimmed = codigo.trim();
@@ -452,10 +527,9 @@ function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
 
   return (
     <form className={styles.manualPanel} onSubmit={onSubmit}>
-      <h2 className={styles.panelTitleCenter}>Inserir codigo manualmente</h2>
-      <p className={styles.panelDescriptionCenter}>
-        Digite o codigo da etiqueta no formato{" "}
-        <code className={styles.codigoFormat}>PRV-AAAA-MM-NNNNNN</code>. A
+      <h2 className={styles.panelTitleManual}>Inserir codigo manualmente</h2>
+      <p className={styles.panelDescriptionManual}>
+        Digite o codigo da etiqueta no formato PRV-AAAA-MM-NNNNNN. A
         movimentacao sera registrada apos a confirmacao.
       </p>
 
@@ -490,23 +564,19 @@ function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
         </div>
       )}
 
-      <button
-        type="submit"
-        className={`${styles.primaryButton} ${styles.ctaManual}`}
-        disabled={submitDisabled}
-      >
+      <button type="submit" className={styles.manualCta} disabled={submitDisabled}>
         <span>{isLoading ? "Buscando..." : "Buscar prova"}</span>
         {!isLoading && (
-          <ArrowRightIcon width={16} height={16} aria-hidden="true" />
+          <ArrowRightIcon width={11} height={11} aria-hidden="true" />
         )}
       </button>
     </form>
   );
 }
 
-/** Footer dentro do innerCard branco. Wave 3 v4.0 (C10) entrega como
- * placeholder visual (Q3 do Mario aprovou). C18 + futura wave plugam
- * "ultima leitura" via audit_log filtrado por user. */
+/** Footer dentro do innerCard branco — placeholder visual.
+ * Q3 do Mario: "Ultima leitura ha —" + "Ver historico" desabilitado.
+ * Texto 11px #7a7a7a, divisor 1px #e9e9e9 (specs Figma). */
 function InnerFooter() {
   return (
     <div className={styles.innerFooter}>
@@ -516,7 +586,8 @@ function InnerFooter() {
         aria-disabled="true"
         title="Disponivel em breve"
       >
-        Ver historico →
+        Ver historico
+        <ArrowRightIcon width={11} height={11} aria-hidden="true" />
       </span>
     </div>
   );

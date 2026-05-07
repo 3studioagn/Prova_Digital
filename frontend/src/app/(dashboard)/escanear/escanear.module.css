@@ -1,50 +1,60 @@
 /* ──────────────────────────────────────────────────────────────────────
  * Wave 3 v4.0 / Componente 10 — Scanner reformulado.
  *
- * Iteracao 2 (pos-Mario apontar discrepancias visuais com o Figma).
+ * Iteracao 3 (pos-Mario fornecer link do Figma e specs exatas via MCP).
  *
- * Estrutura visual fiel as 2 imagens de referencia
- * (docs/wave3-v4-c10/figma-reference-*.png) — aninhamento tripla:
+ * Specs canonicos extraidos via mcp__9b97d32e-...__get_design_context
+ * (file kqOrPgP07y6y1SV7BUlEBs):
+ *   - Frame Camera node 206:87
+ *   - Frame Manual node 240:6448
  *
- *   .pageWrapper (gray bg = cor da viewport, fora do wrapper)
- *     .wrapper (CINZA CLARO arredondado, engloba TUDO)
- *       .header (h1 "Escanear prova" + subtitulo)
- *       .tabs (CENTRALIZADO horizontalmente)
- *       .innerCard (CARD BRANCO arredondado interno)
- *         .cameraPanel | .manualPanel
- *           [camera] .previewSlot (CINZA CLARO, brackets externos)
- *                      .qrMockCard (BRANCO com sombra, QR decorativo)
- *                    .previewHint
- *                    .cameraSidebar (h2 + descricao + CTA)
- *           [manual] conteudo centralizado vertical
- *         .innerFooter (divisor + Ultima leitura | Ver historico)
+ * Estrutura:
+ *   .pageWrapper
+ *     .wrapper (bg #eaeaea, rounded 43px, engloba TUDO)
+ *       .header (titulo 64px + subtitulo 18px #575757)
+ *       .tabsRow → .tabs (white, rounded 39px, h 58px, w 513px)
+ *                  alinhado a esquerda no mesmo X do innerCard
+ *       .innerCard (white, rounded 37px, h ~581px)
+ *         [camera] .cameraPanel (preview 624px + sidebar 554px)
+ *         [manual] .manualPanel (centralizado vertical)
+ *         .innerFooter (divisor 554px + Ultima leitura | Ver historico)
  *
- * Tokens canonicos consumidos:
- *   --color-page-text, --color-text-secondary, --color-card-surface,
- *   --color-accent (preto), --radius-pill, --radius-card-xl.
+ * Tokens canonicos do Figma:
+ *   - bg wrapper: #eaeaea
+ *   - subtitulo: #575757
+ *   - sidebar title: #0e0e0e
+ *   - sidebar desc: #5a5a5a (line-height 20.8px)
+ *   - footer + hint: #7a7a7a
+ *   - brackets: #f5c518 (AMARELO!)
+ *   - preview slot bg: gradient #fafafa → #f1f1f1, border 1px #ececec
+ *   - mini-card branco: white, border 1px #ececec, shadow especifico
+ *   - input wrapper (manual): bg #fafafa, border 1px #e3e3e3, rounded 12px
+ *   - input prefix: #9a9a9a JetBrains Mono 13px
+ *   - input placeholder: #757575 JetBrains Mono 16px
+ *   - botao Buscar prova: bg #dcdcdc (desabilitado), texto #9a9a9a
  *
- * Acessibilidade preservada: tabs com role="tab" + aria-selected,
- * banners com role="alert", prefers-reduced-motion respeitado.
+ * Acessibilidade preservada (role=tab, aria-selected, role=alert,
+ * prefers-reduced-motion).
  * ──────────────────────────────────────────────────────────────────── */
 
 .pageWrapper {
   display: flex;
   flex-direction: column;
-  padding: 1.5rem 2rem 2rem;
+  padding: 1.5rem 2rem 1.5rem 2rem;
   min-height: 100%;
 }
 
-/* ─── Wrapper externo cinza claro (engloba TUDO) ──────────────────── */
+/* ─── Wrapper externo cinza claro ─────────────────────────────────── */
 
 .wrapper {
-  background: #ededeb; /* cinza off-white do Figma */
-  border-radius: 32px;
-  padding: 2.5rem 3rem 1.75rem;
+  background: #eaeaea;
+  border-radius: 43px;
+  padding: 2.5rem clamp(2rem, 4vw, 3.5rem) 2rem;
   display: flex;
   flex-direction: column;
-  gap: 1.75rem;
+  gap: 1.5rem;
   flex: 1;
-  min-height: 600px;
+  min-height: 720px;
 }
 
 /* ─── Header ──────────────────────────────────────────────────────── */
@@ -52,55 +62,65 @@
 .header {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.625rem;
+  /* Titulo e subtitulo alinhados a esquerda — mesmo X que o innerCard
+   * comeca (sem padding extra). */
 }
 
 .title {
-  font-size: clamp(2rem, 3vw, 3.25rem);
-  font-weight: 600;
-  color: var(--color-page-text);
+  font-size: clamp(2.5rem, 4.2vw, 4rem);
+  font-weight: 400;
+  color: #000000;
   letter-spacing: -0.02em;
   margin: 0;
-  line-height: 1.05;
+  line-height: 1;
 }
 
 .subtitle {
-  font-size: 0.95rem;
-  color: var(--color-text-secondary);
+  font-size: 1.125rem; /* 18px */
+  font-weight: 400;
+  color: #575757;
   margin: 0;
   max-width: 60ch;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
-/* ─── Toggle pill (CENTRALIZADO horizontalmente) ──────────────────── */
+/* ─── Toggle pill (Camera / Manual) ───────────────────────────────── */
 
+/* Tabs alinhados a ESQUERDA do wrapper (mesmo X que o innerCard).
+ * Nao centralizado horizontalmente. */
 .tabsRow {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .tabs {
   display: inline-flex;
   align-items: center;
-  background: var(--color-card-surface);
-  border-radius: var(--radius-pill);
-  padding: 0.4rem;
-  gap: 0.4rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  background: #ffffff;
+  border-radius: 39px;
+  padding: 5px;
+  gap: 5px;
+  height: 58px;
+  /* No Figma o container tem 513px fixo. Em telas pequenas usamos
+   * largura maxima da viewport.  */
+  width: min(513px, 100%);
 }
 
 .tab {
   display: inline-flex;
   align-items: center;
-  gap: 0.55rem;
-  padding: 0.7rem 2rem;
+  justify-content: center;
+  gap: 0.5rem;
+  flex: 1; /* cada tab divide a largura igualmente */
+  height: 48px;
   border: none;
   background: transparent;
-  color: var(--color-page-text);
-  border-radius: var(--radius-pill);
+  color: #000000;
+  border-radius: 39px;
   font: inherit;
-  font-weight: 500;
-  font-size: 0.95rem;
+  font-weight: 400;
+  font-size: 1.125rem; /* 18px */
   cursor: pointer;
   transition: background-color 180ms ease, color 180ms ease;
 }
@@ -110,176 +130,175 @@
 }
 
 .tabActive {
-  background-color: var(--color-accent);
-  color: var(--color-card-surface);
+  background-color: #000000;
+  color: #ffffff;
 }
 
 .tabActive:hover {
-  background-color: var(--color-accent);
+  background-color: #000000;
 }
 
 .tab:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid #000000;
   outline-offset: 2px;
 }
 
-/* ─── Card branco interno (innerCard) ─────────────────────────────── */
+/* ─── Card branco interno ─────────────────────────────────────────── */
 
 .innerCard {
-  background: var(--color-card-surface);
-  border-radius: 24px;
-  padding: 2.5rem 2.75rem 1.25rem;
+  background: #ffffff;
+  border-radius: 37px;
+  padding: 2.5rem clamp(2rem, 3.5vw, 3rem) 1.75rem;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 480px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
-/* ─── Painel da camera (lado a lado dentro do innerCard) ──────────── */
+/* ─── Camera panel (lado a lado) ──────────────────────────────────── */
 
 .cameraPanel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 3rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: clamp(2rem, 4vw, 5rem);
   flex: 1;
   align-items: center;
 }
 
-/* Preview slot: caixa CINZA CLARO com brackets externos pretos.
- * Dentro fica o `.qrMockCard` branco com sombra. */
+/* Preview slot: gradient sutil, border, brackets externos amarelos. */
 .previewSlot {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #f4f4f2;
-  border-radius: 18px;
-  padding: 3rem 2rem 2.5rem;
+  background: linear-gradient(180deg, #fafafa 0%, #f1f1f1 100%);
+  border: 1px solid #ececec;
+  border-radius: 16px;
+  padding: 3rem;
   min-height: 380px;
-  aspect-ratio: 1.05 / 1;
+  aspect-ratio: 1.18 / 1;
+  width: 100%;
 }
 
 .previewHint {
   position: absolute;
-  bottom: 0.75rem;
+  bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 0.8rem;
-  color: var(--color-text-secondary);
+  font-size: 12px;
+  color: #7a7a7a;
   margin: 0;
   white-space: nowrap;
+  text-align: center;
 }
 
-/* Brackets externos do previewSlot — cinza/preto medio, nos 4 cantos. */
+/* qrMockBox: wrapper que aninha o card branco/camera live + os 4
+ * brackets amarelos. Position relative para que os brackets se
+ * posicionem com inset -10px relativo a este box. */
+.qrMockBox {
+  position: relative;
+  width: clamp(220px, 75%, 300px);
+  aspect-ratio: 1;
+}
+
+/* Mini-card branco com QR mock (estado idle).
+ * Specs Figma: white, border 1px #ececec, rounded 16px,
+ * shadow `0 12px 36px -12px rgba(0,0,0,0.18)`. Ocupa 100% do qrMockBox. */
+.qrMockCard {
+  background: #ffffff;
+  border: 1px solid #ececec;
+  border-radius: 16px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0px 12px 36px -12px rgba(0, 0, 0, 0.18),
+    0px 1px 0px 0px rgba(0, 0, 0, 0.04);
+}
+
+/* Faixa amarela superior — gradient sutil simulando o destaque
+ * do design (Figma node 240:6278, height 60px, gradient 0→0.14→0). */
+.qrMockYellowBar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  height: 60px;
+  background: linear-gradient(
+    180deg,
+    rgba(245, 197, 24, 0) 0%,
+    rgba(245, 197, 24, 0.14) 50%,
+    rgba(245, 197, 24, 0) 100%
+  );
+  border-radius: 8px 8px 0 0;
+  pointer-events: none;
+}
+
+/* SVG QR centralizado, 120x120 conforme Figma. */
+.qrMockSvg {
+  width: 120px;
+  height: 120px;
+  position: relative;
+  z-index: 1;
+}
+
 .bracketTopLeft,
 .bracketTopRight,
 .bracketBottomLeft,
 .bracketBottomRight {
   position: absolute;
-  width: 36px;
-  height: 36px;
-  border-color: rgba(0, 0, 0, 0.45);
+  width: 20px;
+  height: 20px;
+  border-color: #f5c518; /* AMARELO! */
   border-style: solid;
   border-width: 0;
   pointer-events: none;
 }
 
 .bracketTopLeft {
-  top: 14px;
-  left: 14px;
+  top: -10px;
+  left: -10px;
   border-top-width: 2px;
   border-left-width: 2px;
-  border-top-left-radius: 4px;
 }
 
 .bracketTopRight {
-  top: 14px;
-  right: 14px;
+  top: -10px;
+  right: -10px;
   border-top-width: 2px;
   border-right-width: 2px;
-  border-top-right-radius: 4px;
 }
 
 .bracketBottomLeft {
-  bottom: 14px;
-  left: 14px;
+  bottom: -10px;
+  left: -10px;
   border-bottom-width: 2px;
   border-left-width: 2px;
-  border-bottom-left-radius: 4px;
 }
 
 .bracketBottomRight {
-  bottom: 14px;
-  right: 14px;
+  bottom: -10px;
+  right: -10px;
   border-bottom-width: 2px;
   border-right-width: 2px;
-  border-bottom-right-radius: 4px;
 }
 
-/* Mini-card branco com sombra contendo o QR mock decorativo. */
-.qrMockCard {
-  background: var(--color-card-surface);
-  border-radius: 18px;
-  width: min(72%, 260px);
-  aspect-ratio: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-  position: relative;
-}
-
-/* Faixa amarela superior dentro do mini-card. */
-.qrMockYellowBar {
-  width: 70%;
-  height: 12%;
-  margin: 14% auto 0;
-  background: linear-gradient(
-    180deg,
-    rgba(254, 240, 138, 0.85),
-    rgba(253, 224, 71, 0.45)
-  );
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-/* Grade decorativa do QR mock. */
-.qrMockGrid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  grid-template-rows: repeat(7, 1fr);
-  gap: 8%;
-  padding: 14% 18% 18%;
-}
-
-.qrMockCellOn {
-  background: var(--color-page-text);
-  border-radius: 1px;
-}
-
-.qrMockCellOff {
-  background: transparent;
-}
-
-/* Quadradinho amarelo no centro do QR mock — destaque do design. */
-.qrMockYellowCenter {
-  background: rgb(252, 211, 77);
-  border-radius: 2px;
-}
-
-/* ─── Camera live (estado scanning) — substitui .qrMockCard ───────── */
+/* ─── Camera live (estado scanning) — ocupa o qrMockBox ──────────── */
 
 .cameraLiveWrapper {
   position: relative;
-  width: min(72%, 260px);
-  aspect-ratio: 1;
-  background: var(--color-page-text);
-  border-radius: 18px;
+  width: 100%;
+  height: 100%;
+  background: #000000;
+  border: 1px solid #ececec;
+  border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: 0px 12px 36px -12px rgba(0, 0, 0, 0.18),
+    0px 1px 0px 0px rgba(0, 0, 0, 0.04);
 }
 
 .cameraLive {
@@ -299,10 +318,10 @@
   left: 50%;
   transform: translateX(-50%);
   font-size: 0.85rem;
-  color: var(--color-card-surface);
+  color: #ffffff;
   background: rgba(0, 0, 0, 0.55);
   padding: 0.25rem 0.75rem;
-  border-radius: var(--radius-pill);
+  border-radius: 999px;
   margin: 0;
 }
 
@@ -312,174 +331,72 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 1.25rem;
-  padding: 0 0.5rem;
+  gap: 1rem;
+  max-width: 554px;
 }
 
 .panelTitle {
-  font-size: clamp(1.5rem, 2.2vw, 2.25rem);
-  font-weight: 600;
-  color: var(--color-page-text);
+  font-size: clamp(1.75rem, 2.5vw, 2.5rem); /* 40px alvo */
+  font-weight: 500; /* Inter Medium */
+  color: #0e0e0e;
   margin: 0;
   letter-spacing: -0.01em;
-  line-height: 1.1;
+  line-height: 1.05;
 }
 
 .panelDescription {
-  font-size: 0.95rem;
-  color: var(--color-text-secondary);
-  line-height: 1.55;
+  font-size: 1.125rem; /* 18px */
+  color: #5a5a5a;
+  line-height: 20.8px; /* spec Figma */
   margin: 0;
-  max-width: 38ch;
 }
 
-/* ─── Painel manual (centralizado dentro do innerCard) ────────────── */
-
-.manualPanel {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1.25rem;
-  flex: 1;
-  padding: 2rem 1rem;
-  text-align: center;
-}
-
-.panelTitleCenter {
-  font-size: clamp(1.5rem, 2.2vw, 2.25rem);
-  font-weight: 600;
-  color: var(--color-page-text);
-  margin: 0;
-  letter-spacing: -0.01em;
-}
-
-.panelDescriptionCenter {
-  font-size: 0.95rem;
-  color: var(--color-text-secondary);
-  line-height: 1.55;
-  margin: 0;
-  max-width: 56ch;
-}
-
-.codigoFormat {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
-  font-size: 0.9em;
-  background: rgba(0, 0, 0, 0.06);
-  padding: 0.1rem 0.4rem;
-  border-radius: 4px;
-  letter-spacing: 0.02em;
-}
-
-/* Campo de input com prefixo "PRV-" embutido. */
-.manualInputWrapper {
-  width: min(420px, 100%);
-  position: relative;
-  display: flex;
-  align-items: center;
-  background: #f4f4f2;
-  border: 1px solid transparent;
-  border-radius: 10px;
-  padding: 0 1rem;
-  transition: border-color 180ms ease, background-color 180ms ease;
-}
-
-.manualInputWrapper:focus-within {
-  border-color: rgba(0, 0, 0, 0.2);
-  background: var(--color-card-surface);
-}
-
-.manualInputPrefix {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
-  font-size: 0.95rem;
-  color: var(--color-text-secondary);
-  padding-right: 0.4rem;
-  letter-spacing: 0.04em;
-  user-select: none;
-}
-
-.manualInput {
-  flex: 1;
-  padding: 0.85rem 0;
-  font: inherit;
-  font-size: 0.95rem;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
-  letter-spacing: 0.04em;
-  background: transparent;
-  color: var(--color-page-text);
-  border: none;
-  outline: none;
-}
-
-.manualInput::placeholder {
-  color: rgba(0, 0, 0, 0.32);
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
-  letter-spacing: 0.04em;
-}
-
-.manualInputWrapper[aria-invalid="true"] {
-  border-color: #b91c1c;
-}
-
-/* ─── Botoes ──────────────────────────────────────────────────────── */
-
-.primaryButton {
+/* Botao "Abrir camera": preto, rounded 17, w 494, h 50, texto 16px. */
+.cameraCta {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.85rem 1.75rem;
+  gap: 0.625rem;
+  width: 100%;
+  max-width: 494px;
+  height: 50px;
   font: inherit;
-  font-weight: 500;
-  font-size: 0.95rem;
-  background: var(--color-accent);
-  color: var(--color-card-surface);
+  font-weight: 400;
+  font-size: 1rem; /* 16px */
+  background: #000000;
+  color: #ffffff;
   border: none;
-  border-radius: var(--radius-pill);
+  border-radius: 17px;
   cursor: pointer;
   transition: background-color 180ms ease, transform 120ms ease;
-  width: fit-content;
+  margin-top: 0.5rem;
 }
 
-.primaryButton:hover:not(:disabled) {
+.cameraCta:hover:not(:disabled) {
   background-color: rgba(0, 0, 0, 0.85);
 }
 
-.primaryButton:active:not(:disabled) {
+.cameraCta:active:not(:disabled) {
   transform: translateY(1px);
 }
 
-.primaryButton:focus-visible {
-  outline: 2px solid var(--color-accent);
+.cameraCta:focus-visible {
+  outline: 2px solid #000000;
   outline-offset: 3px;
 }
 
-.primaryButton:disabled {
-  background: #d4d4d4;
-  color: rgba(0, 0, 0, 0.45);
+.cameraCta:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
-}
-
-/* CTA "Abrir camera" no modo camera tem largura definida. */
-.ctaLarge {
-  min-width: 220px;
-}
-
-/* CTA "Buscar prova" no modo manual ocupa a largura do input. */
-.ctaManual {
-  width: min(420px, 100%);
 }
 
 .linkButton {
   background: transparent;
   border: none;
-  color: var(--color-page-text);
+  color: #000000;
   font: inherit;
   font-weight: 500;
+  font-size: 0.95rem;
   text-decoration: underline;
   cursor: pointer;
   padding: 0.25rem 0;
@@ -510,29 +427,178 @@
   font-weight: 600;
 }
 
-/* ─── Footer dentro do innerCard ──────────────────────────────────── */
+/* ─── Manual panel ────────────────────────────────────────────────── */
+
+.manualPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start; /* alinha conteudo a esquerda como no Figma */
+  justify-content: center;
+  gap: 1.25rem;
+  flex: 1;
+  padding: 0;
+  /* No Figma o conteudo manual fica em left 956 dentro do innerCard
+   * (left 528, w 1342) — empurrado para o centro-direita. */
+  padding-left: clamp(0px, 12vw, 28%);
+}
+
+.panelTitleManual {
+  font-size: clamp(1.75rem, 2.5vw, 2.5rem); /* 40px */
+  font-weight: 500; /* Inter Medium */
+  color: #0e0e0e;
+  margin: 0;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+}
+
+.panelDescriptionManual {
+  font-size: 1.125rem; /* 18px */
+  color: #5a5a5a;
+  line-height: 20.8px;
+  margin: 0;
+  max-width: 554px;
+}
+
+/* Input wrapper com prefixo monospace.
+ * Specs Figma: bg #fafafa, border 1px #e3e3e3, rounded 12px, w 520px,
+ * pl 17px, pr 7px, py 7px, gap 10px. */
+.manualInputWrapper {
+  width: min(520px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fafafa;
+  border: 1px solid #e3e3e3;
+  border-radius: 12px;
+  padding: 7px 7px 7px 17px;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.manualInputWrapper:focus-within {
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.manualInputWrapper[aria-invalid="true"] {
+  border-color: #b91c1c;
+}
+
+/* Prefixo "PRV-" — Q4 do Mario: formato real do produto.
+ * Estilo identico ao Figma (JetBrains Mono 13px #9a9a9a tracking 0.65px). */
+.manualInputPrefix {
+  font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular,
+    "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 400;
+  color: #9a9a9a;
+  letter-spacing: 0.65px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Input campo — JetBrains Mono 16px #757575 tracking 0.8px. */
+.manualInput {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 0;
+  font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular,
+    "SF Mono", Menlo, Consolas, monospace;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0.8px;
+  background: transparent;
+  color: #000000;
+  border: none;
+  outline: none;
+}
+
+.manualInput::placeholder {
+  color: #757575;
+  font-family: inherit;
+  letter-spacing: 0.8px;
+}
+
+.manualInput:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Botao "Buscar prova":
+ * - Desabilitado: bg #dcdcdc, texto #9a9a9a (Inter Medium 13.2px)
+ * - Habilitado: bg #000000, texto #ffffff
+ * Rounded 12px (nao pill), padding py 14px. */
+.manualCta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: min(520px, 100%);
+  padding: 14px 18px;
+  font: inherit;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-weight: 500; /* Inter Medium */
+  font-size: 13.2px;
+  background: #dcdcdc;
+  color: #9a9a9a;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.manualCta:not(:disabled) {
+  background: #000000;
+  color: #ffffff;
+}
+
+.manualCta:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.manualCta:disabled {
+  cursor: not-allowed;
+}
+
+.manualCta:focus-visible {
+  outline: 2px solid #000000;
+  outline-offset: 2px;
+}
+
+/* ─── Footer dentro do innerCard branco ───────────────────────────── */
 
 .innerFooter {
   margin-top: auto;
-  padding-top: 1.25rem;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  padding-top: 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
+  font-size: 11px;
+  color: #7a7a7a;
+  border-top: 1px solid #e9e9e9;
 }
 
 .innerFooterLabel {
   font-weight: 400;
 }
 
+.innerFooterLink {
+  color: #7a7a7a;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .innerFooterLinkDisabled {
-  color: var(--color-text-secondary);
-  opacity: 0.55;
+  color: #7a7a7a;
+  opacity: 0.7;
   cursor: not-allowed;
   user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
+
+/* No modo manual, o footer no Figma fica numa posicao especifica do
+ * innerCard. Alinhamento se mantem identico ao modo camera (auto-margin). */
 
 /* ─── Acessibilidade ──────────────────────────────────────────────── */
 
@@ -551,21 +617,11 @@
 /* ─── Responsividade ──────────────────────────────────────────────── */
 
 @media (max-width: 1100px) {
-  .wrapper {
-    padding: 2rem 2rem 1.5rem;
-  }
-
-  .innerCard {
-    padding: 2rem 2rem 1rem;
-  }
-
   .cameraPanel {
-    gap: 2rem;
+    gap: 2.5rem;
   }
-
-  .qrMockCard,
-  .cameraLiveWrapper {
-    width: min(85%, 260px);
+  .manualPanel {
+    padding-left: clamp(0px, 8vw, 20%);
   }
 }
 
@@ -575,7 +631,12 @@
   }
 
   .wrapper {
-    padding: 1.5rem 1.5rem 1rem;
+    padding: 1.75rem 1.5rem 1.5rem;
+    border-radius: 28px;
+  }
+
+  .innerCard {
+    padding: 1.75rem 1.5rem 1.25rem;
     border-radius: 24px;
   }
 
@@ -584,14 +645,14 @@
     gap: 1.5rem;
   }
 
-  .panelDescription,
-  .panelDescriptionCenter {
-    max-width: none;
+  .manualPanel {
+    padding-left: 0;
+    align-items: stretch;
   }
 
-  .qrMockCard,
-  .cameraLiveWrapper {
-    width: min(80%, 240px);
+  .panelDescription,
+  .panelDescriptionManual {
+    max-width: none;
   }
 }
 
@@ -606,8 +667,13 @@
     border-radius: 18px;
   }
 
+  .tabs {
+    height: 52px;
+  }
+
   .tab {
-    padding: 0.55rem 1.2rem;
+    height: 42px;
+    font-size: 1rem;
   }
 }
 
@@ -615,8 +681,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .tab,
-  .primaryButton,
-  .manualInput {
+  .cameraCta,
+  .manualCta,
+  .manualInput,
+  .manualInputWrapper {
     transition: none;
   }
 }
