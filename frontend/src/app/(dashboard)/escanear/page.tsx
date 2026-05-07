@@ -25,33 +25,27 @@ import styles from "./escanear.module.css";
 /* ──────────────────────────────────────────────────────────────────────
  * Pagina /escanear — Wave 3 v4.0, Componente 10 (atualizacao v4.0).
  *
+ * Iteracao 2 (pos-Mario apontar discrepancias visuais com o Figma).
+ *
  * Estrategia desta entrega (analysis.md §1):
  *   - Apenas IDENTIFICACAO: scan + lookup → redireciona para /provas/[id].
- *   - O fluxo de assinatura/transicao NAO esta mais aqui — migra para a
- *     pagina de detalhe na proxima entrega da wave (C11 v4.0).
+ *   - O fluxo de assinatura/transicao migra para a pagina de detalhe na
+ *     proxima entrega da wave (C11 v4.0).
  *
- * UI fiel ao Figma:
- *   - Header com h1 "Escanear prova" + subtitulo.
- *   - Toggle pill "Camera" / "Manual" (ambos os tabs funcionalmente
- *     clicaveis — modo Manual e o contrato pronto para o C19).
- *   - Card grande cinza claro com:
- *       · Lado esquerdo: subcard branco com preview do QR / camera live.
- *       · Lado direito: titulo + descricao + CTA "Abrir camera".
- *   - Card central (modo Manual): titulo + descricao + input PRV +
- *     botao "Buscar prova →".
- *   - Footer placeholder: "Ultima leitura ha — | Ver historico"
- *     (OUT OF SCOPE Wave 3 v4.0 / C10 — aprovado pelo Mario na Q3 do
- *     pre-Gate-2).
+ * Estrutura visual fiel as 2 imagens de referencia
+ * (docs/wave3-v4-c10/figma-reference-*.png):
  *
- * RBAC (Wave 1 v4.0 / Componente 05):
- *   - rule key = "scanner", path = "/escanear", match = prefix.
- *   - Os 4 perfis tem `acesso = full`. Anonimo bloqueado pelo middleware.
- *   - Defesa proativa abaixo via `useAuthorization` segue o padrao das
- *     outras pages (M-1 fix da Wave 1 v4.0 Audit Fixes — `loading=true`
- *     evita flash de UI proibida).
+ *   .pageWrapper
+ *     .wrapper (CINZA CLARO arredondado, engloba TUDO)
+ *       .header (h1 + subtitulo)
+ *       .tabsRow (centraliza .tabs)
+ *       .innerCard (BRANCO arredondado)
+ *         [camera] CameraPanel (preview slot CINZA com brackets +
+ *                  qrMockCard BRANCO + sidebar)
+ *         [manual] ManualPanel (centralizado vertical com input + CTA)
+ *         .innerFooter (divisor + Ultima leitura | Ver historico)
  *
- * Atalho global `g s` em `useGlobalShortcuts` continua apontando para
- * esta rota — sem mudanca.
+ * RBAC (Wave 1 v4.0): rule key "scanner", todos os 4 perfis = full.
  * ──────────────────────────────────────────────────────────────────── */
 
 type Tab = "camera" | "manual";
@@ -92,8 +86,6 @@ export default function EscanearPage() {
     onDetect: handleDetect,
   });
 
-  // Erro de hardware/permissao reportado pelo useScanner: traduz em
-  // erro tipado e oferece o tab Manual como alternativa.
   useEffect(() => {
     if (
       cameraState.kind === "scanning" &&
@@ -107,7 +99,6 @@ export default function EscanearPage() {
     }
   }, [cameraState.kind, scanner.errorCode]);
 
-  // ── Identificacao — caminho camera ───────────────────────────────
   useEffect(() => {
     if (cameraState.kind !== "identifying") return;
     let cancelled = false;
@@ -116,16 +107,7 @@ export default function EscanearPage() {
         getToken,
       });
       if (cancelled) return;
-      _aplicarResultadoCamera(result);
-    })();
-    return () => {
-      cancelled = true;
-    };
-
-    function _aplicarResultadoCamera(result: ResultadoIdentificacao) {
       if (result.tipo === "sucesso") {
-        // Sucesso → navega para /provas/[id]. Animacao de feedback CSS
-        // pode ser observada brevemente antes do replace via fade.
         router.push(`/provas/${result.prova.prova.id}`);
         return;
       }
@@ -134,18 +116,23 @@ export default function EscanearPage() {
         codigo: result.codigo,
         mensagem: result.mensagem,
       });
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraState.kind]);
 
-  // ── Identificacao — caminho manual (C19 contract) ────────────────
   const handleManualSubmit = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
       const codigo = codigoManual.trim();
       if (!codigo) return;
       setManualState({ kind: "identifying", codigo });
-      const result = await identificarProvaPorCodigo(codigo, { getToken });
+      const result: ResultadoIdentificacao = await identificarProvaPorCodigo(
+        codigo,
+        { getToken },
+      );
       if (result.tipo === "sucesso") {
         router.push(`/provas/${result.prova.prova.id}`);
         return;
@@ -181,7 +168,7 @@ export default function EscanearPage() {
     setCameraState({ kind: "idle" });
   }, []);
 
-  // ── Defesa proativa RBAC (M-1 fix Wave 1 v4.0) ───────────────────
+  // Defesa proativa RBAC (M-1 fix Wave 1 v4.0).
   if (auth.loading) return null;
   if (!auth.hasAccess) {
     return <Restricted ruleKey="scanner" profile={auth.profile} />;
@@ -189,40 +176,42 @@ export default function EscanearPage() {
 
   return (
     <div className={styles.pageWrapper}>
-      <div className={styles.pageHeader}>
-        <h1 className={styles.title}>Escanear prova</h1>
-        <p className={styles.subtitle}>
-          Leia o QR Code da etiqueta com a camera ou insira o codigo
-          manualmente para confirmar a proxima movimentacao.
-        </p>
-      </div>
+      <section className={styles.wrapper}>
+        <header className={styles.header}>
+          <h1 className={styles.title}>Escanear prova</h1>
+          <p className={styles.subtitle}>
+            Leia o QR Code da etiqueta com a camera ou insira o codigo
+            manualmente para confirmar a proxima movimentacao.
+          </p>
+        </header>
 
-      <ScannerTabs
-        tab={tab}
-        onCamera={trocarParaCamera}
-        onManual={trocarParaManual}
-      />
+        <ScannerTabs
+          tab={tab}
+          onCamera={trocarParaCamera}
+          onManual={trocarParaManual}
+        />
 
-      <div className={styles.card}>
-        {tab === "camera" ? (
-          <CameraPanel
-            state={cameraState}
-            scanner={scanner}
-            onAbrir={abrirCamera}
-            onCancelar={cancelarCamera}
-            onTentarNovamente={tentarNovamenteCamera}
-            onTrocarParaManual={trocarParaManual}
-          />
-        ) : (
-          <ManualPanel
-            state={manualState}
-            codigo={codigoManual}
-            onChange={setCodigoManual}
-            onSubmit={handleManualSubmit}
-          />
-        )}
-        <CardFooter />
-      </div>
+        <div className={styles.innerCard}>
+          {tab === "camera" ? (
+            <CameraPanel
+              state={cameraState}
+              scanner={scanner}
+              onAbrir={abrirCamera}
+              onCancelar={cancelarCamera}
+              onTentarNovamente={tentarNovamenteCamera}
+              onTrocarParaManual={trocarParaManual}
+            />
+          ) : (
+            <ManualPanel
+              state={manualState}
+              codigo={codigoManual}
+              onChange={setCodigoManual}
+              onSubmit={handleManualSubmit}
+            />
+          )}
+          <InnerFooter />
+        </div>
+      </section>
     </div>
   );
 }
@@ -241,27 +230,29 @@ function ScannerTabs({
   onManual: () => void;
 }) {
   return (
-    <div className={styles.tabs} role="tablist" aria-label="Modo de leitura">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === "camera"}
-        className={`${styles.tab} ${tab === "camera" ? styles.tabActive : ""}`}
-        onClick={onCamera}
-      >
-        <CameraIcon width={18} height={18} aria-hidden="true" />
-        <span>Camera</span>
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === "manual"}
-        className={`${styles.tab} ${tab === "manual" ? styles.tabActive : ""}`}
-        onClick={onManual}
-      >
-        <KeyIcon width={18} height={18} aria-hidden="true" />
-        <span>Manual</span>
-      </button>
+    <div className={styles.tabsRow}>
+      <div className={styles.tabs} role="tablist" aria-label="Modo de leitura">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "camera"}
+          className={`${styles.tab} ${tab === "camera" ? styles.tabActive : ""}`}
+          onClick={onCamera}
+        >
+          <CameraIcon width={18} height={18} aria-hidden="true" />
+          <span>Camera</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "manual"}
+          className={`${styles.tab} ${tab === "manual" ? styles.tabActive : ""}`}
+          onClick={onManual}
+        >
+          <KeyIcon width={18} height={18} aria-hidden="true" />
+          <span>Manual</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -290,19 +281,23 @@ function CameraPanel({
 
   return (
     <div className={styles.cameraPanel}>
+      {/* Lado esquerdo: previewSlot CINZA com brackets externos +
+          qrMockCard BRANCO no centro (ou camera live no estado scanning). */}
       <div className={styles.previewSlot}>
+        <span className={styles.bracketTopLeft} aria-hidden="true" />
+        <span className={styles.bracketTopRight} aria-hidden="true" />
+        <span className={styles.bracketBottomLeft} aria-hidden="true" />
+        <span className={styles.bracketBottomRight} aria-hidden="true" />
+
         {state.kind === "scanning" ? (
           <CameraLive divId={scanner.divId} ready={scanner.ready} />
         ) : (
-          <QRMockPreview />
+          <QRMockCard />
         )}
-        <p className={styles.previewHint}>
-          {state.kind === "scanning"
-            ? "Centralize o QR Code no quadro"
-            : "Centralize o QR Code no quadro"}
-        </p>
+        <p className={styles.previewHint}>Centralize o QR Code no quadro</p>
       </div>
 
+      {/* Lado direito: titulo + descricao + CTA contextual. */}
       <div className={styles.cameraSidebar}>
         <h2 className={styles.panelTitle}>{titulo}</h2>
         <p className={styles.panelDescription}>{descricao}</p>
@@ -324,7 +319,7 @@ function CameraPanel({
 
         <button
           type="button"
-          className={styles.primaryButton}
+          className={`${styles.primaryButton} ${styles.ctaLarge}`}
           onClick={ctaHandler}
           disabled={ctaDisabled}
         >
@@ -393,67 +388,52 @@ function CameraLive({ divId, ready }: { divId: string; ready: boolean }) {
   return (
     <div className={styles.cameraLiveWrapper}>
       <div className={styles.cameraLive} id={divId} />
-      <div className={styles.cameraOverlay} aria-hidden="true">
-        <span className={styles.bracketTopLeft} />
-        <span className={styles.bracketTopRight} />
-        <span className={styles.bracketBottomLeft} />
-        <span className={styles.bracketBottomRight} />
-      </div>
-      {!ready && (
-        <p className={styles.cameraStatus}>Iniciando camera...</p>
-      )}
+      {!ready && <p className={styles.cameraStatus}>Iniciando camera...</p>}
     </div>
   );
 }
 
-function QRMockPreview() {
-  // Preview estatico do estado idle — quadrado central com brackets,
-  // alinhado a Imagem 1 do Figma.
+/** Mini-card branco com sombra contendo o QR mock decorativo
+ * (faixa amarela superior + grade decorativa + quadradinho amarelo central).
+ * Estado idle do `previewSlot`. Substitudo por <CameraLive /> em scanning. */
+function QRMockCard() {
   return (
-    <div className={styles.qrMock} aria-hidden="true">
-      <div className={styles.qrMockOverlay}>
-        <span className={styles.bracketTopLeft} />
-        <span className={styles.bracketTopRight} />
-        <span className={styles.bracketBottomLeft} />
-        <span className={styles.bracketBottomRight} />
-      </div>
-      <div className={styles.qrMockSquare}>
-        <div className={styles.qrMockYellowStripe} />
-        {/* Padrao de "QR" simulado — apenas decorativo. */}
-        <div className={styles.qrMockGrid}>
-          {Array.from({ length: 49 }, (_, i) => (
+    <div className={styles.qrMockCard} aria-hidden="true">
+      <div className={styles.qrMockYellowBar} />
+      <div className={styles.qrMockGrid}>
+        {Array.from({ length: 49 }, (_, i) => {
+          const isCenter = i === 24; // centro da grade 7x7
+          if (isCenter) {
+            return <span key={i} className={styles.qrMockYellowCenter} />;
+          }
+          return (
             <span
               key={i}
               className={
-                _qrMockCell(i)
-                  ? styles.qrMockCellOn
-                  : styles.qrMockCellOff
+                _qrMockCell(i) ? styles.qrMockCellOn : styles.qrMockCellOff
               }
             />
-          ))}
-        </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// Padrao deterministico para o mock do QR — apenas decorativo, sem
-// significado funcional.
+// Padrao deterministico para o mock do QR — apenas decorativo.
 function _qrMockCell(i: number): boolean {
-  // Alguns padroes "tipo QR": cantos cheios + quadrados centrais.
   const row = Math.floor(i / 7);
   const col = i % 7;
-  // Finder patterns nos cantos
+  // Finder patterns nos 3 cantos (TL, TR, BL).
   const tl = row < 3 && col < 3;
   const tr = row < 3 && col > 3;
   const bl = row > 3 && col < 3;
   if (tl || tr || bl) {
-    // borda + centro do finder
     if (row === 0 || row === 2 || col === 0 || col === 2) return true;
     if (row === 1 && col === 1) return true;
     return tr && (row === 1 || col === 5);
   }
-  // Centro com pseudo-padrao
+  // Centro com pseudo-padrao deterministico.
   return (i * 7 + 3) % 5 < 2;
 }
 
@@ -465,11 +445,6 @@ interface ManualPanelProps {
 }
 
 function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
-  // Wave 3 v4.0 (C10 v4.0): este painel e o **shell visual** + chamada
-  // a camada de servico. Nao tem mascara de digitacao avancada nem
-  // validacao em tempo real (`validar_formato_codigo_publico` no
-  // backend ja rejeita formato invalido com 404 generico). Isso fica
-  // para o Componente 19 (Wave 3 v4.0).
   const isLoading = state.kind === "identifying";
   const isError = state.kind === "error";
   const trimmed = codigo.trim();
@@ -484,7 +459,13 @@ function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
         movimentacao sera registrada apos a confirmacao.
       </p>
 
-      <div className={styles.manualInputWrapper}>
+      <div
+        className={styles.manualInputWrapper}
+        aria-invalid={isError ? "true" : "false"}
+      >
+        <span className={styles.manualInputPrefix} aria-hidden="true">
+          PRV-
+        </span>
         <label htmlFor="codigo-manual" className={styles.srOnly}>
           Codigo da prova
         </label>
@@ -494,11 +475,10 @@ function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
           className={styles.manualInput}
           value={codigo}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="PRV-AAAA-MM-NNNNNN"
+          placeholder="AAAA-MM-NNNNNN"
           autoComplete="off"
           autoCapitalize="characters"
           spellCheck={false}
-          aria-invalid={isError ? "true" : "false"}
           aria-describedby={isError ? "manual-error" : undefined}
           disabled={isLoading}
         />
@@ -512,7 +492,7 @@ function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
 
       <button
         type="submit"
-        className={styles.primaryButton}
+        className={`${styles.primaryButton} ${styles.ctaManual}`}
         disabled={submitDisabled}
       >
         <span>{isLoading ? "Buscando..." : "Buscar prova"}</span>
@@ -524,17 +504,15 @@ function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
   );
 }
 
-function CardFooter() {
-  // Wave 3 v4.0 (C10): footer renderizado como **placeholder visual**.
-  // "Ultima leitura" e "Ver historico" requerem endpoint de query do
-  // audit_log por usuario — fora do escopo desta entrega (aprovado pelo
-  // Mario na Q3 do pre-Gate-2). C18 (Auditoria, Wave 6 v3.0) ja entrega
-  // os dados; uma futura wave plugara aqui.
+/** Footer dentro do innerCard branco. Wave 3 v4.0 (C10) entrega como
+ * placeholder visual (Q3 do Mario aprovou). C18 + futura wave plugam
+ * "ultima leitura" via audit_log filtrado por user. */
+function InnerFooter() {
   return (
-    <div className={styles.cardFooter}>
-      <span className={styles.cardFooterLabel}>Ultima leitura ha —</span>
+    <div className={styles.innerFooter}>
+      <span className={styles.innerFooterLabel}>Ultima leitura ha —</span>
       <span
-        className={styles.cardFooterLinkDisabled}
+        className={styles.innerFooterLinkDisabled}
         aria-disabled="true"
         title="Disponivel em breve"
       >
