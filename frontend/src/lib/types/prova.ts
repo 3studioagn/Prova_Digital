@@ -295,15 +295,23 @@ export interface ImagemUrlResponse {
 
 // ─── Scan + Transicao (Componentes 10 e 11 — Wave 3 Lote A) ──────────
 
-/** Request de `POST /api/v1/provas/scan` (sub-bloco A.3).
+/** Request de `POST /api/v1/provas/scan`.
  *
- * Formato esperado do `payload`: "3SD|{nro_requerimento}|{hash_truncado}"
- * (hash truncado = 16 chars hex). O backend valida estrutura + integridade
- * (hash HMAC constant-time) e retorna os dados da prova + as transicoes
- * que o usuario corrente pode executar.
+ * Wave 3 v4.0 (Componente 10): aceita XOR entre `payload` (caminho
+ * camera) e `codigo` (caminho digitacao manual — Componente 19). O
+ * backend valida via `model_validator` que exatamente um dos dois esta
+ * presente.
+ *
+ * - `payload`: "3SD|<id>|<hash[:16]>". O segundo campo pode ser:
+ *     · `codigo_publico` (PRV-AAAA-MM-NNNNNN) — provas v4.0+
+ *     · `nro_requerimento` (string livre) — provas legacy v3.0
+ *   Backend detecta pelo formato e usa o lookup apropriado.
+ * - `codigo`: codigo publico legivel `PRV-AAAA-MM-NNNNNN`. Caminho
+ *   canonico do C19. Resolve direto pela coluna `codigo_publico`.
  */
 export interface ScanRequest {
-  payload: string;
+  payload?: string;
+  codigo?: string;
 }
 
 /** Response de `POST /api/v1/provas/scan`.

@@ -4,82 +4,77 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type FormEvent,
 } from "react";
-import type SignatureCanvas from "react-signature-canvas";
-import SigCanvas from "react-signature-canvas";
+import { useRouter } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/client";
-import { ScanIcon } from "@/components/icons";
-import { useScanProva } from "@/hooks/useScanProva";
-import { useExecutarTransicao } from "@/hooks/useExecutarTransicao";
+import { CameraIcon, KeyIcon, ArrowRightIcon } from "@/components/icons";
 import { useScanner } from "@/hooks/useScanner";
-import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useAuthorization } from "@/lib/hooks/use-authorization";
+import { Restricted } from "@/components/Restricted";
 import {
-  ASSINATURA_BASE64_MAX_BYTES,
-  ROTA_LABELS,
-  STATUS_LABELS,
-  type ScanResponse,
-  type StatusProva,
-} from "@/lib/types/prova";
+  identificarProvaPorCodigo,
+  identificarProvaPorPayload,
+  type CodigoErro,
+  type ResultadoIdentificacao,
+} from "@/lib/services/identificacao-prova";
 import styles from "./escanear.module.css";
 
 /* ──────────────────────────────────────────────────────────────────────
- * Maquina de estados da pagina
+ * Pagina /escanear — Wave 3 v4.0, Componente 10 (atualizacao v4.0).
+ *
+ * Estrategia desta entrega (analysis.md §1):
+ *   - Apenas IDENTIFICACAO: scan + lookup → redireciona para /provas/[id].
+ *   - O fluxo de assinatura/transicao NAO esta mais aqui — migra para a
+ *     pagina de detalhe na proxima entrega da wave (C11 v4.0).
+ *
+ * UI fiel ao Figma:
+ *   - Header com h1 "Escanear prova" + subtitulo.
+ *   - Toggle pill "Camera" / "Manual" (ambos os tabs funcionalmente
+ *     clicaveis — modo Manual e o contrato pronto para o C19).
+ *   - Card grande cinza claro com:
+ *       · Lado esquerdo: subcard branco com preview do QR / camera live.
+ *       · Lado direito: titulo + descricao + CTA "Abrir camera".
+ *   - Card central (modo Manual): titulo + descricao + input PRV +
+ *     botao "Buscar prova →".
+ *   - Footer placeholder: "Ultima leitura ha — | Ver historico"
+ *     (OUT OF SCOPE Wave 3 v4.0 / C10 — aprovado pelo Mario na Q3 do
+ *     pre-Gate-2).
+ *
+ * RBAC (Wave 1 v4.0 / Componente 05):
+ *   - rule key = "scanner", path = "/escanear", match = prefix.
+ *   - Os 4 perfis tem `acesso = full`. Anonimo bloqueado pelo middleware.
+ *   - Defesa proativa abaixo via `useAuthorization` segue o padrao das
+ *     outras pages (M-1 fix da Wave 1 v4.0 Audit Fixes — `loading=true`
+ *     evita flash de UI proibida).
+ *
+ * Atalho global `g s` em `useGlobalShortcuts` continua apontando para
+ * esta rota — sem mudanca.
  * ──────────────────────────────────────────────────────────────────── */
 
-type PageState =
+type Tab = "camera" | "manual";
+
+type CameraState =
   | { kind: "idle" }
   | { kind: "scanning" }
-  | { kind: "scan-loading"; payload: string }
-  | { kind: "scan-ready"; scan: ScanResponse }
-  | {
-      kind: "signing";
-      scan: ScanResponse;
-      statusNovo: StatusProva;
-      precisaMotivo: boolean;
-    }
-  | {
-      kind: "submitting";
-      scan: ScanResponse;
-      statusNovo: StatusProva;
-      precisaMotivo: boolean;
-    }
-  | {
-      kind: "done";
-      scan: ScanResponse;
-      statusAplicado: StatusProva;
-    }
-  | { kind: "scan-error"; message: string };
+  | { kind: "identifying"; payload: string }
+  | { kind: "error"; codigo: CodigoErro; mensagem: string };
 
-/* ──────────────────────────────────────────────────────────────────────
- * Labels de botao por transicao (pt-BR).
- * Se nao houver entrada, fallback usa STATUS_LABELS[destino].
- * ──────────────────────────────────────────────────────────────────── */
-
-const ACTION_LABELS: Partial<Record<StatusProva, string>> = {
-  RETIRADA_PELO_VENDEDOR: "Retirar prova",
-  APROVADA_PELO_VENDEDOR: "Aprovar",
-  REPROVADA_PELO_VENDEDOR: "Reprovar",
-  DE_VOLTA_3STUDIO: "Devolver a 3Studio",
-  ENCAMINHADA_A_CLICHERIA: "Encaminhar a clicheria",
-  COM_MOTORISTA: "Enviar ao motorista",
-  ENVIADA_PARA_CLICHERIA: "Confirmar transporte",
-  RECEBIDA_PELA_CLICHERIA: "Confirmar recebimento",
-};
-
-function labelParaTransicao(destino: StatusProva): string {
-  return ACTION_LABELS[destino] ?? STATUS_LABELS[destino];
-}
-
-/* ──────────────────────────────────────────────────────────────────────
- * Pagina principal
- * ──────────────────────────────────────────────────────────────────── */
+type ManualState =
+  | { kind: "idle" }
+  | { kind: "identifying"; codigo: string }
+  | { kind: "error"; codigo: CodigoErro; mensagem: string };
 
 export default function EscanearPage() {
-  const [state, setState] = useState<PageState>({ kind: "idle" });
+  const router = useRouter();
+  const auth = useAuthorization("scanner");
+
+  const [tab, setTab] = useState<Tab>("camera");
+  const [cameraState, setCameraState] = useState<CameraState>({ kind: "idle" });
+  const [manualState, setManualState] = useState<ManualState>({ kind: "idle" });
+  const [codigoManual, setCodigoManual] = useState("");
 
   const getToken = useCallback(async () => {
     const supabase = createClient();
@@ -87,654 +82,464 @@ export default function EscanearPage() {
     return data.session?.access_token ?? null;
   }, []);
 
-  const scanHook = useScanProva(getToken);
-  const transicaoHook = useExecutarTransicao(getToken);
-
-  // ── Scanner: ativo apenas no estado "scanning" ─────────────────────
-  const handleDetect = useCallback(
-    (payload: string) => {
-      setState({ kind: "scan-loading", payload });
-    },
-    [],
-  );
+  // ── Camera lifecycle ─────────────────────────────────────────────
+  const handleDetect = useCallback((payload: string) => {
+    setCameraState({ kind: "identifying", payload });
+  }, []);
 
   const scanner = useScanner({
-    enabled: state.kind === "scanning",
+    enabled: cameraState.kind === "scanning",
     onDetect: handleDetect,
   });
 
-  // ── Handler: quando `scan-loading` entra, chama o backend ──────────
+  // Erro de hardware/permissao reportado pelo useScanner: traduz em
+  // erro tipado e oferece o tab Manual como alternativa.
   useEffect(() => {
-    if (state.kind !== "scan-loading") return;
+    if (
+      cameraState.kind === "scanning" &&
+      scanner.errorCode === "DISPOSITIVO_SEM_CAMERA"
+    ) {
+      setCameraState({
+        kind: "error",
+        codigo: "DISPOSITIVO_SEM_CAMERA",
+        mensagem: "Camera indisponivel. Use a digitacao manual.",
+      });
+    }
+  }, [cameraState.kind, scanner.errorCode]);
+
+  // ── Identificacao — caminho camera ───────────────────────────────
+  useEffect(() => {
+    if (cameraState.kind !== "identifying") return;
     let cancelled = false;
     (async () => {
-      const { data, error } = await scanHook.escanear(state.payload);
+      const result = await identificarProvaPorPayload(cameraState.payload, {
+        getToken,
+      });
       if (cancelled) return;
-      if (!data) {
-        setState({
-          kind: "scan-error",
-          message: error ?? "Nao foi possivel resolver o QR Code.",
-        });
-        return;
-      }
-      setState({ kind: "scan-ready", scan: data });
+      _aplicarResultadoCamera(result);
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.kind]);
 
-  // ── Handlers de transicao ──────────────────────────────────────────
-  const comecarScan = useCallback(() => {
-    scanHook.reset();
-    transicaoHook.reset();
-    setState({ kind: "scanning" });
-  }, [scanHook, transicaoHook]);
-
-  const resetar = useCallback(() => {
-    scanHook.reset();
-    transicaoHook.reset();
-    setState({ kind: "idle" });
-  }, [scanHook, transicaoHook]);
-
-  const escolherTransicao = useCallback(
-    (destino: StatusProva) => {
-      if (state.kind !== "scan-ready") return;
-      const precisaMotivo = state.scan.motivo_obrigatorio_em.includes(destino);
-      setState({
-        kind: "signing",
-        scan: state.scan,
-        statusNovo: destino,
-        precisaMotivo,
-      });
-    },
-    [state],
-  );
-
-  const cancelarAssinatura = useCallback(() => {
-    if (state.kind === "signing") {
-      setState({ kind: "scan-ready", scan: state.scan });
-      transicaoHook.reset();
-    }
-  }, [state, transicaoHook]);
-
-  const submeterTransicao = useCallback(
-    async (assinaturaBase64: string, motivo: string | null) => {
-      if (state.kind !== "signing") return;
-      const provaId = state.scan.prova.id;
-      const statusNovo = state.statusNovo;
-
-      setState({
-        kind: "submitting",
-        scan: state.scan,
-        statusNovo,
-        precisaMotivo: state.precisaMotivo,
-      });
-      const { data, error, isConflict } = await transicaoHook.executar({
-        provaId,
-        statusNovo,
-        assinaturaBase64,
-        motivoReprovacao: motivo,
-      });
-
-      if (!data) {
-        if (isConflict) {
-          // B-03: 409 = status mudou. Volta ao inicio para re-escanear.
-          setState({
-            kind: "scan-error",
-            message:
-              error ?? "O status da prova mudou. Escaneie novamente.",
-          });
-          return;
-        }
-        // Volta para `signing` para o usuario poder retentar
-        setState({
-          kind: "signing",
-          scan: state.scan,
-          statusNovo,
-          precisaMotivo: state.precisaMotivo,
-        });
+    function _aplicarResultadoCamera(result: ResultadoIdentificacao) {
+      if (result.tipo === "sucesso") {
+        // Sucesso → navega para /provas/[id]. Animacao de feedback CSS
+        // pode ser observada brevemente antes do replace via fade.
+        router.push(`/provas/${result.prova.prova.id}`);
         return;
       }
+      setCameraState({
+        kind: "error",
+        codigo: result.codigo,
+        mensagem: result.mensagem,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraState.kind]);
 
-      setState({
-        kind: "done",
-        scan: {
-          ...state.scan,
-          prova: data.prova,
-        },
-        statusAplicado: statusNovo,
+  // ── Identificacao — caminho manual (C19 contract) ────────────────
+  const handleManualSubmit = useCallback(
+    async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      const codigo = codigoManual.trim();
+      if (!codigo) return;
+      setManualState({ kind: "identifying", codigo });
+      const result = await identificarProvaPorCodigo(codigo, { getToken });
+      if (result.tipo === "sucesso") {
+        router.push(`/provas/${result.prova.prova.id}`);
+        return;
+      }
+      setManualState({
+        kind: "error",
+        codigo: result.codigo,
+        mensagem: result.mensagem,
       });
     },
-    [state, transicaoHook],
+    [codigoManual, getToken, router],
   );
+
+  const trocarParaManual = useCallback(() => {
+    setTab("manual");
+    setCameraState({ kind: "idle" });
+  }, []);
+
+  const trocarParaCamera = useCallback(() => {
+    setTab("camera");
+    setManualState({ kind: "idle" });
+  }, []);
+
+  const abrirCamera = useCallback(() => {
+    setCameraState({ kind: "scanning" });
+  }, []);
+
+  const cancelarCamera = useCallback(() => {
+    setCameraState({ kind: "idle" });
+  }, []);
+
+  const tentarNovamenteCamera = useCallback(() => {
+    setCameraState({ kind: "idle" });
+  }, []);
+
+  // ── Defesa proativa RBAC (M-1 fix Wave 1 v4.0) ───────────────────
+  if (auth.loading) return null;
+  if (!auth.hasAccess) {
+    return <Restricted ruleKey="scanner" profile={auth.profile} />;
+  }
 
   return (
     <div className={styles.pageWrapper}>
       <div className={styles.pageHeader}>
-        <div>
-          <h1 className={styles.title}>Escanear prova</h1>
-          <p className={styles.subtitle}>
-            Leia o QR Code da etiqueta e confirme a movimentacao.
-          </p>
-        </div>
+        <h1 className={styles.title}>Escanear prova</h1>
+        <p className={styles.subtitle}>
+          Leia o QR Code da etiqueta com a camera ou insira o codigo
+          manualmente para confirmar a proxima movimentacao.
+        </p>
       </div>
 
-      {state.kind === "idle" && (
-        <IdleView
-          onStart={comecarScan}
-          onManualSubmit={(payload) => {
-            scanHook.reset();
-            transicaoHook.reset();
-            setState({ kind: "scan-loading", payload });
-          }}
-        />
-      )}
+      <ScannerTabs
+        tab={tab}
+        onCamera={trocarParaCamera}
+        onManual={trocarParaManual}
+      />
 
-      {state.kind === "scanning" && (
-        <ScanningView
-          divId={scanner.divId}
-          ready={scanner.ready}
-          error={scanner.error}
-          onCancel={resetar}
-        />
-      )}
-
-      {state.kind === "scan-loading" && (
-        <div className={styles.scannerWrapper}>
-          <p className={styles.scannerStatus}>Verificando QR Code...</p>
-        </div>
-      )}
-
-      {state.kind === "scan-ready" && (
-        <ScanReadyView
-          scan={state.scan}
-          onEscolher={escolherTransicao}
-          onCancelar={resetar}
-        />
-      )}
-
-      {(state.kind === "signing" || state.kind === "submitting") && (
-        <>
-          <ScanReadyView
-            scan={state.scan}
-            onEscolher={() => {
-              /* opaco — modal esta aberto */
-            }}
-            onCancelar={resetar}
-            readOnly
+      <div className={styles.card}>
+        {tab === "camera" ? (
+          <CameraPanel
+            state={cameraState}
+            scanner={scanner}
+            onAbrir={abrirCamera}
+            onCancelar={cancelarCamera}
+            onTentarNovamente={tentarNovamenteCamera}
+            onTrocarParaManual={trocarParaManual}
           />
-          <AssinaturaModal
-            statusAtual={state.scan.prova.status}
-            statusNovo={state.statusNovo}
-            precisaMotivo={state.precisaMotivo}
-            loading={state.kind === "submitting"}
-            error={transicaoHook.error}
-            onCancelar={cancelarAssinatura}
-            onConfirmar={submeterTransicao}
-          />
-        </>
-      )}
-
-      {state.kind === "done" && (
-        <DoneView
-          scan={state.scan}
-          statusAplicado={state.statusAplicado}
-          onNovaLeitura={comecarScan}
-        />
-      )}
-
-      {state.kind === "scan-error" && (
-        <ErrorView message={state.message} onTentarNovamente={comecarScan} />
-      )}
-    </div>
-  );
-}
-
-/* ──────────────────────────────────────────────────────────────────────
- * Sub-componentes de estado
- * ──────────────────────────────────────────────────────────────────── */
-
-function IdleView({
-  onStart,
-  onManualSubmit,
-}: {
-  onStart: () => void;
-  onManualSubmit: (payload: string) => void;
-}) {
-  const [codigoManual, setCodigoManual] = useState("");
-
-  const handleManual = useCallback(
-    (e: FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      const v = codigoManual.trim();
-      if (v) onManualSubmit(v);
-    },
-    [codigoManual, onManualSubmit],
-  );
-
-  return (
-    <div className={styles.idleCard}>
-      <div className={styles.idleIcon} aria-hidden="true">
-        <ScanIcon width={28} height={28} />
-      </div>
-      <h2 className={styles.idleTitle}>Pronto para escanear</h2>
-      <p className={styles.idleDescription}>
-        Ative a camera para ler o QR Code, ou digite o codigo da prova
-        manualmente.
-      </p>
-      <button
-        type="button"
-        className={styles.primaryButton}
-        onClick={onStart}
-      >
-        Abrir camera
-      </button>
-
-      <form className={styles.manualInputWrapper} onSubmit={handleManual}>
-        <label className={styles.manualLabel}>Inserir codigo manual:</label>
-        <input
-          type="text"
-          className={styles.manualInput}
-          value={codigoManual}
-          onChange={(e) => setCodigoManual(e.target.value)}
-        />
-        <button
-          type="submit"
-          className={styles.darkButton}
-          disabled={!codigoManual.trim()}
-        >
-          Buscar
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function ScanningView({
-  divId,
-  ready,
-  error,
-  onCancel,
-}: {
-  divId: string;
-  ready: boolean;
-  error: string | null;
-  onCancel: () => void;
-}) {
-  return (
-    <div className={styles.scannerWrapper}>
-      <div className={styles.scannerContainer} id={divId} />
-      <p className={styles.scannerStatus}>
-        {error
-          ? ""
-          : ready
-          ? "Aponte a camera para o QR Code da prova."
-          : "Iniciando camera..."}
-      </p>
-      {error && (
-        <div className={styles.scannerError} role="alert">
-          {error}
-        </div>
-      )}
-      <button
-        type="button"
-        className={styles.secondaryButton}
-        onClick={onCancel}
-      >
-        Cancelar
-      </button>
-    </div>
-  );
-}
-
-function ScanReadyView({
-  scan,
-  onEscolher,
-  onCancelar,
-  readOnly = false,
-}: {
-  scan: ScanResponse;
-  onEscolher: (destino: StatusProva) => void;
-  onCancelar: () => void;
-  readOnly?: boolean;
-}) {
-  const { prova, transicoes_permitidas } = scan;
-  return (
-    <>
-      <div className={styles.provaCard}>
-        <div className={styles.provaCardHeader}>
-          <div>
-            <div className={styles.provaNome}>{prova.nome}</div>
-            <div className={styles.provaNroReq}>{prova.nro_requerimento}</div>
-          </div>
-          <span className={styles.statusBadge}>
-            {STATUS_LABELS[prova.status]}
-          </span>
-        </div>
-        <div className={styles.provaInfoGrid}>
-          <div>
-            <div className={styles.provaInfoLabel}>Cliente</div>
-            <div className={styles.provaInfoValue}>{prova.cliente}</div>
-          </div>
-          <div>
-            <div className={styles.provaInfoLabel}>Vendedor</div>
-            <div className={styles.provaInfoValue}>{prova.vendedor_nome}</div>
-          </div>
-          {prova.rota && (
-            <div>
-              <div className={styles.provaInfoLabel}>Rota</div>
-              <div className={styles.provaInfoValue}>
-                {ROTA_LABELS[prova.rota]}
-              </div>
-            </div>
-          )}
-          <div>
-            <div className={styles.provaInfoLabel}>Ciclo</div>
-            <div className={styles.provaInfoValue}>{prova.ciclo_atual}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.actionsWrapper}>
-        <div className={styles.actionsTitle}>Acoes disponiveis</div>
-        {transicoes_permitidas.length === 0 ? (
-          <p className={styles.noActions}>
-            {prova.status === "CANCELADA" || prova.status === "RECEBIDA_PELA_CLICHERIA"
-              ? `Esta prova ja foi finalizada (${STATUS_LABELS[prova.status]}).`
-              : "Voce nao tem permissao para movimentar esta prova no estado atual."}
-          </p>
         ) : (
-          <>
-            <p className={styles.actionsHint}>
-              Escolha uma acao abaixo e assine para confirmar.
-            </p>
-            <div className={styles.actionsList}>
-              {transicoes_permitidas.map((destino) => {
-                const reprovar = destino === "REPROVADA_PELO_VENDEDOR";
-                const cls = reprovar
-                  ? styles.dangerButton
-                  : styles.primaryButton;
-                return (
-                  <button
-                    key={destino}
-                    type="button"
-                    className={cls}
-                    disabled={readOnly}
-                    onClick={() => onEscolher(destino)}
-                  >
-                    {labelParaTransicao(destino)}
-                  </button>
-                );
-              })}
-            </div>
-          </>
+          <ManualPanel
+            state={manualState}
+            codigo={codigoManual}
+            onChange={setCodigoManual}
+            onSubmit={handleManualSubmit}
+          />
         )}
-        <div style={{ marginTop: "1rem" }}>
-          <button
-            type="button"
-            className={styles.secondaryButton}
-            onClick={onCancelar}
-            disabled={readOnly}
-          >
-            Escanear outra
-          </button>
-        </div>
+        <CardFooter />
       </div>
-    </>
+    </div>
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────────
- * Modal de assinatura
- * ──────────────────────────────────────────────────────────────────── */
+/* ──────────────────────────────────────────────────────────────────── */
+/* Sub-componentes                                                      */
+/* ──────────────────────────────────────────────────────────────────── */
 
-function AssinaturaModal({
-  statusAtual,
-  statusNovo,
-  precisaMotivo,
-  loading,
-  error,
-  onCancelar,
-  onConfirmar,
+function ScannerTabs({
+  tab,
+  onCamera,
+  onManual,
 }: {
-  statusAtual: StatusProva;
-  statusNovo: StatusProva;
-  precisaMotivo: boolean;
-  loading: boolean;
-  error: string | null;
-  onCancelar: () => void;
-  onConfirmar: (assinaturaBase64: string, motivo: string | null) => void;
+  tab: Tab;
+  onCamera: () => void;
+  onManual: () => void;
 }) {
-  const sigRef = useRef<SignatureCanvas | null>(null);
-  const canvasContainerRef = useRef<HTMLDivElement>(null);
-  const focusTrapRef = useFocusTrap<HTMLDivElement>(true);
-  const [canvasWidth, setCanvasWidth] = useState(0);
-  const [motivo, setMotivo] = useState("");
-  const [localError, setLocalError] = useState<string | null>(null);
+  return (
+    <div className={styles.tabs} role="tablist" aria-label="Modo de leitura">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === "camera"}
+        className={`${styles.tab} ${tab === "camera" ? styles.tabActive : ""}`}
+        onClick={onCamera}
+      >
+        <CameraIcon width={18} height={18} aria-hidden="true" />
+        <span>Camera</span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === "manual"}
+        className={`${styles.tab} ${tab === "manual" ? styles.tabActive : ""}`}
+        onClick={onManual}
+      >
+        <KeyIcon width={18} height={18} aria-hidden="true" />
+        <span>Manual</span>
+      </button>
+    </div>
+  );
+}
 
-  // B-02: Dimensionar canvas pela largura real do container (mobile-first).
-  useEffect(() => {
-    const el = canvasContainerRef.current;
-    if (!el) return;
-    const update = () => {
-      const w = el.clientWidth;
-      if (w > 0) setCanvasWidth(w);
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+interface CameraPanelProps {
+  state: CameraState;
+  scanner: ReturnType<typeof useScanner>;
+  onAbrir: () => void;
+  onCancelar: () => void;
+  onTentarNovamente: () => void;
+  onTrocarParaManual: () => void;
+}
 
-  // D-04: Fechar modal com Escape (WAI-ARIA).
-  useEffect(() => {
-    if (loading) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancelar();
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [loading, onCancelar]);
-
-  const label = labelParaTransicao(statusNovo);
-  const isReprovar = statusNovo === "REPROVADA_PELO_VENDEDOR";
-  const titulo = isReprovar ? "Reprovar prova" : `Confirmar: ${label}`;
-  const descricao = isReprovar
-    ? "Descreva o motivo da reprovacao e assine para confirmar."
-    : "Assine no quadro abaixo para confirmar a movimentacao.";
-  const transicaoLabel = `${STATUS_LABELS[statusAtual]} \u2192 ${STATUS_LABELS[statusNovo]}`;
-
-  const handleLimpar = useCallback(() => {
-    sigRef.current?.clear();
-    setLocalError(null);
-  }, []);
-
-  const handleSubmit = useCallback(
-    (e: FormEvent<HTMLFormElement>) => {
-      e.preventDefault();
-      setLocalError(null);
-
-      const canvas = sigRef.current;
-      if (!canvas || canvas.isEmpty()) {
-        setLocalError("Assinatura e obrigatoria.");
-        return;
-      }
-      if (precisaMotivo && !motivo.trim()) {
-        setLocalError("Motivo da reprovacao e obrigatorio.");
-        return;
-      }
-
-      // Exporta como dataURL e remove o prefixo `data:image/png;base64,`.
-      // `getTrimmedCanvas()` e mais cara (tira bounding box) mas gera PNG
-      // menor — vale ao custo para poupar banda/armazenamento.
-      const dataUrl = canvas.getCanvas().toDataURL("image/png");
-      const base64 = dataUrl.split(",")[1] ?? "";
-
-      if (base64.length > ASSINATURA_BASE64_MAX_BYTES) {
-        setLocalError(
-          "Assinatura muito complexa. Tente um traco mais simples.",
-        );
-        return;
-      }
-
-      onConfirmar(base64, precisaMotivo ? motivo.trim() : null);
-    },
-    [precisaMotivo, motivo, onConfirmar],
+function CameraPanel({
+  state,
+  scanner,
+  onAbrir,
+  onCancelar,
+  onTentarNovamente,
+  onTrocarParaManual,
+}: CameraPanelProps) {
+  const { titulo, descricao, ctaLabel, ctaHandler, ctaDisabled } = useMemo(
+    () => _resolverTextoCamera(state, onAbrir, onCancelar, onTentarNovamente),
+    [state, onAbrir, onCancelar, onTentarNovamente],
   );
 
-  const displayError = error ?? localError;
-
   return (
-    <div
-      className={styles.modalBackdrop}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="assinatura-modal-title"
-      ref={focusTrapRef}
-    >
-      <form className={styles.modalCard} onSubmit={handleSubmit}>
-        <h2 id="assinatura-modal-title" className={styles.modalTitle}>
-          {titulo}
-        </h2>
-        <p className={styles.modalDescription}>{descricao}</p>
-        <p className={styles.modalTransicao}>{transicaoLabel}</p>
-
-        {precisaMotivo && (
-          <div className={styles.modalField}>
-            <label className={styles.modalLabel} htmlFor="motivo-reprovacao">
-              Motivo da reprovacao
-            </label>
-            <textarea
-              id="motivo-reprovacao"
-              className={styles.modalTextarea}
-              value={motivo}
-              onChange={(e) => setMotivo(e.target.value)}
-              maxLength={1000}
-              placeholder="Ex: Cor do logo errada"
-              required
-            />
-          </div>
+    <div className={styles.cameraPanel}>
+      <div className={styles.previewSlot}>
+        {state.kind === "scanning" ? (
+          <CameraLive divId={scanner.divId} ready={scanner.ready} />
+        ) : (
+          <QRMockPreview />
         )}
+        <p className={styles.previewHint}>
+          {state.kind === "scanning"
+            ? "Centralize o QR Code no quadro"
+            : "Centralize o QR Code no quadro"}
+        </p>
+      </div>
 
-        <div className={styles.signatureWrapper}>
-          <label className={styles.modalLabel}>Assinatura</label>
-          <div ref={canvasContainerRef}>
-            {canvasWidth > 0 && (
-              <SigCanvas
-                ref={sigRef}
-                penColor="#000000"
-                backgroundColor="#ffffff"
-                canvasProps={{
-                  className: styles.signatureCanvas,
-                  width: canvasWidth,
-                  height: 200,
-                }}
-              />
+      <div className={styles.cameraSidebar}>
+        <h2 className={styles.panelTitle}>{titulo}</h2>
+        <p className={styles.panelDescription}>{descricao}</p>
+
+        {state.kind === "error" && (
+          <div className={styles.errorBanner} role="alert">
+            <strong>{state.mensagem}</strong>
+            {state.codigo === "DISPOSITIVO_SEM_CAMERA" && (
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={onTrocarParaManual}
+              >
+                Ir para digitacao manual →
+              </button>
             )}
           </div>
-          <div className={styles.signatureActions}>
-            <span className={styles.signatureHint}>
-              Assine com o dedo ou mouse no quadro acima.
-            </span>
-            <button
-              type="button"
-              className={styles.clearButton}
-              onClick={handleLimpar}
-            >
-              Limpar
-            </button>
-          </div>
-        </div>
-
-        {displayError && (
-          <div className={styles.modalError} role="alert">
-            {displayError}
-          </div>
         )}
 
-        <div className={styles.modalFooter}>
-          <button
-            type="button"
-            className={styles.secondaryButton}
-            onClick={onCancelar}
-            disabled={loading}
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            className={isReprovar ? styles.dangerButton : styles.primaryButton}
-            disabled={loading}
-          >
-            {loading ? "Enviando..." : "Confirmar"}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-/* ──────────────────────────────────────────────────────────────────────
- * Done / Error views
- * ──────────────────────────────────────────────────────────────────── */
-
-function DoneView({
-  scan,
-  statusAplicado,
-  onNovaLeitura,
-}: {
-  scan: ScanResponse;
-  statusAplicado: StatusProva;
-  onNovaLeitura: () => void;
-}) {
-  const mensagem = useMemo(() => {
-    const labelAcao = ACTION_LABELS[statusAplicado] ?? STATUS_LABELS[statusAplicado];
-    return `${labelAcao} — movimentacao registrada.`;
-  }, [statusAplicado]);
-
-  return (
-    <div className={styles.successCard}>
-      <div className={styles.successIcon} aria-hidden="true">
-        ✓
+        <button
+          type="button"
+          className={styles.primaryButton}
+          onClick={ctaHandler}
+          disabled={ctaDisabled}
+        >
+          <CameraIcon width={18} height={18} aria-hidden="true" />
+          <span>{ctaLabel}</span>
+        </button>
       </div>
-      <div className={styles.successTitle}>Tudo certo!</div>
-      <p className={styles.successMessage}>
-        <strong>{scan.prova.nome}</strong> — {mensagem}
-      </p>
-      <span className={styles.statusBadge}>
-        {STATUS_LABELS[scan.prova.status]}
-      </span>
-      <button
-        type="button"
-        className={styles.primaryButton}
-        onClick={onNovaLeitura}
-      >
-        Escanear proxima
-      </button>
     </div>
   );
 }
 
-function ErrorView({
-  message,
-  onTentarNovamente,
-}: {
-  message: string;
-  onTentarNovamente: () => void;
-}) {
+function _resolverTextoCamera(
+  state: CameraState,
+  onAbrir: () => void,
+  onCancelar: () => void,
+  onTentarNovamente: () => void,
+): {
+  titulo: string;
+  descricao: string;
+  ctaLabel: string;
+  ctaHandler: () => void;
+  ctaDisabled: boolean;
+} {
+  switch (state.kind) {
+    case "idle":
+      return {
+        titulo: "Pronto para escanear",
+        descricao:
+          "Aponte a camera para o QR Code da etiqueta. A leitura e instantanea e a movimentacao e registrada com horario e usuario.",
+        ctaLabel: "Abrir camera",
+        ctaHandler: onAbrir,
+        ctaDisabled: false,
+      };
+    case "scanning":
+      return {
+        titulo: "Aponte para o QR Code",
+        descricao:
+          "A camera ja esta ativa. Centralize o codigo no quadro para identificar a prova.",
+        ctaLabel: "Cancelar",
+        ctaHandler: onCancelar,
+        ctaDisabled: false,
+      };
+    case "identifying":
+      return {
+        titulo: "Verificando QR Code",
+        descricao: "Estamos identificando a prova. Isso leva menos de 2 segundos.",
+        ctaLabel: "Aguarde...",
+        ctaHandler: () => {},
+        ctaDisabled: true,
+      };
+    case "error":
+      return {
+        titulo: "Nao foi possivel escanear",
+        descricao:
+          state.codigo === "DISPOSITIVO_SEM_CAMERA"
+            ? "Sem acesso a camera. Use a digitacao manual ou tente novamente apos liberar a permissao."
+            : "Tente novamente ou troque para a digitacao manual.",
+        ctaLabel: "Tentar novamente",
+        ctaHandler: onTentarNovamente,
+        ctaDisabled: false,
+      };
+  }
+}
+
+function CameraLive({ divId, ready }: { divId: string; ready: boolean }) {
   return (
-    <div className={styles.errorCard}>
-      <div className={styles.errorTitle}>Nao foi possivel escanear</div>
-      <p className={styles.errorMessage}>{message}</p>
+    <div className={styles.cameraLiveWrapper}>
+      <div className={styles.cameraLive} id={divId} />
+      <div className={styles.cameraOverlay} aria-hidden="true">
+        <span className={styles.bracketTopLeft} />
+        <span className={styles.bracketTopRight} />
+        <span className={styles.bracketBottomLeft} />
+        <span className={styles.bracketBottomRight} />
+      </div>
+      {!ready && (
+        <p className={styles.cameraStatus}>Iniciando camera...</p>
+      )}
+    </div>
+  );
+}
+
+function QRMockPreview() {
+  // Preview estatico do estado idle — quadrado central com brackets,
+  // alinhado a Imagem 1 do Figma.
+  return (
+    <div className={styles.qrMock} aria-hidden="true">
+      <div className={styles.qrMockOverlay}>
+        <span className={styles.bracketTopLeft} />
+        <span className={styles.bracketTopRight} />
+        <span className={styles.bracketBottomLeft} />
+        <span className={styles.bracketBottomRight} />
+      </div>
+      <div className={styles.qrMockSquare}>
+        <div className={styles.qrMockYellowStripe} />
+        {/* Padrao de "QR" simulado — apenas decorativo. */}
+        <div className={styles.qrMockGrid}>
+          {Array.from({ length: 49 }, (_, i) => (
+            <span
+              key={i}
+              className={
+                _qrMockCell(i)
+                  ? styles.qrMockCellOn
+                  : styles.qrMockCellOff
+              }
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Padrao deterministico para o mock do QR — apenas decorativo, sem
+// significado funcional.
+function _qrMockCell(i: number): boolean {
+  // Alguns padroes "tipo QR": cantos cheios + quadrados centrais.
+  const row = Math.floor(i / 7);
+  const col = i % 7;
+  // Finder patterns nos cantos
+  const tl = row < 3 && col < 3;
+  const tr = row < 3 && col > 3;
+  const bl = row > 3 && col < 3;
+  if (tl || tr || bl) {
+    // borda + centro do finder
+    if (row === 0 || row === 2 || col === 0 || col === 2) return true;
+    if (row === 1 && col === 1) return true;
+    return tr && (row === 1 || col === 5);
+  }
+  // Centro com pseudo-padrao
+  return (i * 7 + 3) % 5 < 2;
+}
+
+interface ManualPanelProps {
+  state: ManualState;
+  codigo: string;
+  onChange: (v: string) => void;
+  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+}
+
+function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
+  // Wave 3 v4.0 (C10 v4.0): este painel e o **shell visual** + chamada
+  // a camada de servico. Nao tem mascara de digitacao avancada nem
+  // validacao em tempo real (`validar_formato_codigo_publico` no
+  // backend ja rejeita formato invalido com 404 generico). Isso fica
+  // para o Componente 19 (Wave 3 v4.0).
+  const isLoading = state.kind === "identifying";
+  const isError = state.kind === "error";
+  const trimmed = codigo.trim();
+  const submitDisabled = isLoading || trimmed.length === 0;
+
+  return (
+    <form className={styles.manualPanel} onSubmit={onSubmit}>
+      <h2 className={styles.panelTitleCenter}>Inserir codigo manualmente</h2>
+      <p className={styles.panelDescriptionCenter}>
+        Digite o codigo da etiqueta no formato{" "}
+        <code className={styles.codigoFormat}>PRV-AAAA-MM-NNNNNN</code>. A
+        movimentacao sera registrada apos a confirmacao.
+      </p>
+
+      <div className={styles.manualInputWrapper}>
+        <label htmlFor="codigo-manual" className={styles.srOnly}>
+          Codigo da prova
+        </label>
+        <input
+          id="codigo-manual"
+          type="text"
+          className={styles.manualInput}
+          value={codigo}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="PRV-AAAA-MM-NNNNNN"
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          aria-invalid={isError ? "true" : "false"}
+          aria-describedby={isError ? "manual-error" : undefined}
+          disabled={isLoading}
+        />
+      </div>
+
+      {isError && (
+        <div id="manual-error" className={styles.errorBanner} role="alert">
+          {state.mensagem}
+        </div>
+      )}
+
       <button
-        type="button"
+        type="submit"
         className={styles.primaryButton}
-        onClick={onTentarNovamente}
+        disabled={submitDisabled}
       >
-        Tentar novamente
+        <span>{isLoading ? "Buscando..." : "Buscar prova"}</span>
+        {!isLoading && (
+          <ArrowRightIcon width={16} height={16} aria-hidden="true" />
+        )}
       </button>
+    </form>
+  );
+}
+
+function CardFooter() {
+  // Wave 3 v4.0 (C10): footer renderizado como **placeholder visual**.
+  // "Ultima leitura" e "Ver historico" requerem endpoint de query do
+  // audit_log por usuario — fora do escopo desta entrega (aprovado pelo
+  // Mario na Q3 do pre-Gate-2). C18 (Auditoria, Wave 6 v3.0) ja entrega
+  // os dados; uma futura wave plugara aqui.
+  return (
+    <div className={styles.cardFooter}>
+      <span className={styles.cardFooterLabel}>Ultima leitura ha —</span>
+      <span
+        className={styles.cardFooterLinkDisabled}
+        aria-disabled="true"
+        title="Disponivel em breve"
+      >
+        Ver historico →
+      </span>
     </div>
   );
 }

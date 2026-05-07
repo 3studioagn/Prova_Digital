@@ -68,6 +68,35 @@ export function ScanIcon(props: IconProps) {
   );
 }
 
+export function CameraIcon(props: IconProps) {
+  // Wave 3 v4.0 (C10): icone de camera para tab "Camera" do scanner.
+  return (
+    <svg {...baseProps} {...props} aria-hidden={props["aria-label"] ? undefined : true}>
+      <path d="M3.5 8.5c0-1.1.9-2 2-2h2L9 4.5h6L16.5 6.5h2c1.1 0 2 .9 2 2V18c0 1.1-.9 2-2 2h-13c-1.1 0-2-.9-2-2v-9.5Z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
+  );
+}
+
+export function KeyIcon(props: IconProps) {
+  // Wave 3 v4.0 (C10): icone de chave para tab "Manual" do scanner.
+  return (
+    <svg {...baseProps} {...props} aria-hidden={props["aria-label"] ? undefined : true}>
+      <circle cx="7.5" cy="14.5" r="3.5" />
+      <path d="m10 12 9-9M16 6l3 3M14 8l3 3" />
+    </svg>
+  );
+}
+
+export function ArrowRightIcon(props: IconProps) {
+  // Wave 3 v4.0 (C10): seta direita usada em CTAs como "Buscar prova".
+  return (
+    <svg {...baseProps} {...props} aria-hidden={props["aria-label"] ? undefined : true}>
+      <path d="M5 12h14M13 6l6 6-6 6" />
+    </svg>
+  );
+}
+
 export function ChartIcon(props: IconProps) {
   return (
     <svg {...baseProps} {...props} aria-hidden={props["aria-label"] ? undefined : true}>
