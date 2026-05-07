@@ -26,6 +26,7 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **v4.0 W2 — C06 Audit Fixes** | ✅ **COMPLETO** | Auditoria sênior independente pos-Wave 2 v4.0 (2026-05-05, commit `1b47290` em `wave2-v4/audit`). Veredito: REPROVADO E REFAZER — 2 CRITICAL bloqueantes (AUD-W2V4-001 reinicio zera rota disparando trigger SQLSTATE 22023; AUD-W2V4-002 branch development build-broken com helper `isAllowedImageType` uncommitted). Findings: **3 CRITICAL · 7 HIGH · 4 MEDIUM · 8 LOW · 4 INFO = 26 totais**. Sessao de correcao 2026-05-05 (`wave2-v4/fixes/execution`) corrigiu **22/22 acionaveis em 15 commits atomicos** + 4 INFO confirmados/registrados. **CRITICAL**: AUD-001+A01+006+007 (state_machine reinicio agora preserva `rota_antes` em vez de zerar — completa modificacao cirurgica do ADR-119; commit `cbd6506`); AUD-002+D01+D02 (commit dos 3 frontend uncommitted + nota anexo Visual Refresh v1; tsc + next build re-validados; commit `1a88ab8`). **HIGH**: AUD-T01 (suite `test_imutabilidade_rota.py` 5 cenarios banco real — Wave 7 readiness automatizada); AUD-T02 (suite `test_rota_enum_drift.py` 5 testes confrontando Python↔Postgres↔TS↔Pydantic — confirma zero drift atual); AUD-T03 (suite `test_migration_012.py` 3 testes upgrade/downgrade/idempotencia); AUD-A02+M03 (default `INITIAL_FORM.rota=""` + texto auxiliar restaurado — mitigacao "Confusao operacional" Backlog v4.0 §6); AUD-M01 (`schema.sql` reescrito refletindo `alembic_version=012` + 3 chunks MCP); AUD-003 (docstring `codigo_publico_service` corrigida — trigger nao protege codigo). **MEDIUM**: AUD-004 (handler `criar_prova` com retry 3x em colisao de `idx_provas_codigo_publico` + classificacao por constraint_name); AUD-005 (docstring `validar_payload_qr` documenta contrato polimorfico segundo campo); AUD-M02 (CLAUDE.md + docstring migration 012 documentam divergencia 3 chunks MCP); AUD-T04 (smoke E2E manual obrigatorio antes do merge — 11 itens de checklist). **LOW**: AUD-S01 (gerar_payload_qr rejeita identificador com `\|`); AUD-007 (audit log de reinicio agora grava `rota_depois=rota_antes.value`); AUD-P03 (`lru_cache` em `_check_assets`; cache de bytes WONTFIX-parcial); AUD-M04 (bloco "Pos-supersedimento" no ADR-120); AUD-T05 (200 → 10k amostras unicidade); AUD-D01+D02 (anexo + re-validacao). **INFO**: S02/S03/P01/P02 confirmados/follow-up. **Validacao**: backend pytest **805 passed + 9 skipped** (era 795 + 0; +19 novos -- 2 AUD-001 + 5 T01 + 5 T02 + 3 T03 + 3 AUD-004 + 1 S01); 9 skipped sao integrados sem `INTEGRATION_DATABASE_URL`. tsc --noEmit exit 0; next build 13/13 paginas; `/nova-prova` 6.84 kB / 209 kB. Advisors MCP sem novos alertas. ADRs novos: ADR-123 (reinicio preserva rota completa modificacao cirurgica do ADR-119) + ADR-124 (default vazio + texto auxiliar — substitui mitigacao descartada em ADR-118 SUPERSEDIDO). Recomendacao final: **PR pronto para merge condicional** (smoke E2E manual obrigatorio + nova auditoria independente em sessao separada apos merge para validar resolucao + ausencia de regressao + Wave 7 viavel). | — |
 | **v4.0 W2 — C08 Visualizacao de Prova (atualizacao v4.0)** | ✅ **COMPLETO** (aguarda smoke visual humano + PR) | Componente 08 (atualizacao v4.0) — Visualizacao de Prova com Redesign + Suporte a Exibicao de Rota. Gate-based two-stage com 4 ambiguidades visuais resolvidas pelo Mario (A1: `STATUS_LABELS["CRIADA"]` -> "Aguardando vendedor" global; A2: `actionsRow` com 2/3/4 botoes side-by-side via `flex: 1 1 220px`; A3: rotas legacy `PADRAO`/`DIRETA` perdem sufixo "(legada v3.0)" e viram "Padrao"/"Direta"; A4: `isPathActive` por prefix-match destaca "Provas" em `/provas/[id]`). Frontend-only — zero touch em backend, RLS, migrations. Layout invertido (arte esquerda 480px · info direita 1fr) + header com "Requerimento: NNN" pequeno + nome grande + divisor + grid 3x2 de metadata (Cliente · Rota · Criada em / Vendedor · Ciclo Atual · Status) + Codigo em mono como item adicional + banner full-width de cancelamento + linha de acoes. Card preto do historico passa a ser secao separada (era aninhada no innerCard branco). Timeline.tsx **nao tocada** — ja era orientada a dados (preparada para Wave 3 v4.0). AdminActions.tsx **nao tocada** — `useAuthorization` integrado desde Wave 1 v4.0. **Validacao**: tsc --noEmit exit 0; next build 13/13 paginas; `/provas/[id]` em **11.4 kB / 209 kB** First Load (era ~10 kB — overhead pelo import de `STATUS_LABELS`/`StatusProva` e novos seletores CSS). Advisors MCP sem novos alertas. ADRs 125-128. Smoke visual humano obrigatorio antes do PR (preview programatico nao tem auth). | — |
 | **v4.0 W2 — C08 Audit Fixes** | ✅ **COMPLETO** (mergeado em `development`) | Auditoria sênior independente pos-C08 v4.0 (2026-05-06, commit `d90c672` em `wave2-v4-c08/audit`). Veredito: REPROVADO E REFAZER (CONDICIONAL). Findings: **1 CRITICAL · 3 ALTOS · 4 MÉDIOS · 5 BAIXOS · 3 INFOs = 16 totais**. Sessao de correcao 2026-05-06 (`wave2-v4-c08/fixes/execution`) corrigiu **16/16 acionaveis em 13 commits atomicos** + 3 ajustes visuais finais validados pelo Mario. **CRITICAL**: AUD-001 (figma-reference.png commitada). **ALTOS**: AUD-002 (analysis.md cherry-pick para branch da entrega — link CHANGELOG resolve); AUD-003 (refactor `formatRota` -> `lib/types/prova.ts` + `isPathActive` -> `lib/path-active.ts` + 13 testes Vitest novos cobrindo 4 v4.0 + 2 legacy + null + sanity exhaustividade + 5 cenarios isPathActive — total Vitest do projeto 15 -> 28); AUD-004 (token semantico `--color-card-art-bg=#d9d9d9` em globals.css desacoplado de `--color-card-surface` — ADR-129). **MÉDIOS**: AUD-005+006 (`codigo_publico` migrado do metaGrid para `requerimentoLabel` no header — restaura grid 3x2 estrito; apendice no ADR-127); AUD-007 (`.title` clamp 1.5rem/2.5vw/2.5rem — minimo 24px em viewport tablet); AUD-008 (nova secao "Pagina de detalhe da prova: estrutura e extensao para Wave 3" em CLAUDE.md cobrindo 4 camadas para adicionar valor a `StatusProvaEnum`). **BAIXOS**: AUD-009 (object-fit cover WONTFIX — ADR-130); AUD-010 (wrapper trivial `formatStatus` removido); AUD-011 (tooltip nativo HTML title no em-dash de prova legacy); AUD-012 (coberto por AUD-003); AUD-013 (template `smoke-validation.md` 19 itens — Mario percorre antes do PR final). **INFOs**: AUD-014/015/016 consolidados em ADR-131. **Ajustes visuais finais (3 commits pos-Mario)**: card branco com `flex: 1` para preencher altura disponivel; `timelineCard` REANINHADO dentro do `innerCard` branco (correcao de interpretacao errada do ADR-127 — apendice 2); `artSlot` reduzido de 380px para 320px (proporcao Figma). **Validacao final**: npx vitest run 28/28; npx tsc --noEmit exit 0; npx next build 13/13 paginas; `/provas/[id]` em 11.4 kB / 209 kB (sem regressao). Advisors MCP sem novos alertas. **B1 default aplicado**: stash@{0} preserva CSS uncommitted experimentais — Mario decide se reaplica. ADRs novos: 129, 130, 131 + 2 apendices ADR-127. **Pendencias**: smoke E2E manual (`smoke-validation.md` 19 itens — itens 4/5 podem ser SKIP por ausencia de motorista/clicheria em producao); nova auditoria independente em sessao separada para validar resolucao + ausencia de regressao + viabilidade Wave 3 + fidelidade visual contra figma-reference.png. | — |
+| **v4.0 W3 — C10 Scanner Reformulado** | ✅ **COMPLETO** (aguarda smoke E2E + PR) | Componente 10 (atualizacao v4.0) — Redesign do Scanner de QR Code com Identificacao por Codigo Alfanumerico. **1ª entrega da Wave 3 v4.0** (de 4 — C19, C11, C12 a seguir). Gate-based two-stage: 4 ambiguidades visuais resolvidas pelo Mario (Q1 estrategia hibrida do payload — camera valida `payload` completo + hash, manual valida `codigo_publico` isolado; Q2 tab Manual como shell funcional + chamada da camada de servico — sem mascara/realtime/rate-limit-client que ficam para C19; Q3 footer "Ultima leitura ha —" + "Ver historico" como placeholder visual OUT OF SCOPE; Q4 input usa formato real `PRV-AAAA-MM-NNNNNN` em vez do `3S- XXXX-XXXX` do Figma). **Bug corrigido R-1:** `scan_prova` fazia lookup por `nro_requerimento` mesmo quando QR carregava `codigo_publico` — provas v4.0 nao escaneavam. Agora detecta formato via `validar_formato_codigo_publico` e usa lookup correto. **Backend:** `ScanRequest` aceita `payload` XOR `codigo` via `model_validator`. Novo helper `_carregar_prova_por_codigo_publico_com_scoping` (canonico v4.0+). Audit log com novo campo `origem` ('camera' \| 'manual'). Mensagens 404 GENERICAS para inexistente / fora-do-scope / formato invalido (DAT §8.2 — protecao contra enumeracao). **Frontend:** camada de servico desacoplada `lib/services/identificacao-prova.ts` com `identificarProvaPorPayload` + `identificarProvaPorCodigo`. Tipos `CodigoErro` (5 codigos) + `ResultadoIdentificacao` (tagged union). Mensagens em pt-BR pre-resolvidas. **Constraint dura: zero acoplamento com DOM/camera** — testavel em `vitest --environment node`; teste anti-acoplamento (regex contra `navigator.`/`document.`/`window.`/`html5-qrcode`) garante. Page reescrita 740→414 LOC. CSS reescrito 589→433 LOC. UI fiel ao Figma: toggle pill Camera/Manual, painel da camera com QR mock idle / live preview scanning + brackets viewfinder, painel manual com input PRV + botao "Buscar prova →" + chamada da camada de servico, footer placeholder, banners de erro contextuais (DISPOSITIVO_SEM_CAMERA com link para Manual inline). Removidos `useScanProva`, `AssinaturaModal`, `ScanReadyView`, `DoneView`, `react-signature-canvas` import (transicao migra para `/provas/[id]` no C11 v4.0). **825 testes backend (era 805 + 20 novos)** + **44 Vitest (era 28 + 16 novos)**. tsc 0; next build 13/13; `/escanear` 5.25 kB / 168 kB (era ~9 kB / 175 kB). Zero migration. RLS inalterada. ADRs 132 (lookup polimorfico) + 133 (camada de servico desacoplada) + 134 (tab Manual + Q3 + Q4 do Mario). Documentos: `docs/wave3-v4-c10/analysis.md` (Gate 1 + Execucao), `contrato-c19.md` (contrato pronto para Componente 19 consumir), `smoke-validation.md` (20 cenarios), `figma-references.md` (guia para adicionar PNGs). | — |
 
 **Estado atual do banco de producao:**
 - `alembic_version = 012` (migration 012 aplicada na Wave 2 v4.0, 2026-05-04 — ADRs 115-119). Wave 6 nao criou Alembic. Wave 1 v4.0 nao criou Alembic.
@@ -476,6 +477,81 @@ ainda filtrara dados. Para invalidacao ativa do cache (publicacao
 via Realtime ou similar), ver follow-up em `audit-report.md` §
 "Itens de backlog tecnico" item 7.
 
+
+---
+
+## Identificacao de provas: contrato compartilhado entre scanner e digitacao manual (Wave 3 v4.0+)
+
+A Wave 3 v4.0 introduz **2 mecanismos** de identificacao de provas que
+compartilham o mesmo lookup logico:
+
+1. **Camera (Componente 10 v4.0 — entregue):** o `html5-qrcode`
+   decodifica o QR Code da etiqueta e devolve o **payload completo**
+   (ex.: `3SD|PRV-2026-05-K3T9XB|abcd1234567890ef`).
+2. **Digitacao manual (Componente 19 — proxima entrega da Wave):** o
+   usuario digita o **codigo legivel** (ex.: `PRV-2026-05-K3T9XB`).
+
+DAT v3.0 §8.1 exige **idempotencia** — ambos resolvem para o mesmo
+registro pelo mesmo lookup.
+
+**Camada de servico desacoplada:** `frontend/src/lib/services/identificacao-prova.ts`.
+
+```typescript
+// Caminho camera (C10):
+identificarProvaPorPayload(payload, { getToken }): Promise<ResultadoIdentificacao>
+
+// Caminho manual / contrato C19:
+identificarProvaPorCodigo(codigo, { getToken }): Promise<ResultadoIdentificacao>
+
+// Tagged union — garante exhaustividade no chamador:
+type ResultadoIdentificacao =
+  | { tipo: "sucesso"; prova: ScanResponse }
+  | { tipo: "erro"; codigo: CodigoErro; mensagem: string };
+
+type CodigoErro =
+  | "QR_INVALIDO"
+  | "PROVA_NAO_ENCONTRADA"  // mensagem GENERICA para 3 cenarios — DAT §8.2
+  | "DISPOSITIVO_SEM_CAMERA"
+  | "ERRO_REDE"
+  | "SESSAO_EXPIRADA";
+```
+
+**Constraint dura:** **zero acoplamento com DOM/camera**. A camada e
+testavel em `vitest --environment node`. Um teste especial faz regex
+contra `navigator.`/`document.`/`window.`/`html5-qrcode` no source —
+quebra o build se alguem reintroduzir acoplamento. Isso garante que o
+C19 herda a camada testavel sem precisar de JSDOM.
+
+**Backend correspondente:** `POST /api/v1/provas/scan` aceita
+`payload` XOR `codigo` via `model_validator`. **Lookup polimorfico** no
+caminho camera:
+  - Se segundo campo do payload casa `validar_formato_codigo_publico`
+    (`PRV-AAAA-MM-NNNNNN`) → busca por `provas_digitais.codigo_publico`.
+  - Caso contrario → fallback `provas_digitais.nro_requerimento`
+    (provas legacy v3.0 com QR antigo, ate Wave 7 / C21 regerar
+    etiquetas).
+
+**Audit log:** ambos os caminhos gravam `acao='escanear_prova'` com
+`detalhes['origem']` em {`camera`, `manual`} + `codigo_publico` da
+prova.
+
+**Mensagens 404 GENERICAS:** "Prova nao encontrada" e a mesma
+resposta para inexistente / fora do scope / formato invalido.
+Frontend nao distingue. **DAT §8.2 protecao contra enumeracao.**
+
+**Como o C19 consome:** ver `docs/wave3-v4-c10/contrato-c19.md` —
+documento dedicado com tipos, funcoes, casos de uso e roteiro de
+implementacao do C19 (mascara, validacao client-side, rate-limit
+backend, etc.).
+
+**Importante para waves futuras:**
+- NUNCA criar fetch direto para `/scan` em outro lugar — sempre via
+  a camada de servico.
+- NUNCA importar `html5-qrcode` na camada de servico.
+- Se precisar adicionar codigo de erro novo, estender `CodigoErro`
+  + `MENSAGENS_ERRO` + atualizar `contrato-c19.md`.
+- Mensagem 404 generica nao pode ser quebrada: introduzir distincao
+  entre "inexistente" e "fora do scope" abre vetor de enumeracao.
 
 ---
 

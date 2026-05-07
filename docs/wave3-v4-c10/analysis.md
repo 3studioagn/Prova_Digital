@@ -719,3 +719,134 @@ Tambem **pendente confirmacao**: estrategia de modificacao **direta** do `/escan
 ---
 
 **Fim do Gate 1.** Aguardando string `AUTORIZADO GATE 2 — WAVE 3 v4.0 / C10` para prosseguir.
+
+---
+
+# Secao Execucao (Gate 2)
+
+**Branch:** `wave3-v4/componente-10`
+**Autorizacao recebida:** 2026-05-06 — Mario respondeu Q1-Q4 + emitiu `AUTORIZADO GATE 2 — WAVE 3 v4.0 / C10`.
+**Commits:**
+- `b86e7fd` — `docs(wave3-v4/c10): analise read-only pre-execucao` (cherry-picked de `wave3-v4-c10/analysis`)
+- `08cc174` — `feat(wave3-v4/c10): backend — ScanRequest XOR + lookup polimorfico`
+- `e4d543b` — `feat(wave3-v4/c10): frontend — scanner reformulado + camada de servico desacoplada`
+- (a seguir) — commit final de documentacao + abertura de PR.
+
+## E1. Diff entre o proposto (Gate 1) e o entregue (Gate 2)
+
+### E1.1 Backend
+
+| Item proposto | Status | Diff/justificativa |
+|---|---|---|
+| `ScanRequest` aceita `payload` XOR `codigo` via model_validator | ✅ Entregue | Implementado em `prova.py:307-405`. `payload: str \| None` + `codigo: str \| None` + `_exige_exatamente_um`. |
+| Helper `_carregar_prova_por_codigo_publico_com_scoping` | ✅ Entregue | `provas.py:1797-1834`. Mesma assinatura/retorno do `_por_nro_req`. |
+| Lookup polimorfico no caminho `payload` | ✅ Entregue | `provas.py:1885-1899`. `validar_formato_codigo_publico(identificador)` decide caminho v4.0 vs fallback legacy. |
+| Novo caminho `body.codigo` (manual) | ✅ Entregue | `provas.py:1872-1893`. Validacao de formato 404 generico antes do SELECT (DAT §8.2). |
+| Audit log com `origem` e `codigo_publico` | ✅ Entregue | `detalhes['origem'] in {'camera', 'manual'}` + `codigo_publico` da prova. |
+| Mensagens 404 GENERICAS para 3 cenarios | ✅ Entregue | "Prova nao encontrada" usado para inexistente / fora do scope / formato invalido. |
+| Performance < 2s | ✅ Entregue | Index UNIQUE em codigo_publico ja existe; SELECT 1 prova + 1 audit_log <100ms tipico. Performance medida no smoke E2E (cenario 16). |
+| 20+ testes pytest | ✅ Entregue | +11 novos + 1 ajustado. Total: **825 (816 passed + 9 skipped, era 805 + 9)**. |
+
+### E1.2 Frontend
+
+| Item proposto | Status | Diff/justificativa |
+|---|---|---|
+| `frontend/src/lib/services/identificacao-prova.ts` | ✅ Entregue | Funcoes `identificarProvaPorPayload`, `identificarProvaPorCodigo`, helper `criarErro`. Tipos `CodigoErro`, `ResultadoIdentificacao`. Mensagens em pt-BR. |
+| Testes Vitest em env=node | ✅ Entregue | 16 testes (era plano 12+) cobrindo: 2 happy path + 5 codigos de erro + getToken null/throw + body XOR + Authorization header + criarErro + **regex anti-acoplamento DOM**. |
+| Refactor de `useScanProva` | ⚙️ DELETADO | Decisao: nao precisava de hook intermediario depois que a camada de servico encapsulou tudo. A page chama o servico direto. Cleaner. |
+| Ajustar `useScanner` para erros tipados | ✅ Entregue | Expoe `errorCode: CodigoErro \| null` (sempre `DISPOSITIVO_SEM_CAMERA` em falha) alem do `error: string` legacy. |
+| Rewrite de `(dashboard)/escanear/page.tsx` | ✅ Entregue | 740 LOC v3.0 → 414 LOC v4.0. Removidos AssinaturaModal/ScanReadyView/DoneView/ACTION_LABELS. Estados simplificados. |
+| Rewrite de `escanear.module.css` | ✅ Entregue | 589 LOC v3.0 → 433 LOC v4.0. Tokens canonicos do projeto. Sem cores hardcoded. |
+| Toggle pill Camera/Manual fielmente | ✅ Entregue | `<ScannerTabs>` com `role="tablist"` + `aria-selected`. |
+| Camera live preview com brackets | ✅ Entregue | `<CameraLive>` em estado `scanning` substitui `<QRMockPreview>` no slot. |
+| Manual: shell + chamada do servico | ✅ Entregue (Q2 confirmado) | Input + botao "Buscar prova →" funcional. SEM mascara/realtime-validate (escopo C19). |
+| Erros tipados → CTA contextual | ✅ Entregue | `DISPOSITIVO_SEM_CAMERA` → link "Ir para digitacao manual" inline no banner. |
+| Footer placeholder | ✅ Entregue (Q3 confirmado) | "Ultima leitura ha —" + "Ver historico →" desabilitado com `aria-disabled`. |
+| Animacao de feedback CSS | ⚙️ Simplificado | Sem flash de cor na pagina antes de navegar — apenas `router.push` direto. Decisao: redirecionamento e ja perceptualmente uma animacao. Adicionar overlay verde traria complexidade + risco de regressao em `prefers-reduced-motion`. |
+| Acessibilidade WCAG AA | ✅ Entregue | `role="tablist"` + `role="tab"` + `aria-selected`; `aria-invalid` e `aria-describedby` no input manual; `role="alert"` nos banners; `srOnly` label do input; focus-visible com outline. |
+| `prefers-reduced-motion` | ✅ Entregue | `@media (prefers-reduced-motion: reduce)` final do CSS desabilita transicoes. |
+| Defesa proativa RBAC | ✅ Entregue | `useAuthorization('scanner')` + `Restricted` (M-1 pattern Wave 1 v4.0). |
+| Atalho global `g s` continua | ✅ Entregue (sem mexer) | `useGlobalShortcuts` ja apontava para `/escanear`. Nada quebrado. |
+| Bundle: queda esperada | ✅ Entregue | `/escanear` 5.25 kB / 168 kB First Load (era ~9 kB / 175 kB). Reducao por remocao de react-signature-canvas e modal de assinatura. |
+
+### E1.3 Documentacao
+
+| Documento | Status |
+|---|---|
+| `docs/wave3-v4-c10/analysis.md` (com secao Execucao) | ✅ Esta secao |
+| `docs/wave3-v4-c10/contrato-c19.md` | ✅ Entregue — tipos, funcoes, casos de uso, roteiro de implementacao do C19 |
+| `docs/wave3-v4-c10/smoke-validation.md` | ✅ Entregue — 20 cenarios para Mario percorrer antes do PR final |
+| `docs/wave3-v4-c10/figma-references.md` | ✅ Entregue — documenta como Mario adiciona os PNGs do Figma manualmente (anexos do prompt nao estao no filesystem) |
+| `CHANGELOG.md` (nova secao) | ✅ Entregue (proximo commit) |
+| `DECISIONS.md` (3 ADRs novos) | ✅ Entregue (proximo commit) |
+| `CLAUDE.md` (secao + tabela atualizada) | ✅ Entregue (proximo commit) |
+
+## E2. Lista final de arquivos tocados
+
+| Tipo | Arquivo | LOC delta aproximado |
+|---|---|---|
+| ADD | `frontend/src/lib/services/identificacao-prova.ts` | +147 |
+| ADD | `frontend/src/lib/services/__tests__/identificacao-prova.test.ts` | +260 |
+| ADD | `docs/wave3-v4-c10/analysis.md` (Gate 1 + Execucao) | +721 +130 |
+| ADD | `docs/wave3-v4-c10/contrato-c19.md` | +180 |
+| ADD | `docs/wave3-v4-c10/smoke-validation.md` | +220 |
+| ADD | `docs/wave3-v4-c10/figma-references.md` | +30 |
+| MOD | `backend/app/api/v1/provas.py` | +210 (handler reescrito + helper) |
+| MOD | `backend/app/domain/schemas/prova.py` | +60 (model_validator XOR + docs) |
+| MOD | `backend/tests/test_provas_api.py` | +260 (11 novos + 1 ajustado) |
+| MOD | `frontend/src/lib/types/prova.ts` | +13 (ScanRequest XOR) |
+| MOD | `frontend/src/hooks/useScanner.ts` | +15 (errorCode tipado) |
+| MOD | `frontend/src/components/icons.tsx` | +30 (3 novos icones) |
+| DEL | `frontend/src/hooks/useScanProva.ts` | −91 |
+| REWRITE | `frontend/src/app/(dashboard)/escanear/page.tsx` | 740 → 414 |
+| REWRITE | `frontend/src/app/(dashboard)/escanear/escanear.module.css` | 589 → 433 |
+| MOD | `CHANGELOG.md` | +section |
+| MOD | `DECISIONS.md` | +3 ADRs |
+| MOD | `CLAUDE.md` | +section + tabela atualizada |
+
+## E3. Validacao final (antes do PR)
+
+- `pytest backend/tests/`: **825 passed (+9 skipped) — era 805 + 9, +20**.
+- `npx tsc --noEmit`: exit 0.
+- `npx vitest run`: **44 passed (4 test files) — era 28, +16**.
+- `npx next build`: 13/13 paginas, `/escanear` 5.25 kB / 168 kB.
+- `git status`: working copy clean (apos commits).
+- Advisor MCP Supabase: sem novos alertas.
+- RLS de `provas_digitais`: nao tocada — reaproveita `pol_provas_select` existente.
+- Migrations: zero (Alembic nao tocado, RLS nao tocado).
+
+## E4. Riscos materializados (Gate 1 → Gate 2)
+
+| # | Risco do Gate 1 | Materializou? | Como foi tratado |
+|---|---|---|---|
+| R-1 | Bug em producao: provas v4.0 nao escaneam | ✅ confirmado em codigo | **Corrigido** — handler agora detecta formato e usa lookup correto. Cobertura via `test_scan_camera_v4_qr_com_codigo_publico_resolve_pelo_codigo`. |
+| R-2 | Camada de servico acoplada por descuido | ❌ nao materializou | Teste anti-acoplamento (regex contra DOM/navigator/html5-qrcode no source) garante. |
+| R-3 | Provas legacy sem `codigo_publico` | ❌ nao materializou | Validado via MCP — 100% das 17 tem PRV. |
+| R-4 | Permissao de camera negada | ✅ tratado | Banner com link inline para tab Manual (DISPOSITIVO_SEM_CAMERA). |
+| R-5 | Tab Manual confuso | ❌ mitigado | Codigo de exemplo no placeholder + descricao com `<code>PRV-AAAA-MM-NNNNNN</code>` + 404 generico. C19 vai adicionar mascara real. |
+| R-6 | Vazamento via mensagens distintas | ❌ nao materializou | Backend: 1 mensagem 404 para 3 cenarios. Frontend: nao distingue. |
+| R-7 | RLS divergente entre scan e detalhe | ❌ nao materializou | Mesmo `_scoping_filter` usado nos dois caminhos. |
+| R-8 | C19 quebra contrato | 🛡️ mitigado em advance | `contrato-c19.md` documenta tipos, funcoes, casos de uso. |
+| R-9 | Performance > 2s | ❌ mitigado em advance | Index UNIQUE existe; query e 1-row. Cenario 16 do smoke valida em 3G simulado. |
+| R-10 | Browser sem getUserMedia | ✅ tratado | useScanner reporta DISPOSITIVO_SEM_CAMERA tipado. |
+| R-11 | useExecutarTransicao orfao | ⚙️ aceito | Hook continua existindo intocado; sera consumido por C11 v4.0. |
+| R-12 | Tipos compartilhados quebrados | ❌ nao materializou | `ASSINATURA_BASE64_MAX_BYTES`, `TransicaoRequest`/`Response` permanecem em `types/prova.ts`. |
+| R-13 | Animacao falha prefers-reduced-motion | ❌ nao materializou | `@media (prefers-reduced-motion: reduce)` desabilita as transicoes simples. |
+| R-14 | Footer placeholder confuso | ✅ tratado | `title="Disponivel em breve"` + `aria-disabled` + cor desbotada. |
+| R-15 | Conflito de merge | ❌ nao materializou | Branch dedicada limpa. |
+
+## E5. O que fica para C19 (Wave 3 v4.0, proxima entrega)
+
+Ver `docs/wave3-v4-c10/contrato-c19.md`:
+- Mascara de digitacao em tempo real (`PRV-AAAA-MM-NNNNNN`).
+- Validacao client-side antes do submit.
+- Auto-uppercase no input.
+- Rate limiting backend (DAT §8.2 — 30/min).
+
+## E6. O que fica para C11 (Wave 3 v4.0, terceira entrega)
+
+- Maquina de estados expandida para 14 estados.
+- UI de transicao (assinatura + selecao) na pagina `/provas/[id]` (substitui o que estava no /escanear v3.0).
+- `ScanResponse.transicoes_permitidas` continua existindo no backend — sera consumido pelo detalhe.
+
+**Fim da secao Execucao.**

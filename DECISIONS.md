@@ -5422,3 +5422,125 @@ positivo de saude do sistema.
 **Consequencias:**
   - Confirma que o escopo do C08 foi respeitado (frontend-only).
   - Proxima auditoria pode usar este ADR como baseline de comparacao.
+---
+
+## ADR-132 — Lookup polimorfico no scan: codigo_publico vs nro_requerimento (Wave 3 v4.0 / Componente 10)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10)
+**Contexto:** A Wave 2 v4.0 (ADR-116) introduziu `codigo_publico` no
+segundo campo do payload do QR Code. As 16 provas pre-migration-012
+ainda tem QR antigo com `nro_requerimento` no segundo campo. A
+1 prova MATRIZ pos-migration tem QR novo. **Bug em producao
+identificado em Gate 1 / R-1:** `scan_prova` fazia lookup por
+`nro_requerimento` mesmo quando recebia `codigo_publico` —
+provas v4.0 nao escaneavam.
+
+**Decisao:** No handler `scan_prova` (apos extrair
+`identificador` do segundo campo do payload), invocar
+`validar_formato_codigo_publico(identificador)`:
+  - Se True → `_carregar_prova_por_codigo_publico_com_scoping`.
+  - Se False → `_carregar_prova_por_nro_req_com_scoping` (fallback
+    legacy).
+
+Ambos os helpers compartilham mesma assinatura/retorno e usam
+`_scoping_filter(user)` (semantica RLS preservada).
+
+**Alternativas:**
+  - Forcar regenarcao das 16 etiquetas legacy ja nesta wave (rejeitado:
+    e Wave 7 / Componente 21 escopo).
+  - Tentar 2 SELECTs sequenciais (1 por codigo_publico, fallback nro_req)
+    (rejeitado: latencia 2x desnecessaria; `validar_formato_codigo_publico`
+    e regex puro <1us).
+  - SELECT com OR `codigo_publico = X OR nro_requerimento = X`
+    (rejeitado: nao usa indice unique, full scan; nao distingue origem).
+
+**Consequencias:**
+  - Provas v4.0 escaneam corretamente (bug R-1 corrigido).
+  - Provas legacy continuam funcionando ate Wave 7.
+  - Audit log inclui `codigo_publico` em ambos os caminhos para
+    rastreabilidade.
+  - Cobertura: `test_scan_camera_v4_qr_com_codigo_publico_resolve_pelo_codigo`
+    + `test_scan_camera_legacy_qr_continua_funcionando_via_fallback`.
+
+---
+
+## ADR-133 — Camada de servico de identificacao desacoplada de hardware (Wave 3 v4.0 / C10)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10)
+**Contexto:** O Backlog v4.0 (Componente 10) e DAT v3.0 §8.1 exigem
+idempotencia entre camera (C10) e digitacao manual (C19) — ambos
+mecanismos resolvem para o mesmo registro pelo mesmo lookup. Sem uma
+camada compartilhada, C19 vai duplicar logica de transporte HTTP +
+mapeamento de erro + autenticacao.
+
+**Decisao:** Criar `frontend/src/lib/services/identificacao-prova.ts`
+com 2 funcoes publicas:
+  - `identificarProvaPorPayload(payload, getToken)` — caminho camera.
+  - `identificarProvaPorCodigo(codigo, getToken)` — caminho manual / C19.
+
+Tipos compartilhados:
+  - `CodigoErro` enum: 5 codigos tipados.
+  - `ResultadoIdentificacao` tagged union (sucesso | erro).
+
+**Constraint dura:** zero acoplamento com DOM/camera/html5-qrcode.
+Vitest roda o modulo em `environment: node`. Teste especial faz
+regex contra `navigator.`/`document.`/`window.`/`html5-qrcode`
+no source — quebra o build se alguem reintroduzir acoplamento.
+
+**Alternativas:**
+  - Hook React `useIdentificarProva` (rejeitado: hook ja exige
+    React + JSDOM; queremos servico testavel em Node puro).
+  - Fetch direto na page (rejeitado: duplicaria logica entre /escanear
+    e o futuro componente do C19).
+  - Backend separado (rejeitado: Backlog v4.0 nao requer endpoint
+    novo; `/scan` ja foi estendido).
+
+**Consequencias:**
+  - C19 herda contrato pronto. Documentado em `docs/wave3-v4-c10/contrato-c19.md`.
+  - Camada e testavel sem mock de camera (16 testes Vitest verdes).
+  - Tipos sao reusaveis em qualquer ponto futuro que precise mapear
+    erros do scan.
+
+---
+
+## ADR-134 — Tab Manual entregue como shell funcional + placeholder PRV-AAAA-MM-NNNNNN (Wave 3 v4.0 / C10)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10)
+**Contexto:** Tres orientacoes do Mario no pre-Gate-2 convergem:
+  1. Q2: implementar a tab Manual como **shell funcional** (input +
+     botao chamando a camada de servico) sem mascara/realtime-validate
+     — esses sao escopo do C19.
+  2. Q3: footer "Ultima leitura ha N min" + link "Ver historico" virou
+     placeholder visual — sem dados reais.
+  3. Q4: input usa `PRV-AAAA-MM-NNNNNN` (formato real do produto)
+     em vez de `3S- XXXX-XXXX` que o Figma ainda mostrava.
+
+**Decisao 1 (Q2):** `<ManualPanel>` na page renderiza:
+  - h2 + descricao com `<code>PRV-AAAA-MM-NNNNNN</code>`.
+  - Input com `placeholder=PRV-AAAA-MM-NNNNNN`, `autoCapitalize=characters`,
+    `spellCheck=false`, `aria-invalid`/`aria-describedby`.
+  - Botao "Buscar prova →" desabilita quando vazio.
+  - Submit chama `identificarProvaPorCodigo` direto + redireciona
+    para `/provas/[id]` em sucesso.
+  - Banner de erro inline com `role="alert"`.
+
+**Decisao 2 (Q3):** `<CardFooter>` renderiza:
+  - "Ultima leitura ha —" (em-dash literal, sem dados).
+  - Link "Ver historico →" com `aria-disabled` + cor desbotada +
+    `title="Disponivel em breve"`.
+
+**Decisao 3 (Q4):** Placeholder do input segue formato real. Divergencia
+explicita do Figma documentada em `figma-references.md`.
+
+**Alternativas:**
+  - Q2 alternativa: tab Manual como skeleton estatico (rejeitado: quebraria
+    o fluxo "shell + chamada do servico" que da contrato pronto ao C19).
+  - Q3 alternativa: omitir o footer (rejeitado: divergiria visualmente
+    do Figma sem motivo forte).
+  - Q4 alternativa: usar `3S-` no placeholder e implementar mapeamento
+    no backend (rejeitado: confunde produto, requer migration adicional).
+
+**Consequencias:**
+  - C19 nao precisa rewrite do tab Manual — apenas adiciona mascara,
+    auto-uppercase, validacao client-side, rate-limit.
+  - Footer fica como TODO de uma wave futura quando o endpoint de
+    "ultima leitura" existir (audit_log filtrado por user, ja disponivel
+    via C18). A11y mantida.
+  - Mario aprovou as 3 decisoes na resposta pre-Gate-2.

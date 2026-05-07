@@ -2,6 +2,105 @@
 
 ---
 
+## v4.0 — Wave 3 — Componente 10 (atualizacao v4.0) — Scanner reformulado + Camada de servico desacoplada
+**Data:** 2026-05-06
+**Branch:** `wave3-v4/componente-10`
+**Status:** Implementacao Gate 2 completa, aguardando smoke-validation.md (humano) + PR final.
+
+### Adicionado
+- **`frontend/src/lib/services/identificacao-prova.ts`** — camada de servico
+  desacoplada de hardware/DOM. Funcoes `identificarProvaPorPayload`
+  (camera) e `identificarProvaPorCodigo` (manual / contrato C19). Tipos
+  `CodigoErro` (5 codigos: `QR_INVALIDO`, `PROVA_NAO_ENCONTRADA`,
+  `DISPOSITIVO_SEM_CAMERA`, `ERRO_REDE`, `SESSAO_EXPIRADA`) e
+  `ResultadoIdentificacao` (tagged union sucesso | erro). Mensagens em
+  pt-BR pre-resolvidas. Helper `criarErro(codigo)`.
+- **`frontend/src/lib/services/__tests__/identificacao-prova.test.ts`**
+  — 16 testes Vitest em `environment: node`, cobrindo: caminho payload
+  com 200 e 5 erros; caminho codigo com 200 e 5 erros; getToken
+  null/throw; body XOR; Authorization header; mensagens pt-BR;
+  helper `criarErro`; teste anti-acoplamento (regex contra DOM).
+- **`docs/wave3-v4-c10/analysis.md`** — Gate 1 (read-only) + Secao
+  Execucao (diff entre proposto e entregue, riscos materializados,
+  plano para C19/C11).
+- **`docs/wave3-v4-c10/contrato-c19.md`** — documento dedicado para
+  o C19 ler. Tipos, funcoes, casos de uso, roteiro de implementacao.
+- **`docs/wave3-v4-c10/smoke-validation.md`** — 20 cenarios para
+  Mario percorrer antes do PR final.
+- **`docs/wave3-v4-c10/figma-references.md`** — guia para Mario
+  adicionar os PNGs do Figma ao repo.
+- **`backend/app/api/v1/provas.py:_carregar_prova_por_codigo_publico_com_scoping`**
+  — helper canonico v4.0+ usando `idx_provas_codigo_publico`.
+- **3 novos icones** em `components/icons.tsx`: `CameraIcon`,
+  `KeyIcon`, `ArrowRightIcon`.
+
+### Modificado
+- **Bug em producao corrigido (R-1):** `scan_prova` agora detecta
+  formato no segundo campo do payload (`validar_formato_codigo_publico`)
+  e usa o lookup correto. Provas v4.0 (1 hoje, mais conforme uso)
+  voltam a escanear. Provas legacy v3.0 continuam funcionando via
+  fallback.
+- **`backend/app/domain/schemas/prova.py:ScanRequest`** — agora aceita
+  `payload: str | None` XOR `codigo: str | None` via `model_validator`.
+  Mensagem clara quando ambos ou nenhum vem preenchidos.
+- **`backend/app/api/v1/provas.py:scan_prova`** — handler reescrito
+  com 2 caminhos (camera/manual) + lookup polimorfico. Audit log
+  inclui novo campo `origem` ('camera' | 'manual') e sempre inclui
+  `codigo_publico` da prova.
+- **`frontend/src/hooks/useScanner.ts`** — agora expoe
+  `errorCode: CodigoErro | null` (sempre `DISPOSITIVO_SEM_CAMERA` em
+  falha) alem do `error: string` legacy.
+- **`frontend/src/lib/types/prova.ts:ScanRequest`** — tipos atualizados
+  para suportar `payload?` XOR `codigo?`.
+- **`frontend/src/components/icons.tsx`** — +3 icones.
+
+### Reescrito
+- **`frontend/src/app/(dashboard)/escanear/page.tsx`** — 740 LOC v3.0 →
+  414 LOC v4.0. Removidos `AssinaturaModal`, `ScanReadyView`,
+  `DoneView`, `ACTION_LABELS`, `useExecutarTransicao` (transicao
+  migra para `/provas/[id]` no C11 v4.0). Nova UI fiel ao Figma:
+  toggle pill Camera/Manual, painel da camera com preview/live,
+  painel manual com input PRV + botao "Buscar prova →", footer
+  placeholder, banners de erro contextuais.
+- **`frontend/src/app/(dashboard)/escanear/escanear.module.css`** —
+  589 LOC v3.0 → 433 LOC v4.0. Tokens canonicos do projeto. Sem
+  cores hardcoded. Brackets viewfinder, QR mock decorativo, camera
+  live overlay, responsividade em 2 breakpoints,
+  `prefers-reduced-motion` respeitado.
+
+### Removido
+- **`frontend/src/hooks/useScanProva.ts`** — superseded pela camada
+  de servico desacoplada.
+- Codigo morto da v3.0: maquina de estados PageState completa
+  (signing/submitting/done), modal de assinatura,
+  `react-signature-canvas` import, lista de transicoes na pagina.
+
+### Cobertura
+- Backend: **825 testes (816 passed + 9 skipped)** — era 805 + 9.
+  +20 testes novos.
+- Frontend Vitest: **44 testes (4 test files)** — era 28. +16 novos.
+- TypeScript: `npx tsc --noEmit` exit 0.
+- Build: `npx next build` 13/13 paginas. `/escanear` 5.25 kB / 168 kB
+  First Load (era ~9 kB / 175 kB).
+- Advisor MCP Supabase: sem novos alertas.
+
+### Migrations
+- **Zero.** Coluna + indice unique de `codigo_publico` ja em
+  producao via migration 012 (Wave 2 v4.0). RLS inalterada.
+
+### ADRs novos
+- **ADR-132** — Lookup polimorfico no scan (codigo_publico vs nro_requerimento).
+- **ADR-133** — Camada de servico de identificacao desacoplada de hardware.
+- **ADR-134** — Tab Manual entregue como shell funcional + placeholder PRV-AAAA-MM-NNNNNN.
+
+### Pendencias
+- Smoke E2E manual (Mario percorre `smoke-validation.md` 20 cenarios)
+  antes do PR para `development`.
+- Adicao manual dos PNGs do Figma ao repo (instrucoes em
+  `docs/wave3-v4-c10/figma-references.md`).
+
+---
+
 ## [2026-05-05 — Wave 2 v4.0 — Correcoes Pos-Auditoria Senior]
 
 Sessao de correcao dos 26 achados do `docs/wave2-v4/audit-report.md`
