@@ -5828,3 +5828,60 @@ e explicita para os dois lados.
 identico nos 2 tabs apos a correcao.
 
 ---
+
+## ADR-140 — Timing differential 422 vs 404 no caminho camera (defesa em profundidade)
+
+**Data:** 2026-05-11 (Wave 3 v4.0 — Pos-Auditoria)
+**Resolve:** AUD-W3C10-005 (medio — sem ADR original)
+
+**Contexto:** o handler `POST /api/v1/provas/scan` no caminho camera
+tem fluxo em 2 fases:
+
+1. **SELECT com scoping (`_scoping_filter`)** — retorna 404 generico se
+   linha nao volta (cobre 3 cenarios indistinguiveis: prova inexistente,
+   formato do identificador invalido, ou prova existe mas fora do scope
+   RLS).
+2. **Validacao de hash via `qrcode_service.validar_payload_qr`** — se
+   o lookup encontrou linha mas o hash truncado nao bate, retorna 422
+   "QR Code nao corresponde a prova esperada".
+
+A auditoria levantou: atacante que sabe um `codigo_publico` valido de
+**prova in scope** pode forjar payload com hash errado. Recebe 422.
+Repete com `codigo_publico` de **prova fora do scope** (ou inexistente):
+recebe 404. **Conclusao:** 422 vs 404 sinaliza existencia "in scope" vs
+"nao".
+
+**Avaliacao do risco real:**
+
+- O atacante precisa **ja conhecer** um `codigo_publico` valido para
+  isolar a diferenca. Se ele conhece, ele ja consegue acessar a prova
+  via outros endpoints (RLS deixa passar — e prova in scope dele).
+- Para outros usuarios (`codigo_publico` que ele NAO conhece), `_scoping_filter` filtra ANTES da validacao de hash. 404 e
+  retornado sem nem chegar na validacao. Sem timing differential.
+- **Vetor de enumeracao real = 0.** O 422 so dispara para provas que
+  o atacante ja tem acesso.
+
+**Decisao:** **manter o comportamento atual** (validacao de hash apos
+lookup) como **defesa em profundidade**:
+
+- Evita gastar timing em casos invalidos massivos (validar hash sem
+  saber se prova existe seria CPU wasted).
+- Em escala (>1000 linhas), `idx_provas_codigo_publico` UNIQUE evita
+  o full scan e o lookup e O(log n).
+- O caminho **manual** ja garante anti-enumeracao perfeita via
+  `validar_formato_codigo_publico` ANTES do SELECT (retorna 404
+  generico sem ir ao banco — AUD-W3C10-005 nao se aplica a manual).
+- O caminho **camera** depende de o atacante ja conhecer um codigo
+  in-scope — pre-requisito que ja implica acesso legitimo.
+
+**Alternativa rejeitada:** retornar 404 para hash invalido tambem.
+Custo: perde sinal forense de "QR adulterado" (com AUD-W3C10-010,
+agora gravamos `payload_recebido` no audit log — investigacao
+continua possivel). Beneficio: zero, ja que vetor real = 0.
+
+**Consequencias:**
+- Status quo preservado.
+- Documentacao explicita do raciocinio para auditorias futuras.
+- Cross-link com AUD-W3C10-010 (payload bruto no audit log) que mitiga
+  cenario forense complementar.
+
