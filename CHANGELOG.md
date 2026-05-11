@@ -2,6 +2,76 @@
 
 ---
 
+## v4.0 — Wave 3 — Componente 19 — Fallback de Digitacao Manual (2026-05-11)
+
+**Branch:** `wave3-v4/componente-19`
+**Tipo:** componente NOVO na v4.0 (RF-005 / US-002 / Backlog item 19).
+**Escopo:** frontend-only — ativa logica em UI ja entregue pelo C10.
+
+### Adicionado
+
+- **`frontend/src/lib/codigo-publico.ts`** (139 LOC) — util puro com:
+  - `CODIGO_PUBLICO_REGEX` (paridade com backend `validar_formato_codigo_publico`).
+  - `ALFABETO_SUFIXO` (`ABCDEFGHJKMNPQRSTUVWXYZ23456789` — 31 chars sem 0/O/1/I/L).
+  - `aplicarMascara(raw)` — auto-uppercase, strip do prefixo PRV-, hifens automaticos, **bloqueio rigido por posicao** (ano/mes=digitos, sufixo=alfabeto), truncamento em 14 chars.
+  - `montarCodigoCompleto(display)` — prepende "PRV-" para envio ao backend.
+  - `validarFormatoCodigoPublico` / `isDisplayCompleto` / `isCharValidoEmPosicaoSemHifen`.
+- **`frontend/src/hooks/useCodigoPrvInput.ts`** (68 LOC) — hook React (binding sobre funcoes puras) expondo `display`, `codigoCompleto`, `isComplete`, `isFormatValid`, `setFromInput`, `reset`.
+- **43 testes Vitest novos** em `lib/__tests__/codigo-publico.test.ts`:
+  - Paridade com backend (casos copiados de `test_codigo_publico_service`).
+  - Mascara incremental (parcial, completo, paste de prefixo, idempotencia).
+  - Bloqueio rigido por posicao (letra no ano descartada, 0/O/1/I/L no sufixo descartados).
+  - Truncamento + tipos nao-string.
+  - Integracao mascara → validacao.
+
+### Modificado
+
+- **`frontend/src/app/(dashboard)/escanear/page.tsx`** (+133 / -21 LOC):
+  - `<ManualPanel>` agora recebe `display` / `isFormatValid` / `onChange` / `onTentarNovamente` do container.
+  - **Validacao client-side** ANTES de chamar o backend — botao "Buscar prova" so habilita com formato completo.
+  - **Anti-enumeracao em camada UI (D7):** `MENSAGENS_C19` mapeia `QR_INVALIDO` para "Prova nao encontrada." (mesma mensagem do 404 generico do backend). Falha client-side e 422 backend resultam em mensagem identica ao 404 — preserva DAT v3.0 §8.2.
+  - **Reset do banner ao editar (D8):** `handleManualChange` zera `manualState` quando estava em error.
+  - **Foco automatico no `<input>`** ao mount do `<ManualPanel>` (R-8 / D10) — `useRef` + `useEffect([])`. Dispara em cada troca para tab Manual via `AnimatePresence mode="wait"`.
+  - **Label sr-only estendida:** "Codigo da prova no formato PRV-AAAA-MM-NNNNNN".
+  - **Hint sr-only adicional** (`id="manual-hint"`) com instrucoes do alfabeto. `aria-describedby` alterna entre `#manual-error` e `#manual-hint` conforme estado (D10).
+  - **Botao "Tentar novamente"** no estado `ERRO_REDE` — reset sem mexer no codigo digitado (R-10).
+  - **`maxLength={14}`** no input (display sem prefixo) — defesa em profundidade alinhada ao backend `max_length=32`.
+  - `codigoInput` preservado ao alternar para tab Camera (R-9) — usuario nao perde digitacao parcial.
+- **`docs/wave3-v4-c10/contrato-c19.md`** — secao 7 "Status: Entrega Completa" com casos de uso consumidos + decisoes D1-D10 + validacao numerica.
+- **`docs/wave3-v4-c19/analysis.md`** — apendice "Execucao" registrando diffs entre proposta Gate 1 e o feito.
+- **`DECISIONS.md`** — ADRs 141 a 145 (mascara manual; bloqueio rigido por posicao; uniformizacao QR_INVALIDO→PROVA_NAO_ENCONTRADA; foco automatico + a11y; rate-limit follow-up).
+- **`CLAUDE.md`** — secao "Identificacao de provas" com nota: "C19 entregue — mascara client-side ativa, validacao de formato espelha o backend, foco automatico, anti-enumeracao preservada na UI."
+
+### Inalterado (proibido pelo prompt)
+
+- **`frontend/src/lib/services/identificacao-prova.ts`** — contrato consumido sem modificacao.
+- **`backend/`** — zero touch (zero migration, zero RLS, zero advisor novo).
+- **`shared/access-matrix.json`** — `scanner` rule inalterada (full × 4 perfis).
+
+### Follow-up obrigatorio (DECISAO D1)
+
+**Rate limiting backend** (DAT v3.0 §8.2 + Backlog C19 Notas Tecnicas): 30 tentativas/min/usuario com resposta 429 → novo codigo `RATE_LIMITED` na camada de servico. **Nao incluido nesta sessao** (prompt explicitamente escopa C19 como frontend-only). Registrado em `analysis.md §13 R-1` e em ADR-145 como **FOLLOW-UP OBRIGATORIO antes do PR para `main`** — sessao separada (ou C20+) com `slowapi` no `/scan` filtrado por `current_user.id`.
+
+Defesa em profundidade corrente cobre enumeracao em rajada (RLS antes da resposta + formato validado antes do SELECT + 404 generico unificado + alfabeto sem ambiguos com 31^6=887M combinacoes/mes + audit log com `codigo_recebido` truncado) — mitiga descoberta lenta com confianca, mas nao substitui o rate-limit prescrito pelo DAT.
+
+### Validacao numerica
+
+| Metrica | Pos-C10 (b406030) | Pos-C19 |
+|---|---|---|
+| Vitest tests | 46 | **89** (+43) |
+| tsc --noEmit | exit 0 | exit 0 |
+| next build | 13/13 paginas | 13/13 paginas |
+| Bundle `/escanear` | 7.68 kB / 210 kB | **8.31 kB / 210 kB** (+0.63 kB Size; First Load inalterado) |
+| MCP advisors security | 2 (pre-existentes) | 2 (mesmos) |
+| MCP advisors performance | 13 (pre-existentes) | 13 (mesmos) |
+| Migrations | — | **zero** |
+
+### Smoke E2E manual (DEFERRED)
+
+Conforme padrao do C10 (AUD-W3C10-003), o smoke E2E completo do tab Manual em producao fica para Mario executar antes do PR final para `main`. Cenarios prioritarios estao em `docs/wave3-v4-c19/smoke-validation.md`.
+
+---
+
 ## v4.0 — Wave 3 — Componente 10 — Correcoes Pos-Auditoria (2026-05-11)
 **Data:** 2026-05-11
 **Branch:** `wave3-v4-c10/fixes/execution`

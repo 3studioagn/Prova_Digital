@@ -5885,3 +5885,236 @@ continua possivel). Beneficio: zero, ja que vetor real = 0.
 - Cross-link com AUD-W3C10-010 (payload bruto no audit log) que mitiga
   cenario forense complementar.
 
+## ADR-141 — Mascara de digitacao manual implementada in-house (sem nova dep)
+
+**Data:** 2026-05-11 (Wave 3 v4.0 — Componente 19)
+**Resolve:** D3 do `docs/wave3-v4-c19/analysis.md §15`.
+
+**Contexto:** o Componente 19 (Fallback de Digitacao Manual) precisa de
+mascara em tempo real para o input do codigo `PRV-AAAA-MM-NNNNNN`. O
+`contrato-c19.md §3.1` sugere "lib `imask` ou implementacao manual com
+`useState`". Avaliacao: a mascara tem regra triviais (2 separadores
+fixos em posicoes determinadas + alfabeto por posicao); `imask`
+adicionaria ~8-15 kB ao bundle; o frontend ja carrega `framer-motion`
+12.38 (~50 kB) e `html5-qrcode` 2.3.8 — adicionar mais uma dep para
+14 chars de input seria desproporcional.
+
+**Decisao:** implementar `aplicarMascara(raw)` como funcao pura em
+`frontend/src/lib/codigo-publico.ts`. Algoritmo:
+
+1. `raw.toUpperCase()`.
+2. Strip de `^PRV-?/i` (paste-friendly).
+3. Itera chars; descarta hifens; valida cada char com
+   `isCharValidoEmPosicaoSemHifen(c, pos)` (ano/mes = digitos 0-9;
+   sufixo = `ALFABETO_SUFIXO`).
+4. Coleta no maximo 12 chars significativos.
+5. Re-insere hifens em pos 4 (ano|mes) e pos 7 (mes|sufixo).
+
+Hook React `useCodigoPrvInput` (em `hooks/useCodigoPrvInput.ts`) faz
+binding: `setDisplay(aplicarMascara(raw))` no `onChange`. Computa
+`codigoCompleto = "PRV-" + display` via `montarCodigoCompleto`.
+
+**Alternativa rejeitada:** `react-imask` (~12 kB) — overhead sem ganho
+funcional; obriga a aprender API; testes do React precisam de
+`jsdom`+`@testing-library/react` (proibido por D-13 da Wave 1 v4.0).
+
+**Consequencias:**
+- 43 testes Vitest cobrindo a util pura — verde imediato sem JSDOM.
+- Idempotencia formal: `aplicarMascara(aplicarMascara(x)) === aplicarMascara(x)`.
+- Bundle delta `/escanear`: +0.63 kB total (era 7.68 → 8.31 kB).
+- Util reusavel por C20+ caso outro fluxo (ex.: filtros de listagem
+  por codigo publico) precise da mesma mascara.
+
+## ADR-142 — Bloqueio rigido por posicao na mascara do C19
+
+**Data:** 2026-05-11 (Wave 3 v4.0 — Componente 19)
+**Resolve:** R-4 + D5 do `docs/wave3-v4-c19/analysis.md`.
+
+**Contexto:** DAT v3.0 §8.3 e
+`backend/app/services/codigo_publico_service.py` deixam claro que o
+alfabeto sem ambiguos (`ABCDEFGHJKMNPQRSTUVWXYZ23456789`) vale apenas
+para o **sufixo NNNNNN**; ano e mes sao digitos 0-9 puros. Um bloqueio
+"global" (recusar `0`/`O`/`1`/`I`/`L` em qualquer posicao) impediria
+o usuario de digitar dezenas de anos validos (`2010`, `2011`, `2020`,
+etc.) e dezenas de meses (`01`, `10`, `11`, `12`).
+
+Tres opcoes consideradas:
+
+(a) **Permissivo** — aceita qualquer char; validacao so no submit.
+    Rejeitado: UX confusa, usuario nao percebe erro ate clicar e ver
+    banner generico.
+(b) **Bloqueio global pelo alfabeto do sufixo** — descarta `0`/`O`/etc
+    sempre. Rejeitado: bloqueia ano `2010`.
+(c) **Bloqueio por posicao** — chars validos dependem do indice no
+    display sem hifens. Adotado.
+
+**Decisao:** `isCharValidoEmPosicaoSemHifen(c, pos)`:
+
+- pos 0-3 (ano): `c >= "0" && c <= "9"`.
+- pos 4-5 (mes): `c >= "0" && c <= "9"` (validacao de range 01-12
+  acontece apenas no submit, via regex final — mes "00" ou "13" e
+  formato invalido mas digitavel ate o submit).
+- pos 6-11 (sufixo): `ALFABETO_SUFIXO.includes(c)`.
+
+**Consequencias:**
+- Usuario que tenta digitar `A` no ano: char nao aparece (D5 rigido).
+- Usuario que digita `2010` (ano legitimo) no inicio: char aparece.
+- Usuario que digita `0` no sufixo: char descartado.
+- Codigo do tipo "mes invalido" (ex.: `2026-13-AAAAAA`) — chega ao
+  validar_formato_codigo_publico, falha, e uniformizado para
+  "Prova nao encontrada." pela mensagemFinal (anti-enumeracao via D7).
+
+## ADR-143 — Uniformizacao client-side de QR_INVALIDO -> "Prova nao encontrada."
+
+**Data:** 2026-05-11 (Wave 3 v4.0 — Componente 19)
+**Resolve:** D7 + R-3 do `docs/wave3-v4-c19/analysis.md`.
+
+**Contexto:** a camada de servico do C10 (`identificacao-prova.ts`) ja
+retorna `PROVA_NAO_ENCONTRADA` com mensagem "Prova nao encontrada."
+para os 3 cenarios do backend 404 (formato invalido / inexistente /
+fora do scope) — anti-enumeracao DAT §8.2.
+
+Porem `QR_INVALIDO` (vindo de 422 backend OR de validacao client-side
+no proprio C19) tem mensagem default "QR Code nao reconhecido.
+Verifique se esta escaneando uma etiqueta de prova." Essa mensagem
+**revela** que o codigo nao passou na validacao basica — vetor de
+distincao com o 404 generico. Um atacante metodico pode tentar codigos
+mal-formados e medir "QR Code nao reconhecido" vs "Prova nao
+encontrada" para inferir o conjunto de codigos com formato
+valido — pre-screening da enumeracao real.
+
+**Decisao:** em `frontend/src/app/(dashboard)/escanear/page.tsx`,
+definir:
+
+```ts
+const MENSAGENS_C19: Partial<Record<CodigoErro, string>> = {
+  QR_INVALIDO: "Prova nao encontrada.",
+};
+function mensagemFinal(codigo: CodigoErro): string {
+  return MENSAGENS_C19[codigo] ?? mensagemPara(codigo);
+}
+```
+
+E aplicar `mensagemFinal` no submit handler quando:
+
+- Validacao client-side falha (regex local) — `setManualState({ codigo: "QR_INVALIDO", mensagem: mensagemFinal("QR_INVALIDO") })`.
+- Backend retorna 422 (codigo > 32 chars) — `result.codigo === "QR_INVALIDO"` cai no `mensagemFinal(result.codigo)`.
+- Backend retorna 404 — `result.codigo === "PROVA_NAO_ENCONTRADA"` cai no fallback `mensagemPara("PROVA_NAO_ENCONTRADA")` que ja diz "Prova nao encontrada.".
+
+**Consequencias:**
+- Anti-enumeracao preservada na camada UI mesmo quando o backend
+  retorna 422.
+- Sacrificio: usuario que digitou errado nao recebe feedback "use o
+  formato PRV-..." — porem o `<placeholder>` + label sr-only + hint
+  sr-only ja orientam.
+- Vetor de timing diferenciado entre "client rejeitou" e "404 backend"
+  e teoricamente menor (sem latencia de rede), mas em ataques reais
+  (descoberta lenta, nao automatizada) e indistinguivel — mensagem
+  identica acomoda.
+
+## ADR-144 — Foco automatico + a11y aprofundada no tab Manual do C19
+
+**Data:** 2026-05-11 (Wave 3 v4.0 — Componente 19)
+**Resolve:** D10 + R-8 do `docs/wave3-v4-c19/analysis.md`.
+
+**Contexto:** o fallback de digitacao manual e o caminho para usuarios
+com necessidade de acessibilidade ou dispositivo sem camera (RNF-008).
+A UX precisa ser excelente para esses usuarios.
+
+**Decisoes:**
+
+1. **Foco automatico no `<input>` ao mount do `<ManualPanel>`** —
+   `useRef<HTMLInputElement>` + `useEffect(() => inputRef.current?.focus(), [])`.
+   Dispara em cada troca para tab Manual (AnimatePresence mode="wait"
+   remonta o panel). WCAG 2.4.3 aceita foco programatico em mount
+   inicial.
+
+2. **Label sr-only estendida:** `"Codigo da prova no formato
+   PRV-AAAA-MM-NNNNNN"` (era apenas "Codigo da prova"). Ajuda leitor
+   de tela a saber o que digitar.
+
+3. **Hint sr-only adicional** com `id="manual-hint"`: "Digite 4
+   digitos para o ano, 2 digitos para o mes e 6 caracteres
+   alfanumericos do alfabeto sem chars ambiguos (sem zero, O, um, I
+   ou L). Hifens sao inseridos automaticamente."
+
+4. **`aria-describedby` dinamico** no `<input>`: aponta para
+   `#manual-error` quando ha erro; para `#manual-hint` caso contrario.
+   Garante orientacao em ambos os modos sem duplicar texto na tela.
+
+5. **Botao "Tentar novamente"** no estado `ERRO_REDE` — link visual
+   com estilo `.linkButton` reusado do banner DISPOSITIVO_SEM_CAMERA
+   do C10. Reseta `manualState` para `idle` SEM mexer no codigo
+   digitado (R-10), permitindo nova tentativa apos restabelecer
+   conexao.
+
+**Consequencias:**
+- Usuario de leitor de tela ouve: "Codigo da prova no formato
+  PRV-AAAA-MM-NNNNNN. Digite 4 digitos para o ano..." ao focar.
+- Em erro: "Codigo da prova no formato PRV-AAAA-MM-NNNNNN. [mensagem
+  do banner]" (foco preserva, banner com role="alert" anuncia).
+- Smoke axe-core obrigatorio antes do PR — DEFERRED ate Mario rodar.
+
+## ADR-145 — Rate limiting backend do `/scan` permanece como follow-up
+
+**Data:** 2026-05-11 (Wave 3 v4.0 — Componente 19)
+**Resolve:** D1 + R-1 do `docs/wave3-v4-c19/analysis.md` —
+**FOLLOW-UP OBRIGATORIO antes do PR para `main`**.
+
+**Contexto:** DAT v3.0 §8.2 e
+`BACKLOG_RastreioProvasDigitais_v4_0.docx` (Componente 19, Notas
+Tecnicas) ambos exigem rate limiting no endpoint de identificacao:
+**"30 tentativas por usuario autenticado por minuto. Excedido,
+retorna 429."**
+
+O prompt da sessao do C19 escopa explicitamente o componente como
+**frontend-only** e proibe modificar o endpoint backend. Citacao do
+prompt §1 "O que esta sessao NAO ENTREGA":
+
+> Não modifica o endpoint backend de identificação — entrega do C10.
+> Apenas consume.
+
+**Defesa em profundidade corrente (suficiente para descoberta lenta,
+insuficiente contra automacao em rajada):**
+
+| Camada | Status | Cobertura |
+|---|---|---|
+| Validacao de formato client-side | ✅ (C19) | Reduz disparos desnecessarios; nao bloqueia atacante consciente |
+| Validacao de formato backend antes do SELECT | ✅ (C10) | 404 generico imediato; sem ida ao banco |
+| RLS deny-by-default antes da resposta | ✅ (W1 v4.0) | Mesma resposta para fora-do-scope |
+| Mensagens unificadas (404 generico + 422 → "Prova nao encontrada.") | ✅ (C10 + C19) | Anti-enumeracao DAT §8.2 |
+| Audit log com `codigo_recebido` truncado | ✅ (AUD-W3C10-010) | Rastreabilidade forense de tentativas |
+| Entropia: alfabeto 31^6 = 887M combinacoes/mes | ✅ (DAT §8.3) | Adversario precisa de ~10^8 tentativas |
+| **Rate limit 30/min/user → 429** | ❌ **AUSENTE** | Sem ele, automacao pode tentar 60+/min via API direta |
+
+**Decisao:** rate limiting NAO incluido nesta sessao. Registrado
+como **achado de follow-up obrigatorio** que deve ser tratado em
+sessao separada ANTES do PR final para `main`.
+
+**Plano para a sessao de follow-up (referencia):**
+
+1. **Backend** (`backend/app/api/v1/provas.py`): adicionar
+   `slowapi` (ou alternativa equivalente) com decorador
+   `@limiter.limit("30/minute")` no endpoint `POST /scan`,
+   filtrado por `current_user.id`. Aplicar APENAS ao caminho
+   `body.codigo` (manual) — o caminho `body.payload` (camera) tem
+   superficie de ataque diferente (atacante precisa do payload
+   completo + hash, vetor real = 0 conforme ADR-140).
+2. **Camada de servico** (`frontend/src/lib/services/identificacao-prova.ts`):
+   estender `CodigoErro` com `RATE_LIMITED`. Mapear 429 →
+   `RATE_LIMITED` em `_mapearErro`. Mensagem padrao: "Muitas
+   tentativas. Aguarde alguns minutos e tente novamente."
+3. **C19** (`page.tsx`): renderizar banner especifico para
+   `RATE_LIMITED` (countdown opcional se backend retornar
+   `Retry-After`).
+4. **Testes:** suite backend cobrindo 429 + headers; Vitest
+   cobrindo o novo codigo na uniao + mensagem.
+5. **Doc:** ADR fechando este follow-up.
+
+**Risco residual atual:** atacante com automacao pode tentar ~10^4
+codigos/minuto via Authorization header. Com 887M combinacoes/mes
+em uso, espaco-mes esta seguro, mas espaco-dia (volume operacional
+de 17 provas hoje, projetado para ~200/mes em prod) e
+**descobrivel em ~horas** sem rate-limit. **Por isso o follow-up
+e OBRIGATORIO, nao opcional.**
+

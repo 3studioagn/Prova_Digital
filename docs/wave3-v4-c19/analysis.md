@@ -908,3 +908,85 @@ antes do primeiro commit no branch `wave3-v4/componente-19`.
 ---
 
 **Fim do Gate 1.**
+
+---
+
+## Apendice A — Execucao (Gate 2)
+
+**Data:** 2026-05-11
+**Branch de execucao:** `wave3-v4/componente-19`
+**Autorizacao:** "Pode prosseguir" (Mario, 2026-05-11) — interpretado
+como autorizacao com os defaults propostos para D1-D10.
+
+### A.1 Diff entre proposta (Gate 1) e o que foi feito (Gate 2)
+
+| Item proposto | Feito? | Diff |
+|---|---|---|
+| `frontend/src/lib/codigo-publico.ts` (regex + mascara + alfabeto por posicao) | ✅ | 139 LOC. Inclui `aplicarMascara`, `montarCodigoCompleto`, `validarFormatoCodigoPublico`, `isCharValidoEmPosicaoSemHifen`, `isDisplayCompleto`. |
+| `__tests__/codigo-publico.test.ts` com 15+ casos | ✅ | **43 testes** (mais do que o minimo). Cobre paridade backend, mascara incremental, bloqueio por posicao, idempotencia, integracao mascara→validacao. |
+| Hook `useCodigoPrvInput` (binding) | ✅ | 68 LOC em `hooks/useCodigoPrvInput.ts`. Sem testes Vitest dedicados (D9 confirmada — logica testavel ja nas funcoes puras; hook validado por E2E). |
+| Integracao no `<ManualPanel>` | ✅ | `page.tsx` +133 / -21 LOC. Substitui `useState("")` por `useCodigoPrvInput`. |
+| Foco automatico (R-8 / D10) | ✅ | `useRef` + `useEffect([])` no `<ManualPanel>`. Dispara em cada mount do panel (AnimatePresence `mode="wait"`). |
+| Label sr-only estendida + hint sr-only adicional | ✅ | `<label>` agora diz "Codigo da prova no formato PRV-AAAA-MM-NNNNNN". `<span id="manual-hint" sr-only>` com instrucoes do alfabeto. `aria-describedby` dinamico. |
+| `MENSAGENS_C19` uniformizando QR_INVALIDO → "Prova nao encontrada." (D7) | ✅ | Definido em `page.tsx` com `mensagemFinal` helper. Aplicado a validacao client-side e a mapeamento backend. |
+| Reset de banner no `onChange` (D8) | ✅ | `handleManualChange` zera `manualState` quando estava em error. |
+| Botao "Tentar novamente" em `ERRO_REDE` (R-10) | ✅ | `tentarNovamenteManual` chama `setManualState({ kind: "idle" })` sem mexer no input. |
+| `maxLength={14}` no input | ✅ | Defesa em profundidade alinhada ao backend. |
+| `codigoInput` preservado ao alternar tabs (R-9) | ✅ | `trocarParaCamera` continua zerando apenas `manualState`. |
+| Update do `contrato-c19.md` (Status: Entrega completa) | ✅ | Secao 7 adicionada com casos de uso, decisoes, validacao numerica. |
+| CHANGELOG, DECISIONS (ADRs 141-145), CLAUDE.md | ✅ | Apendices novos. |
+| `smoke-validation.md` do C19 | ✅ | 20 cenarios criados para Mario rodar antes do PR. |
+
+### A.2 Decisoes nao tomadas / desvios
+
+- **D1 (rate limit backend):** mantido como follow-up. ADR-145 documenta.
+- **R-2 (posicionamento do "PRV-"):** decisao **decoracao** confirmada
+  pelo Mario implicitamente — o `<span aria-hidden>` original do C10
+  foi preservado; `montarCodigoCompleto(display)` prepende "PRV-" no
+  submit. Sem novo edit visual.
+- **Auto-submit (D6):** confirmado NAO. Sem auto-submit.
+
+### A.3 Validacao numerica final
+
+| Metrica | Pos-C10 | Pos-C19 |
+|---|---|---|
+| Vitest tests | 46 | **89** (+43) |
+| tsc --noEmit | exit 0 | exit 0 |
+| next build | 13/13 paginas | 13/13 paginas |
+| Bundle `/escanear` | 7.68 kB / 210 kB | **8.31 kB / 210 kB** |
+| MCP advisors security | 2 | 2 (mesmos) |
+| MCP advisors performance | 13 | 13 (mesmos) |
+| Migrations | — | **zero** |
+
+### A.4 Sequencia de commits (4 funcionais + 1 docs)
+
+```
+63d8625 / 8dc6a92  docs(wave3-v4/c19): análise read-only pré-execução
+f5e3271  feat(wave3-v4/c19): util codigo publico (regex + mascara + alfabeto por posicao)
+f8f7492  feat(wave3-v4/c19): hook useCodigoPrvInput (binding sobre funcoes puras)
+6e42129  feat(wave3-v4/c19): ativa fallback de digitacao manual no <ManualPanel>
+[próximo] docs(wave3-v4/c19): contrato + CHANGELOG + DECISIONS + CLAUDE + analysis Execucao + smoke
+```
+
+### A.5 Smoke E2E manual (DEFERRED — humano)
+
+Criado em `docs/wave3-v4-c19/smoke-validation.md` com 20 cenarios.
+Mario executa antes do PR para `main`. Veredito >= 18/20 PASS para
+merge.
+
+### A.6 Pendencias bloqueantes para PR em `main`
+
+1. **Smoke E2E manual** acima — DEFERRED humano.
+2. **Rate limit backend** (ADR-145) — FOLLOW-UP OBRIGATORIO em
+   sessao separada.
+
+Pendencias nao-bloqueantes (ja resolvidas):
+- ✅ `tsc --noEmit` exit 0.
+- ✅ `vitest run` 89/89.
+- ✅ `next build` 13/13.
+- ✅ MCP advisors sem novos.
+- ✅ Documentacao viva atualizada.
+
+---
+
+**Fim do Apendice A — Execucao.**

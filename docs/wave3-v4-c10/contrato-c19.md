@@ -288,6 +288,106 @@ servico), o pull request do C19 deve:
   `codigo_publico`.
 - ✅ Mensagens 404 genericas (DAT §8.2).
 - ✅ Camada de servico desacoplada: testavel em Node (sem JSDOM).
-- ⏳ Rate limiting (DAT §8.2): C19 faz.
-- ⏳ Mascara de digitacao: C19 faz.
-- ⏳ Smoke E2E completo do fluxo manual: C19 faz.
+- ⏳ Rate limiting backend (DAT §8.2): **FOLLOW-UP OBRIGATORIO** — registrado
+  na entrega do C19 como achado para sessao separada antes do PR para `main`.
+- ✅ Mascara de digitacao: entregue pelo C19 (`lib/codigo-publico.ts` +
+  `useCodigoPrvInput`).
+- ⏳ Smoke E2E completo do fluxo manual: DEFERRED conforme padrao do C10
+  (Mario executa em producao antes do PR final).
+
+---
+
+## 7. Status: Entrega Completa
+
+**Data:** 2026-05-11
+**Branch:** `wave3-v4/componente-19`
+**Componente:** 19 (Fallback de Digitacao Manual)
+
+### Casos de uso consumidos pelo C19
+
+O Componente 19 chamou `identificarProvaPorCodigo(codigo, { getToken })`
+exatamente como o contrato previa. Zero modificacao na camada de
+servico (`identificacao-prova.ts`), zero modificacao no endpoint
+backend (`POST /api/v1/provas/scan`). Casos:
+
+1. **Submit com codigo formato OK** — chama o servico, recebe 200
+   `{ tipo: "sucesso", prova: ... }`, navega para `/provas/[id]`.
+2. **Submit com codigo formato OK mas inexistente** — recebe 404
+   `{ tipo: "erro", codigo: "PROVA_NAO_ENCONTRADA", mensagem: "Prova nao encontrada." }`,
+   renderiza banner.
+3. **Submit com codigo formato OK mas prova fora do scope (RLS)** —
+   mesma resposta 404 + mesma mensagem (anti-enumeracao DAT §8.2).
+4. **Submit com codigo formato invalido (regex client falhou)** —
+   NAO chama o servico; renderiza banner com **mensagem identica** ao
+   404 generico via `mensagemFinal("QR_INVALIDO")` → "Prova nao
+   encontrada." Anti-enumeracao preservada em camada UI.
+5. **Submit com falha de rede (`fetch` throws OR backend 5xx)** —
+   recebe `ERRO_REDE`, renderiza banner com botao "Tentar Novamente"
+   (preserva codigo digitado).
+6. **Submit com sessao expirada (401)** — recebe `SESSAO_EXPIRADA`,
+   renderiza banner padrao.
+
+### Helpers utilizados (AUD-W3C10-020)
+
+- `mensagemPara("PROVA_NAO_ENCONTRADA")` — usado no fallback do
+  `mensagemFinal` para 4 dos 5 codigos.
+- `MENSAGENS_C19: Partial<Record<CodigoErro, string>>` — override
+  local **apenas** para `QR_INVALIDO` (mapeia para "Prova nao
+  encontrada." em vez do texto padrao "QR Code nao reconhecido...").
+
+### Decisoes de produto (D1-D10 registradas em DECISIONS.md / ADR-141 a ADR-145)
+
+- **D1 — Rate limiting backend:** NAO incluido nesta sessao (prompt
+  explicitamente escopa C19 como frontend-only). Registrado em
+  `analysis.md §13 R-1` como **FOLLOW-UP OBRIGATORIO** antes do PR
+  para `main`. Defesa em profundidade atual mantida: validar formato
+  no client + ANTES do SELECT no backend + RLS antes da resposta +
+  404 generico unificado.
+- **D2 — "PRV-" como decoracao** (span aria-hidden), nao parte do
+  input. Funcao `montarCodigoCompleto` prepende ao submit.
+- **D3 — Mascara manual** (sem nova dep). Funcao pura `aplicarMascara`
+  em `lib/codigo-publico.ts`.
+- **D4 — Auto-uppercase** dentro de `aplicarMascara`.
+- **D5 — Bloqueio rigido por posicao**: ano/mes = digitos 0-9; sufixo
+  = alfabeto sem ambiguos. Chars fora do alfabeto da posicao **nao
+  aparecem** no input.
+- **D6 — Auto-submit ao completar:** NAO. Manter clique explicito.
+- **D7 — Uniformizacao `QR_INVALIDO` → "Prova nao encontrada."** em
+  camada UI (anti-enumeracao).
+- **D8 — Reset de banner de erro no `onChange`** do input.
+- **D9 — Sem `@testing-library/react` / `jsdom`:** logica testavel
+  vive em funcoes puras (43 testes Vitest); hook e binding trivial
+  validado por E2E.
+- **D10 — `aria-describedby` dinamico** apontando para `#manual-error`
+  (estado erro) OU `#manual-hint` (estado normal). Label sr-only
+  estendida.
+
+### Validacao numerica
+
+| Metrica | Antes do C19 (pos-AUD C10) | Apos C19 |
+|---|---|---|
+| Vitest tests | 46 | **89** (+43 novos do codigo-publico) |
+| tsc --noEmit | exit 0 | exit 0 |
+| next build | 13/13 paginas | 13/13 paginas |
+| Bundle `/escanear` | 7.68 kB / 210 kB | **8.31 kB / 210 kB** (+0.63 kB) |
+| Advisors security | 2 (pre-existentes) | 2 (mesmos) |
+| Advisors performance | 13 (pre-existentes) | 13 (mesmos) |
+| Migrations | — | — (zero migration nesta sessao) |
+
+### Arquivos tocados
+
+**Novos:**
+- `frontend/src/lib/codigo-publico.ts` (139 LOC).
+- `frontend/src/lib/__tests__/codigo-publico.test.ts` (300 LOC).
+- `frontend/src/hooks/useCodigoPrvInput.ts` (68 LOC).
+
+**Modificados:**
+- `frontend/src/app/(dashboard)/escanear/page.tsx` (+133 / -21 LOC).
+- `docs/wave3-v4-c10/contrato-c19.md` (este apendice).
+- `CHANGELOG.md`, `DECISIONS.md`, `CLAUDE.md`.
+- `docs/wave3-v4-c19/analysis.md` (apendice Execucao).
+
+**Inalterados (proibidos pelo prompt):**
+- `frontend/src/lib/services/identificacao-prova.ts` — contrato preservado.
+- `backend/**` — zero touch.
+- `shared/access-matrix.json` — `scanner` rule inalterada (full × 4 perfis).

@@ -488,8 +488,12 @@ compartilham o mesmo lookup logico:
 1. **Camera (Componente 10 v4.0 — entregue):** o `html5-qrcode`
    decodifica o QR Code da etiqueta e devolve o **payload completo**
    (ex.: `3SD|PRV-2026-05-K3T9XB|abcd1234567890ef`).
-2. **Digitacao manual (Componente 19 — proxima entrega da Wave):** o
-   usuario digita o **codigo legivel** (ex.: `PRV-2026-05-K3T9XB`).
+2. **Digitacao manual (Componente 19 — ENTREGUE):** o usuario digita
+   o **codigo legivel** (ex.: `PRV-2026-05-K3T9XB`). C19 entregue em
+   2026-05-11 (branch `wave3-v4/componente-19`) — mascara client-side
+   ativa, validacao de formato espelha o backend, foco automatico,
+   anti-enumeracao preservada na UI via uniformizacao de
+   `QR_INVALIDO` → "Prova nao encontrada." (ADR-143).
 
 DAT v3.0 §8.1 exige **idempotencia** — ambos resolvem para o mesmo
 registro pelo mesmo lookup.
@@ -592,6 +596,45 @@ backend, etc.).
 - **Botao "Buscar prova"** desabilitado quando input vazio: bg
   `#dcdcdc` texto `#9a9a9a 13.2px` Inter Medium. Habilitado vira
   preto/branco.
+
+**Notas do Componente 19 (Wave 3 v4.0 — entregue):**
+- **Logica testavel pura:** `frontend/src/lib/codigo-publico.ts` —
+  regex, mascara, alfabeto, validacao. 43 testes Vitest em
+  `environment: node` (sem JSDOM, alinhado com D-13 da Wave 1 v4.0).
+- **Hook React:** `frontend/src/hooks/useCodigoPrvInput.ts` — binding
+  trivial sobre as funcoes puras. Sem testes isolados; validado por
+  E2E (smoke do Mario).
+- **Mascara por posicao** (ADR-142): ano/mes = digitos 0-9; sufixo =
+  `ALFABETO_SUFIXO` (`ABCDEFGHJKMNPQRSTUVWXYZ23456789`). Bloqueio
+  rigido — char fora do alfabeto da posicao **nao aparece**.
+- **Strip do prefixo "PRV-" no paste** — usuario pode colar codigo
+  completo ou parcial; a mascara normaliza.
+- **Auto-uppercase** dentro de `aplicarMascara` — usuario pode
+  digitar minusculo.
+- **Validacao client-side** ANTES do submit (`validarFormatoCodigoPublico`).
+  Botao "Buscar prova" so habilita com formato completo (`isFormatValid`).
+- **Anti-enumeracao em UI** (ADR-143): `QR_INVALIDO` (validacao
+  client-side OU 422 backend) e uniformizado para
+  `"Prova nao encontrada."` via `MENSAGENS_C19` + `mensagemFinal`
+  em `page.tsx`. Identica ao 404 generico do backend — preserva
+  DAT v3.0 §8.2.
+- **Foco automatico** no `<input>` ao mount do `<ManualPanel>`
+  (ADR-144) — `useRef` + `useEffect([])`. Dispara em cada troca para
+  tab Manual via `AnimatePresence mode="wait"`.
+- **a11y aprofundada** (ADR-144): label sr-only estendida; hint
+  sr-only adicional (`#manual-hint`); `aria-describedby` dinamico
+  apontando para `#manual-error` ou `#manual-hint`.
+- **Botao "Tentar novamente"** no estado `ERRO_REDE` — reseta
+  `manualState` sem mexer no codigo digitado.
+- **Estado preservado** ao alternar para tab Camera — `codigoInput`
+  vive no container; `trocarParaCamera` zera apenas `manualState`.
+- **`maxLength=14`** no `<input>` (display sem prefixo) — defesa em
+  profundidade alinhada ao backend `max_length=32`.
+- **Rate limiting backend** (DAT §8.2 + Backlog C19 Notas Tecnicas):
+  **NAO entregue** — registrado como FOLLOW-UP OBRIGATORIO em
+  ADR-145 antes do PR final para `main`. Defesa em profundidade
+  corrente cobre descoberta lenta; nao substitui o rate-limit
+  prescrito.
 
 ---
 
