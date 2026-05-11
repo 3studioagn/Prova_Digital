@@ -2418,6 +2418,9 @@ async def test_scan_audit_log_contem_acao_e_status_atual(
     # Wave 3 v4.0: novos campos
     assert kwargs["detalhes"]["origem"] == "camera"
     assert kwargs["detalhes"]["codigo_publico"] == prova.codigo_publico
+    # AUD-W3C10-010: payload bruto recebido para rastreabilidade forense.
+    assert kwargs["detalhes"]["payload_recebido"] == payload[:64]
+    assert kwargs["detalhes"]["codigo_recebido"] is None
     # Campos preservados
     assert kwargs["detalhes"]["nro_requerimento"] == nro_req
     assert kwargs["detalhes"]["status_atual"] == "CRIADA"
@@ -2608,6 +2611,10 @@ async def test_scan_manual_audit_log_origem_manual(vendedor_matriz, mock_db):
     kwargs = mock_log.call_args.kwargs
     assert kwargs["detalhes"]["origem"] == "manual"
     assert kwargs["detalhes"]["codigo_publico"] == codigo_publico
+    # AUD-W3C10-010: codigo bruto recebido (mesmo que o codigo_publico
+    # neste caso porque o lookup foi bem sucedido); payload_recebido None.
+    assert kwargs["detalhes"]["codigo_recebido"] == codigo_publico
+    assert kwargs["detalhes"]["payload_recebido"] is None
 
 
 async def test_scan_manual_codigo_fora_do_scope_retorna_404_generico(

@@ -1984,6 +1984,19 @@ async def scan_prova(
 
     # Audit log: scan e uma acao auditada (RNF-005). Inclui `origem` para
     # distinguir camera vs digitacao manual nas investigacoes futuras.
+    #
+    # AUD-W3C10-010: tambem grava o payload/codigo BRUTO recebido (truncado
+    # em 64 chars) para rastreabilidade forense — se houver suspeita de
+    # etiqueta adulterada fisicamente, investigacao pode reconstruir o
+    # que foi efetivamente lido vs o que foi identificado. Truncamento
+    # evita inflacao do JSONB. Apenas o campo correspondente a origem e
+    # preenchido; o outro fica None.
+    payload_recebido = (
+        (body.payload[:64] if body.payload is not None else None)
+        if origem_scan == "camera"
+        else None
+    )
+    codigo_recebido = body.codigo if origem_scan == "manual" else None
     try:
         await log_audit(
             db,
@@ -1994,6 +2007,8 @@ async def scan_prova(
                 "origem": origem_scan,  # "camera" | "manual"
                 "nro_requerimento": prova.nro_requerimento,
                 "codigo_publico": prova.codigo_publico,
+                "payload_recebido": payload_recebido,
+                "codigo_recebido": codigo_recebido,
                 "status_atual": prova.status.value,
                 "transicoes_permitidas": [s.value for s in transicoes_permitidas],
             },
