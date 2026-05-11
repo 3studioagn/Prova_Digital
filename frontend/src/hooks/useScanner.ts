@@ -128,9 +128,18 @@ export function useScanner(options: UseScannerOptions): UseScannerResult {
         scannerRef.current = instance;
         localInstance = instance;
 
+        // AUD-W3C10-022: qrbox responsivo — antes era fixo 250x250, que
+        // quebrava em viewports <270px (overflow do canvas). Agora a lib
+        // recebe uma funcao que recebe as dimensoes do video e retorna
+        // o quadro de foco proporcional, com teto em 250 (max definido
+        // pelo design). Margem de 20px garante folga em telas pequenas.
+        const qrboxFn = (vw: number, vh: number) => {
+          const lado = Math.max(120, Math.min(vw, vh, 250) - 20);
+          return { width: lado, height: lado };
+        };
         await instance.start(
           { facingMode: "environment" },
-          { fps: 10, qrbox: { width: 250, height: 250 } },
+          { fps: 10, qrbox: qrboxFn },
           (decodedText: string) => {
             // Callback de sucesso — chama o callback externo.
             onDetectRef.current(decodedText);
