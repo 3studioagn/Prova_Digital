@@ -22,7 +22,9 @@
 | `bffe30b` | style(wave3-v4/c10): iteracao 9 — crossfade animado entre panels Camera/Manual |
 | `804d879` | Merge wave3-v4/componente-10 into development |
 
-**Veredito final:** **APROVAR COM CORRECOES** — 1 CRITICO documental (figma-reference.png ausente) + 3 ALTOS (documentacao incompleta de iteracoes 8/9; smoke-validation pendente; bug latente menor em useEffect dependency) bloqueiam aprovacao plena, mas a entrega de codigo e arquitetura esta solida e o C19 pode ser desbloqueado apos correcao dos pontos de documentacao.
+**Veredito final:** **APROVAR COM CORRECOES** — 3 ALTOS (documentacao incompleta de iteracoes 8/9; smoke-validation pendente; bug latente em handleDetect/useEffect deps) bloqueiam aprovacao plena, mas a entrega de codigo e arquitetura esta solida e o C19 pode ser desbloqueado apos correcao desses pontos.
+
+**Nota pos-reporte (2026-05-11):** O achado inicialmente classificado como CRITICO sobre `figma-reference.png` ausente foi **REBAIXADO PARA INFO** apos Mario confirmar explicitamente que o layout atual esta correto e nao requer modificacao. O Figma original portanto nao precisa ser arquivado in-repo como referencia canonica para revisores futuros. Risco residual aceito pelo dono do projeto: revisoes visuais futuras dependerao das descricoes textuais em `figma-references.md` + comentarios CSS extraidos via MCP (tokens do Figma) + acesso live ao file `kqOrPgP07y6y1SV7BUlEBs` no Figma.
 
 ---
 
@@ -32,25 +34,24 @@ A Wave 3 v4.0 Componente 10 entrega o redesign do `/escanear` com **alta qualida
 
 **Camada de servico desacoplada — VIABILIDADE DO C19:** ✅ **CONFIRMADA.** A camada `frontend/src/lib/services/identificacao-prova.ts` (178 LOC) e auditavelmente livre de DOM/navigator/html5-qrcode, com um teste anti-acoplamento que faz regex contra o source. O contrato em `docs/wave3-v4-c10/contrato-c19.md` (227 LOC) e claro e suficiente — o C19 pode ser executado consumindo literalmente a funcao `identificarProvaPorCodigo(codigo, params)` ja entregue.
 
-**Achados:**
+**Achados (apos rebaixamento de AUD-W3C10-001):**
 
 | Severidade | Quantidade |
 |---|---|
-| CRITICO | 1 |
+| CRITICO | 0 |
 | ALTO | 3 |
 | MEDIO | 6 |
 | BAIXO | 8 |
-| INFO | 4 |
+| INFO | 5 |
 | **Total** | **22** |
 
-**Itens de bloqueio (CRITICO + ALTOS):**
+**Itens de bloqueio (ALTOS — os 3 que restam):**
 
-- **AUD-W3C10-001 (CRITICO):** `figma-reference.png` AUSENTE — apenas `figma-references.md` (placeholder textual) foi commitado. `analysis.md §3` prometia commitar 2 PNGs (`figma-reference-camera.png` + `figma-reference-manual.png`) no Gate 2, mas isso nao aconteceu. Bloqueia auditoria de fidelidade visual contra Figma e cria divida de manutencao para revisores futuros.
 - **AUD-W3C10-002 (ALTO):** Iteracoes 8 e 9 (commits `dc7d347` e `bffe30b`, ambas de 2026-05-11) NAO documentadas em `analysis.md`, `CHANGELOG.md` ou `DECISIONS.md`. A iteracao 9 introduz `AnimatePresence` + `motion.div` com efeito de crossfade entre panels — nao tem ADR justificando trade-off (especialmente vs custo de bundle e a11y).
 - **AUD-W3C10-003 (ALTO):** `smoke-validation.md` (20 cenarios) ainda nao executado — sem prova de comportamento real em producao para os 4 perfis (admin, vendedor, motorista, clicheria) × estados.
 - **AUD-W3C10-004 (ALTO):** Bug latente em `(dashboard)/escanear/page.tsx` linha 75-77 + 84-95: `handleDetect` nao verifica estado atual; permite multiplos `setCameraState('identifying')` se html5-qrcode dispara `onDetect` para o mesmo frame multiplas vezes. Tambem o `useEffect` que dispara identificacao tem `[cameraState.kind]` como unica dep com `eslint-disable` — perda silenciosa se `cameraState.payload` mudar entre renders.
 
-**Fidelidade visual (resumo):** A imagem de referencia AUSENTE impede auditoria comparativa direta. Pelas descricoes textuais em `figma-references.md` + `analysis.md §5.3` + comentarios CSS extraidos via MCP (tokens `#eaeaea`/43px/`#f5c518` etc.), a implementacao **alega** ser fiel apos iteracao 3. Como nao ha imagem, este auditor nao consegue validar. **Recomendacao bloqueante:** Mario deve adicionar as 2 PNGs antes da proxima auditoria.
+**Fidelidade visual (resumo):** A imagem de referencia (PNG) nao foi commitada in-repo, mas Mario **confirmou pos-reporte (2026-05-11)** que o layout atual esta correto e nao requer modificacao — risco residual aceito. Pelas descricoes textuais em `figma-references.md` + `analysis.md §5.3` + comentarios CSS com tokens do Figma extraidos via MCP (`#eaeaea`/43px/`#f5c518` brackets amarelos/JetBrains Mono no input/etc.), a implementacao **se alinha** ao Figma apos iteracao 3. Auditor nao validou pixel-a-pixel mas dono do projeto chancela o resultado.
 
 **Coerencia com C06 (resumo):** ✅ **PERFEITA.** A decisao C06 (ADR-116) e hibrida (QR contem `codigo_publico` legivel + hash truncado de autenticidade). O C10 implementa fielmente: handler detecta formato via `validar_formato_codigo_publico(identificador)` e usa lookup correto, com fallback `nro_requerimento` para QR legacy v3.0. Mensagens 404 genericas preservam anti-enumeracao da DAT §8.2.
 
@@ -108,9 +109,9 @@ A `analysis.md §6` tem checklist DoD preliminar mas nao os 24 criterios literai
 | 9 | RLS verificada e versionada | ✅ N/A | Sem mudanca; `pol_provas_select` ja cobre 4 perfis |
 | 10 | Animacoes respeitam `prefers-reduced-motion` | ✅ | ADR-137 + media query final |
 
-### 1.3 Fidelidade Visual contra Figma — **BLOQUEADO**
+### 1.3 Fidelidade Visual contra Figma — **CHANCELADO PELO DONO DO PROJETO**
 
-A imagem oficial do Figma NAO esta preservada em `docs/wave3-v4-c10/figma-reference-camera.png` nem em `figma-reference-manual.png` (apenas `figma-references.md` textual). **A auditoria comparativa elemento-por-elemento e impossivel sem a imagem.**
+A imagem oficial do Figma NAO esta preservada em `docs/wave3-v4-c10/figma-reference-camera.png` nem em `figma-reference-manual.png` (apenas `figma-references.md` textual). **Mario confirmou pos-reporte (2026-05-11) que o layout atual esta correto e nao requer modificacao** — auditoria comparativa pixel-a-pixel ja nao e necessaria. Achado AUD-W3C10-001 rebaixado para INFO.
 
 Reconstrucao **textual** baseada em `figma-references.md §"Conteudo das imagens"` + analysis.md §5.3 + comentarios CSS:
 
@@ -134,7 +135,7 @@ Reconstrucao **textual** baseada em `figma-references.md §"Conteudo das imagens
 | Manual idle | Input JetBrains Mono | importado no `layout.tsx` (iteracao 3) | ✅ via codigo |
 | Manual idle | Botao "Buscar prova" rounded 12px desabilitado | `.manualCta` | ✅ via codigo |
 
-**Veredicto:** sem PNG nao consigo comparar pixel-a-pixel; todos os tokens listados batem com a documentacao textual do Figma. **Achado AUD-W3C10-001 CRITICO** registrado.
+**Veredicto:** sem PNG nao foi possivel comparar pixel-a-pixel, mas todos os tokens listados batem com a documentacao textual do Figma + Mario chancela o resultado. **Achado AUD-W3C10-001 rebaixado para INFO** (registro de decisao de aceitar risco residual).
 
 ### 1.4 Coerencia com a decisao do C06 (ADR-116)
 
@@ -243,8 +244,8 @@ Como a coluna e `NOT NULL` no schema (migration 012, ADR-116) **nenhuma prova no
 | `DECISIONS.md` ADR-132 a 137 | ✅ (parcial) | Faltam ADR-138 (crossfade) e ADR-139 (footer manual) — ver AUD-W3C10-002 |
 | `CLAUDE.md` secao "Identificacao de provas" | ✅ | Confirmada via system reminder; bem documentada com tipos, contratos, riscos |
 | `analysis.md` Gate 1 + Secao Execucao | ⚠️ Parcial | 1012 LOC; **so vai ate iteracao 7** — iteracoes 8 e 9 ausentes |
-| `figma-references.md` placeholder | ⚠️ Parcial | Existe mas PNGs reais AUSENTES — ver AUD-W3C10-001 |
-| `figma-reference.png` / `figma-reference-camera.png` / `figma-reference-manual.png` | ❌ **CRITICO** | AUSENTES |
+| `figma-references.md` placeholder | ✅ Aceito | Existe; PNGs reais ausentes mas Mario chancelou layout (AUD-W3C10-001 rebaixado a INFO) |
+| `figma-reference.png` / `figma-reference-camera.png` / `figma-reference-manual.png` | ⏸ N/A | Decisao do dono: nao commitar (layout ja correto) |
 | `contrato-c19.md` | ✅ Excelente | 227 LOC, tipos, casos de uso, roteiro detalhado para C19 |
 | `smoke-validation.md` | ✅ template criado | 20 cenarios; **NAO preenchido** — ver AUD-W3C10-003 |
 
@@ -507,7 +508,7 @@ Ambas tecnicamente legitimas mas **nao documentadas**.
 
 ### 2.9 Achados de Fidelidade ao Figma
 
-**BLOQUEADO** — sem PNG nao consigo auditar pixel-a-pixel.
+**CHANCELADO PELO DONO DO PROJETO** — Mario confirmou pos-reporte que o layout esta correto. Sem PNG arquivado, auditor nao validou pixel-a-pixel mas dono aceita risco residual.
 
 Baseado em descricoes textuais + comentarios CSS:
 - ✅ Tokens declarados batem com Figma (bg #eaeaea, radius 43px, brackets amarelos #f5c518, etc.)
@@ -614,12 +615,7 @@ Nao verifiquei queries reais ao `audit_logs` desta sessao. Pelos testes:
 
 ### CRITICOS
 
-**AUD-W3C10-001 — figma-reference.png AUSENTE**
-- Arquivos esperados: `docs/wave3-v4-c10/figma-reference-camera.png` + `figma-reference-manual.png`
-- Arquivo presente: apenas `figma-references.md` (placeholder textual com instrucoes para adicao manual)
-- Impacto: bloqueia auditoria de fidelidade visual contra Figma; cria divida de manutencao
-- Recomendacao: Mario exportar os 2 frames do Figma (file `kqOrPgP07y6y1SV7BUlEBs`, nodes `206:87` Camera e `240:6448` Manual) e commitar com mensagem `docs(wave3-v4/c10): adiciona referencias do Figma`
-- Dono sugerido: Mario (acesso ao Figma)
+**(nenhum)** — Apos rebaixamento de AUD-W3C10-001 para INFO (decisao de Mario em 2026-05-11). Ver §INFO abaixo.
 
 ### ALTOS
 
@@ -673,6 +669,13 @@ Nao verifiquei queries reais ao `audit_logs` desta sessao. Pelos testes:
 
 ### INFO
 
+**AUD-W3C10-001 (rebaixado de CRITICO em 2026-05-11) — figma-reference PNGs nao commitados, layout chancelado pelo dono**
+- Arquivos esperados originalmente: `docs/wave3-v4-c10/figma-reference-camera.png` + `figma-reference-manual.png` (conforme `analysis.md §3`).
+- Arquivo presente: apenas `figma-references.md` (placeholder textual).
+- **Decisao Mario (2026-05-11):** "Nao vou anexar a image-reference, pois nao vamos mexer no layout — ja esta tudo correto." Risco residual aceito.
+- Implicacao: revisoes visuais futuras dependerao das descricoes textuais em `figma-references.md` + comentarios CSS extraidos via MCP + acesso live ao file `kqOrPgP07y6y1SV7BUlEBs` no Figma.
+- Sem acao requerida.
+
 **AUD-W3C10-014 — Seq Scan em base de 17 linhas** — comportamento esperado do Postgres planner; nao requer acao.
 
 **AUD-W3C10-017 — Audit log inclui `transicoes_permitidas` que o frontend nao consome** — proposital (ADR-132); nao requer acao.
@@ -686,7 +689,7 @@ Nao verifiquei queries reais ao `audit_logs` desta sessao. Pelos testes:
 ## Recomendacoes de Proximos Passos
 
 1. **Acoes requeridas antes de prosseguir para C19:**
-   - Adicionar `figma-reference-camera.png` + `figma-reference-manual.png` (AUD-001)
+   - ~~Adicionar `figma-reference-camera.png` + `figma-reference-manual.png` (AUD-001)~~ — **DISPENSADO pelo Mario em 2026-05-11**: layout chancelado, sem alteracao de visual planejada. Sem acao.
    - Apendar iteracoes 8 e 9 em analysis.md + criar ADR-138 (crossfade) e ADR-139 (footer manual) + atualizar CHANGELOG (AUD-002)
    - Executar `smoke-validation.md` em producao (AUD-003)
    - Corrigir race em `handleDetect` + deps do useEffect (AUD-004)
@@ -805,6 +808,24 @@ Inspecao do source de `frontend/src/lib/services/identificacao-prova.ts`:
 | ADR-137 | Scanner beam animation (iteracao 7) | ✅ Registrado |
 | **ADR-138 (esperado)** | **Panel crossfade Camera/Manual (iteracao 9)** | ❌ **AUSENTE — AUD-W3C10-006** |
 | **ADR-139 (esperado)** | **Footer manual width fix (iteracao 8)** | ❌ **AUSENTE — AUD-W3C10-007** |
+
+---
+
+## Apendice — Atualizacao pos-reporte (2026-05-11)
+
+**Decisao do Mario sobre AUD-W3C10-001 (figma-reference.png ausente):**
+
+> "Nao vou anexar a image-reference, pois nao vamos mexer no layout, pois ja esta tudo correto."
+
+**Acao tomada nesta auditoria:**
+- AUD-W3C10-001 **rebaixado de CRITICO para INFO**.
+- Veredito final atualizado de "1 CRITICO + 3 ALTOS + ..." para "0 CRITICO + 3 ALTOS + ...".
+- §1.3 (Fidelidade Visual) marcada como **CHANCELADO PELO DONO DO PROJETO** em vez de BLOQUEADO.
+- §1.12 (Documentacao) marcada como Aceito para `figma-references.md` + N/A para os PNGs.
+- §2.9 (Achados de Fidelidade) atualizado.
+- §Recomendacoes ato 1 (Adicionar PNGs) marcado como DISPENSADO.
+
+**Veredito permanece APROVAR COM CORRECOES** — pelos 3 ALTOS remanescentes (AUD-002 documentacao iteracoes 8/9, AUD-003 smoke pendente, AUD-004 race em handleDetect). Essas correcoes continuam sendo pre-requisito para desbloquear o C19.
 
 ---
 
