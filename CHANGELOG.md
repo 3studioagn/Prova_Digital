@@ -101,17 +101,23 @@ Auditoria original veredito: APROVAR COM CORRECOES (0 CRITICO + 3 ALTOS + 6 MEDI
 
 ### Reescrito
 - **`frontend/src/app/(dashboard)/escanear/page.tsx`** — 740 LOC v3.0 →
-  414 LOC v4.0. Removidos `AssinaturaModal`, `ScanReadyView`,
-  `DoneView`, `ACTION_LABELS`, `useExecutarTransicao` (transicao
-  migra para `/provas/[id]` no C11 v4.0). Nova UI fiel ao Figma:
-  toggle pill Camera/Manual, painel da camera com preview/live,
-  painel manual com input PRV + botao "Buscar prova →", footer
-  placeholder, banners de erro contextuais.
+  414 LOC v4.0 (iteracao 1) → **658 LOC pos-iteracoes 3-9** (AUD-016).
+  Removidos `AssinaturaModal`, `ScanReadyView`, `DoneView`,
+  `ACTION_LABELS`, `useExecutarTransicao` (transicao migra para
+  `/provas/[id]` no C11 v4.0). Nova UI fiel ao Figma: toggle pill
+  Camera/Manual, painel da camera com preview/live, painel manual
+  com input PRV + botao "Buscar prova →", footer placeholder,
+  banners de erro contextuais. Crescimento de 414 -> 658 LOC e do
+  conjunto iteracoes 3-9 (specs Figma + brackets + JetBrains Mono +
+  pill animado + scanner beam + crossfade).
 - **`frontend/src/app/(dashboard)/escanear/escanear.module.css`** —
-  589 LOC v3.0 → 433 LOC v4.0. Tokens canonicos do projeto. Sem
-  cores hardcoded. Brackets viewfinder, QR mock decorativo, camera
-  live overlay, responsividade em 2 breakpoints,
-  `prefers-reduced-motion` respeitado.
+  589 LOC v3.0 → 433 LOC v4.0 (iteracao 1) → **802 LOC pos-iteracoes
+  3-9** (AUD-016). Tokens canonicos do projeto. Sem cores hardcoded.
+  Brackets viewfinder, QR mock decorativo, camera live overlay,
+  responsividade em 2 breakpoints, `prefers-reduced-motion`
+  respeitado. Bundle final: **/escanear 5.73 kB / 208 kB First Load**
+  (era 168 kB antes da iteracao 5; +40 kB pelo framer-motion — custo
+  aceito ADR-135, AUD-015).
 
 ### Removido
 - **`frontend/src/hooks/useScanProva.ts`** — superseded pela camada

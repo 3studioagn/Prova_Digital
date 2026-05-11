@@ -989,24 +989,93 @@ beam NAO sai do mini-card no extremo inferior.
 
 **ADR-137 registrado.**
 
+## R8. Iteracao 8 (commit `dc7d347`) — footer manual width fix
+
+Apos as iteracoes 4-7, observou-se que no tab Manual o `<InnerFooter>`
+collapsava no conteudo (em vez de esticar para 554px alinhado com o
+divisor do Figma — node 240:6611). Em Camera, o footer ja exibia
+largura correta porque o `.cameraSidebar` propaga 100% via flex.
+
+**Fix CSS (3 regras em `.innerFooter`):**
+
+```css
+.innerFooter {
+  /* specs existentes do ADR-136 preservados */
+  width: 100%;          /* preenche a coluna pai */
+  max-width: 554px;     /* divisor Figma */
+  align-self: stretch;  /* obriga flex pai a respeitar 100% */
+}
+```
+
+Sem touch em TypeScript/JSX. Em Camera, o `align-self: stretch` e
+no-op (flex container ja propagava). **ADR-139 registrado**
+(documentado em sessao de correcao pos-auditoria 2026-05-11).
+
+## R9. Iteracao 9 (commit `bffe30b`) — panel crossfade
+
+Mario pediu que a troca entre os panels Camera e Manual fosse animada.
+**Implementacao com `framer-motion`** (dependencia ja pre-existente
+desde commit `86b0f9d` da Wave 3 v3.0 — ver apendice ADR-135):
+
+```tsx
+<AnimatePresence mode="wait" initial={false}>
+  <motion.div
+    key={tab}
+    initial={{ opacity: 0, scale: 0.985, y: 6 }}
+    animate={{ opacity: 1, scale: 1, y: 0 }}
+    exit={{ opacity: 0, scale: 0.985, y: -6 }}
+    transition={{ duration: 0.26, ease: ENTER_EASE }}
+  >
+    {tab === "camera" ? <CameraPanel ... /> : <ManualPanel ... />}
+  </motion.div>
+</AnimatePresence>
+```
+
+`mode="wait"` garante que o panel atual sai antes do novo entrar
+(evita sobreposicao). Transicao curta (260ms) com `ENTER_EASE` canonico
+do projeto. `prefers-reduced-motion` respeitado por padrao via
+`useReducedMotion` interno do framer-motion.
+
+**Comportamento durante transicao com camera ativa:** o handler
+`trocarParaManual` chama `setCameraState({ kind: "idle" })` ANTES da
+troca de tab, desligando o `useScanner` antes do panel sair com fade.
+Sem race entre animacao e cleanup.
+
+**ADR-138 registrado** (documentado em sessao de correcao
+pos-auditoria 2026-05-11).
+
 ## R7. Resumo final pos-iteracoes
 
-**Total commits da entrega:** 10 (Gate 1 + execucao + 4 rounds de
-refinamento). Todos pushados em `wave3-v4/componente-10`.
+**Total commits da entrega:** 12 (Gate 1 + execucao + 6 rounds de
+refinamento — iteracoes 4 ate 9). Atualizado pos-auditoria 2026-05-11:
+iteracoes 8 (`dc7d347`) e 9 (`bffe30b`) adicionadas acima.
 
 **Bundle final:** `/escanear` 5.73 kB / 208 kB First Load JS.
 
+**LOC finais (atualizado pos-AUD-W3C10-016):**
+- `(dashboard)/escanear/page.tsx`: 740 (v3.0) -> 414 (iteracao 1) ->
+  **658** (pos-iteracoes 3-9 — refit visual + iteracao 9 crossfade).
+- `(dashboard)/escanear/escanear.module.css`: 589 (v3.0) -> 433
+  (iteracao 1) -> **802** (pos-iteracoes 3-9).
+
 **Validacao:**
 - `pytest backend/tests/`: 825 passed + 9 skipped — backend nao
-  tocado nas iteracoes 4-7.
+  tocado nas iteracoes 4-9 (foi tocado apenas em sessao de correcao
+  pos-auditoria 2026-05-11; estado atualizado em fix-validation.md).
 - `npx tsc --noEmit`: exit 0.
-- `npx vitest run`: 44 passed.
+- `npx vitest run`: 44 passed (entrega original; pos-auditoria sobe
+  para 46 com novos testes AUD-020).
 - `npx next build`: 13/13 paginas.
 - Acessibilidade preservada em todas as iteracoes (role=tab,
-  aria-selected, role=alert, focus-visible, prefers-reduced-motion).
-- Backend, RLS, migrations, schema, contratos publicos: **intocados**.
+  aria-selected, role=alert, focus-visible, prefers-reduced-motion
+  via CSS direto OU via `useReducedMotion` do framer-motion).
+- Backend, RLS, migrations, schema, contratos publicos: **intocados**
+  durante iteracoes 4-9 (modificacoes no backend ocorreram apenas em
+  pos-auditoria via AUD-010 audit log + AUD-012 max_length).
 
-**Pendencias:** as mesmas da entrega inicial — smoke E2E manual via
-`smoke-validation.md` e adicao manual dos PNGs do Figma.
+**Pendencias da entrega original:** as mesmas — smoke E2E manual via
+`smoke-validation.md`. **AUD-001 (PNGs do Figma) foi REBAIXADO PARA
+INFO** apos Mario chancelar o layout em 2026-05-11; sem necessidade
+de adicionar PNGs.
 
 **Fim da secao Refinamento Visual.**
