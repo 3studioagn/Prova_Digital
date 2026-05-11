@@ -2544,6 +2544,27 @@ async def test_scan_manual_codigo_formato_invalido_retorna_404_generico(
     mock_db.execute.assert_not_called()
 
 
+async def test_scan_manual_codigo_acima_de_32_chars_retorna_422_pydantic(
+    admin_user, mock_db
+):
+    """AUD-W3C10-012: codigo com mais de 32 chars rejeitado por
+    Pydantic ANTES de chegar ao handler. PRV-AAAA-MM-NNNNNN tem 18
+    chars; max_length=32 cobre typos sem inflar superficie. Resposta
+    422 e distinguivel de 404 generico, mas e razoavel para input
+    fora da faixa plausivel — anti-enumeracao continua valida para
+    codigos <= 32 chars que sao formato invalido.
+    """
+    _setup(mock_db, user=admin_user)
+    codigo_muito_longo = "PRV-2026-05-" + "X" * 25  # 12 + 25 = 37 chars
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(
+            f"{PREFIX}/scan", json={"codigo": codigo_muito_longo}
+        )
+    assert resp.status_code == 422
+    # NUNCA chega ao banco (validacao Pydantic e pre-handler)
+    mock_db.execute.assert_not_called()
+
+
 async def test_scan_manual_codigo_valido_mas_inexistente_retorna_404(
     admin_user, mock_db
 ):

@@ -336,7 +336,14 @@ class ScanRequest(BaseModel):
     """
 
     payload: str | None = Field(None, min_length=1, max_length=256)
-    codigo: str | None = Field(None, min_length=1, max_length=64)
+    # AUD-W3C10-012: max_length=32 (era 64). Formato canonico
+    # PRV-AAAA-MM-NNNNNN tem 18 chars; folga ate 32 cobre typos sem
+    # inflar superficie de ataque. Codigos com mais de 32 chars retornam
+    # 422 Pydantic; codigos <= 32 mas formato invalido caem em
+    # validar_formato_codigo_publico no handler e retornam 404 generico
+    # (DAT §8.2 — protecao contra enumeracao preservada para a faixa
+    # plausivel de input).
+    codigo: str | None = Field(None, min_length=1, max_length=32)
 
     @field_validator("payload")
     @classmethod
