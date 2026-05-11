@@ -95,7 +95,10 @@ from app.domain.schemas.prova import (
 )
 from app.services import qrcode_service, r2_signed
 from app.services.audit_service import log_audit
-from app.services.codigo_publico_service import gerar_codigo_publico
+from app.services.codigo_publico_service import (
+    gerar_codigo_publico,
+    validar_formato_codigo_publico,
+)
 from app.services.etiqueta_service import TEMPLATE_PADRAO, gerar_pdf
 from app.services.state_machine import (
     TRANSICOES,
@@ -1757,8 +1760,13 @@ async def _carregar_prova_por_nro_req_com_scoping(
     """Carrega prova por `nro_requerimento` aplicando scoping por setor.
 
     Versao do scan do `_carregar_prova_com_scoping` que e por `prova_id`:
-    aqui o seletor e `nro_requerimento` (UNIQUE). Mesma semantica de
-    retorno 4-tupla ou None.
+    aqui o seletor e `nro_requerimento` (UNIQUE — `provas_digitais_nro_requerimento_key`).
+    Mesma semantica de retorno 4-tupla ou None.
+
+    Caminho **legacy v3.0**: provas criadas antes da migration 012 tem
+    QR Code com `nro_requerimento` no segundo campo do payload. Wave 3
+    v4.0 (Componente 10) usa este helper apenas como fallback quando o
+    segundo campo do payload NAO casa o regex `PRV-AAAA-MM-NNNNNN`.
 
     Nao e feito FOR UPDATE — o scan e apenas leitura. O FOR UPDATE vira
     no sub-bloco A.4 (endpoint de transicao) quando for efetivar a
@@ -1785,6 +1793,47 @@ async def _carregar_prova_por_nro_req_com_scoping(
     return prova, vendedor_nome, vendedor_localizacao, vendedor_setor
 
 
+async def _carregar_prova_por_codigo_publico_com_scoping(
+    db: AsyncSession, codigo_publico: str, user: Usuario
+) -> tuple[ProvaDigital, str, LocalizacaoEnum | None, SetorEnum] | None:
+    """Carrega prova por `codigo_publico` aplicando scoping por setor.
+
+    Wave 3 v4.0 (Componente 10): caminho **canonico** para identificacao
+    de provas v4.0+. Lookup por `provas_digitais.codigo_publico`
+    (UNIQUE — `idx_provas_codigo_publico`). Reusado por:
+
+      - **Camera (C10)**: quando o segundo campo do payload do QR e do
+        formato `PRV-AAAA-MM-NNNNNN`.
+      - **Digitacao manual (C19, futuro)**: quando o usuario digita o
+        codigo legivel da etiqueta.
+
+    DAT v3.0 §8.1 — idempotencia entre os dois mecanismos exige que ambos
+    resolvam para o MESMO registro pelo MESMO lookup.
+
+    Mesma semantica de retorno 4-tupla ou None do helper `_por_nro_req`.
+    Nao faz FOR UPDATE (scan e read-only).
+    """
+    stmt = (
+        select(
+            ProvaDigital,
+            Usuario.nome.label("vendedor_nome"),
+            Usuario.localizacao.label("vendedor_localizacao"),
+            Usuario.setor.label("vendedor_setor"),
+        )
+        .join(Usuario, Usuario.id == ProvaDigital.vendedor_id)
+        .where(ProvaDigital.codigo_publico == codigo_publico)
+    )
+    base = _scoping_filter(user)
+    if base is not None:
+        stmt = stmt.where(base)
+
+    row = (await db.execute(stmt)).first()
+    if row is None:
+        return None
+    prova, vendedor_nome, vendedor_localizacao, vendedor_setor = row
+    return prova, vendedor_nome, vendedor_localizacao, vendedor_setor
+
+
 @router.post("/scan", response_model=ScanResponse)
 async def scan_prova(
     body: ScanRequest,
@@ -1792,56 +1841,118 @@ async def scan_prova(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ) -> ScanResponse:
-    """Resolve um payload de QR Code escaneado (Componente 10).
+    """Resolve um payload de QR Code escaneado OU codigo digitado manualmente.
+
+    Wave 3 v4.0 (Componente 10): aceita 2 caminhos de identificacao via
+    `ScanRequest` com XOR (model_validator garante que so um veio):
+
+      1. **Camera** (`body.payload`): payload completo do QR Code
+         (`3SD|<id>|<hash[:16]>`). Sub-caminhos pelo segundo campo:
+           1a. `<id>` casa `PRV-AAAA-MM-NNNNNN` →
+               `_carregar_prova_por_codigo_publico_com_scoping`. Caminho
+               canonico v4.0+.
+           1b. `<id>` NAO casa o regex →
+               `_carregar_prova_por_nro_req_com_scoping`. Fallback para
+               provas legacy v3.0 cujo QR ainda tem `nro_requerimento`
+               no segundo campo.
+         Apos o SELECT, valida o hash via `validar_payload_qr`
+         (constant-time).
+
+      2. **Digitacao manual** (`body.codigo`): codigo publico legivel
+         (`PRV-AAAA-MM-NNNNNN`). Lookup direto via
+         `_carregar_prova_por_codigo_publico_com_scoping`.
+         Wave 3 v4.0 / Componente 19 (futuro) consome este caminho. NAO
+         valida hash — digitacao nao tem como produzir hash. Defesa fica
+         por conta de RLS + scoping + rate limiting (DAT §8.2 — backlog
+         do C19).
+
+    DAT v3.0 §8.1 — idempotencia: ambos os caminhos resolvem para o mesmo
+    `provas_digitais` row pelo mesmo lookup quando o codigo for v4.0.
 
     Fluxo:
-      1. Pydantic valida formato estrutural do payload (prefixo `3SD|`,
-         3 campos, hash com 16 chars). Rejeita 422 se malformado.
-      2. Parseia `nro_requerimento` e `hash_truncado` do payload.
-      3. SELECT prova por `nro_requerimento` com scoping aplicado. Se
-         nao encontra OU o scoping esconde, retorna 404 "Prova nao
-         encontrada" (mesma mensagem para nao vazar existencia — padrao
-         ADR-049).
-      4. Verifica o hash via `qrcode_service.validar_payload_qr` —
-         constant-time. Se nao bate, 422 "QR Code nao corresponde a
-         prova esperada". Essa checagem e **apos** o SELECT porque
-         precisamos do `qr_code_hash` armazenado para comparar.
-      5. Calcula `transicoes_permitidas` via
-         `_computar_transicoes_permitidas` (iterando TRANSICOES +
-         validar_transicao + regra RF-009).
-      6. Log audit `acao="escanear_prova"` com detalhes basicos
-         (nro_requerimento, status_atual). Commit.
+      1. Pydantic valida formato estrutural do `payload` (prefixo `3SD|`,
+         3 campos, hash com 16 chars) OU `codigo` (nao-vazio).
+      2. Detecta caminho (camera vs manual). Resolve `identificador`.
+      3. Aplica lookup com scoping.
+      4. (Apenas camera) Verifica o hash via constant-time.
+      5. Calcula `transicoes_permitidas` via `_computar_transicoes_permitidas`.
+      6. Audit log `acao="escanear_prova"` com origem (camera/manual).
       7. Retorna 200 com `ScanResponse`.
 
     Codigos HTTP:
-      200: happy path. `transicoes_permitidas` pode ser `[]` se a prova
-           esta em estado terminal ou se o usuario nao tem nenhuma
-           transicao permitida a partir do estado atual.
-      401: token ausente/invalido (herdado de `get_current_user`).
+      200: happy path.
+      401: token ausente/invalido.
       403: usuario desativado.
-      404: prova nao encontrada OU escondida por scoping.
-      422: formato de payload invalido OR hash nao bate (integridade).
+      404: prova nao encontrada OU escondida por scoping (mesma mensagem
+           para os dois — protecao contra enumeracao, DAT §8.2 + ADR-049).
+      422: payload mal formado (estrutural) OR hash nao bate (integridade)
+           OR codigo digitado em formato invalido (PRV-...).
       502: erro transitorio de DB (padrao ADR-074).
     """
-    # Parseia nro_requerimento do payload ja validado pelo Pydantic.
-    _prefix, nro_requerimento, _hash_trunc = body.payload.split(
-        qrcode_service.QR_PAYLOAD_SEPARATOR
-    )
+    # Detecta caminho via XOR ja garantido pelo model_validator do ScanRequest.
+    if body.codigo is not None:
+        # ─── Caminho digitacao manual (C19) ───────────────────────────
+        # Validacao de formato APOS o lookup nao adianta (nao da pra
+        # bater contra banco se nao casa formato). Validamos ANTES do
+        # SELECT mas retornamos a MESMA mensagem 404 generica para
+        # "formato invalido" e "fora do scope" — DAT §8.2.
+        if not validar_formato_codigo_publico(body.codigo):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Prova nao encontrada",
+            )
+        identificador = body.codigo
+        origem_scan = "manual"
+        try:
+            scoped = await _carregar_prova_por_codigo_publico_com_scoping(
+                db, identificador, current_user
+            )
+        except Exception:
+            logger.exception(
+                "Falha ao resolver scan manual (user=%s, codigo=%s)",
+                current_user.id,
+                identificador,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Falha ao carregar prova",
+            )
 
-    try:
-        scoped = await _carregar_prova_por_nro_req_com_scoping(
-            db, nro_requerimento, current_user
+    else:
+        # ─── Caminho camera (C10) ─────────────────────────────────────
+        assert body.payload is not None  # garantido pelo model_validator
+        _prefix, identificador, _hash_trunc = body.payload.split(
+            qrcode_service.QR_PAYLOAD_SEPARATOR
         )
-    except Exception:
-        logger.exception(
-            "Falha ao resolver scan (user=%s, nro_req=%s)",
-            current_user.id,
-            nro_requerimento,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Falha ao carregar prova",
-        )
+        origem_scan = "camera"
+
+        # Detecta sub-caminho pelo formato do segundo campo:
+        #   - PRV-AAAA-MM-NNNNNN → caminho canonico v4.0+ (codigo_publico).
+        #   - Caso contrario   → fallback legacy v3.0 (nro_requerimento).
+        # Ambos os caminhos coexistem ate Wave 7 / Componente 21 regerar
+        # etiquetas das provas pre-migration-012 com o novo payload.
+        usa_codigo_publico = validar_formato_codigo_publico(identificador)
+
+        try:
+            if usa_codigo_publico:
+                scoped = await _carregar_prova_por_codigo_publico_com_scoping(
+                    db, identificador, current_user
+                )
+            else:
+                scoped = await _carregar_prova_por_nro_req_com_scoping(
+                    db, identificador, current_user
+                )
+        except Exception:
+            logger.exception(
+                "Falha ao resolver scan camera (user=%s, id=%s, formato=%s)",
+                current_user.id,
+                identificador,
+                "codigo_publico" if usa_codigo_publico else "nro_requerimento",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Falha ao carregar prova",
+            )
 
     if scoped is None:
         raise HTTPException(
@@ -1850,22 +1961,29 @@ async def scan_prova(
         )
     prova, vendedor_nome, vendedor_localizacao, vendedor_setor = scoped
 
-    # Verificacao do hash (constant-time). Feita APOS o scoping para nao
-    # dar pistas sobre existencia da prova via timing.
-    if not qrcode_service.validar_payload_qr(body.payload, prova.qr_code_hash):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="QR Code nao corresponde a prova esperada",
-        )
+    # ─── Verificacao do hash (apenas caminho camera) ──────────────────
+    # Feita APOS o scoping para nao dar pistas sobre existencia da prova
+    # via timing differential (alinhado a ADR-083 Decisao 4).
+    if origem_scan == "camera":
+        assert body.payload is not None
+        if not qrcode_service.validar_payload_qr(body.payload, prova.qr_code_hash):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="QR Code nao corresponde a prova esperada",
+            )
 
     # Calcula transicoes permitidas para este usuario neste estado.
+    # **Nota Wave 3 v4.0 (C10):** o frontend desta entrega NAO consome
+    # mais `transicoes_permitidas` — apos sucesso, redireciona para
+    # `/provas/[id]`. Mantemos o calculo + retorno para preservar o
+    # contrato com o C11 v4.0 (que vai consumir do detalhe) e nao quebrar
+    # outros consumidores hipoteticos. Documentado em ADR.
     transicoes_permitidas, motivo_obrigatorio_em = _computar_transicoes_permitidas(
         prova, current_user
     )
 
-    # Audit log: scan e uma acao auditada (RNF-005 + rastreabilidade de
-    # quem olhou qual prova). Mesmo que o scan nao mude estado, saber
-    # quem escaneou o que e util para investigacao.
+    # Audit log: scan e uma acao auditada (RNF-005). Inclui `origem` para
+    # distinguir camera vs digitacao manual nas investigacoes futuras.
     try:
         await log_audit(
             db,
@@ -1873,7 +1991,9 @@ async def scan_prova(
             usuario_id=current_user.id,
             prova_id=prova.id,
             detalhes={
+                "origem": origem_scan,  # "camera" | "manual"
                 "nro_requerimento": prova.nro_requerimento,
+                "codigo_publico": prova.codigo_publico,
                 "status_atual": prova.status.value,
                 "transicoes_permitidas": [s.value for s in transicoes_permitidas],
             },
@@ -1883,9 +2003,10 @@ async def scan_prova(
     except Exception:
         await db.rollback()
         logger.exception(
-            "Falha ao persistir audit do scan (user=%s, prova=%s)",
+            "Falha ao persistir audit do scan (user=%s, prova=%s, origem=%s)",
             current_user.id,
             prova.id,
+            origem_scan,
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1893,9 +2014,10 @@ async def scan_prova(
         )
 
     logger.info(
-        "Scan OK: user=%s prova=%s status=%s transicoes=%d",
+        "Scan OK: user=%s prova=%s origem=%s status=%s transicoes=%d",
         current_user.id,
         prova.id,
+        origem_scan,
         prova.status.value,
         len(transicoes_permitidas),
     )

@@ -2,6 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
+import type { CodigoErro } from "@/lib/services/identificacao-prova";
+
 interface UseScannerOptions {
   /** Chamado quando um QR Code e detectado. O valor e o texto decodificado. */
   onDetect: (payload: string) => void;
@@ -18,6 +20,17 @@ interface UseScannerResult {
   ready: boolean;
   /** Mensagem de erro do ciclo de vida da camera, ou `null`. */
   error: string | null;
+  /**
+   * Codigo de erro tipado quando aplicavel. Wave 3 v4.0 (Componente 10):
+   * sempre `DISPOSITIVO_SEM_CAMERA` em caso de falha — `getUserMedia`
+   * indisponivel, permissao negada, ou stream rejeitado pelo browser.
+   * `null` quando nao ha erro.
+   *
+   * O componente chamador usa este codigo para decidir o comportamento
+   * (ex.: trocar para tab Manual + mostrar mensagem padrao em pt-BR
+   * de `MENSAGENS_ERRO['DISPOSITIVO_SEM_CAMERA']`).
+   */
+  errorCode: CodigoErro | null;
 }
 
 /**
@@ -57,6 +70,7 @@ export function useScanner(options: UseScannerOptions): UseScannerResult {
 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<CodigoErro | null>(null);
 
   // Refs para guardar a instancia e callbacks mais recentes.
   // Callbacks vao em ref para evitar re-montar a camera quando eles
@@ -113,6 +127,7 @@ export function useScanner(options: UseScannerOptions): UseScannerResult {
         if (mounted) {
           setReady(true);
           setError(null);
+          setErrorCode(null);
         }
       } catch (err) {
         if (!mounted) return;
@@ -120,6 +135,12 @@ export function useScanner(options: UseScannerOptions): UseScannerResult {
           err instanceof Error ? err.message : "Falha ao iniciar a camera";
         setReady(false);
         setError(msg);
+        // Wave 3 v4.0 (Componente 10): qualquer falha de inicializacao
+        // de camera vira `DISPOSITIVO_SEM_CAMERA` na visao do chamador.
+        // Diferenciacoes finas (permissao negada vs lib falhou) ficam
+        // em `error` (mensagem crua) para debug; o codigo tipado e
+        // suficiente para decidir o fluxo.
+        setErrorCode("DISPOSITIVO_SEM_CAMERA");
         if (onErrorRef.current) {
           onErrorRef.current(err instanceof Error ? err : new Error(msg));
         }
@@ -154,5 +175,5 @@ export function useScanner(options: UseScannerOptions): UseScannerResult {
     };
   }, [enabled, safeDivId]);
 
-  return { divId: safeDivId, ready, error };
+  return { divId: safeDivId, ready, error, errorCode };
 }

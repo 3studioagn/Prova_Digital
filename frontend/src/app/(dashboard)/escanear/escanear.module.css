@@ -1,589 +1,802 @@
-/*
- * Pagina Escanear — Wave 3 Lote A sub-bloco A.5.
+/* ──────────────────────────────────────────────────────────────────────
+ * Wave 3 v4.0 / Componente 10 — Scanner reformulado.
  *
- * Fluxo visual: (idle) -> scanner ativo -> prova resolvida -> assinatura
- * -> sucesso. Cada estado tem seu proprio layout dentro do mesmo card
- * do dashboard. Mesmo padrao de tokens (--color-card-*) do /nova-prova
- * e /provas.
- */
+ * Iteracao 3 (pos-Mario fornecer link do Figma e specs exatas via MCP).
+ *
+ * Specs canonicos extraidos via mcp__9b97d32e-...__get_design_context
+ * (file kqOrPgP07y6y1SV7BUlEBs):
+ *   - Frame Camera node 206:87
+ *   - Frame Manual node 240:6448
+ *
+ * Estrutura:
+ *   .pageWrapper
+ *     .wrapper (bg #eaeaea, rounded 43px, engloba TUDO)
+ *       .header (titulo 64px + subtitulo 18px #575757)
+ *       .tabsRow → .tabs (white, rounded 39px, h 58px, w 513px)
+ *                  alinhado a esquerda no mesmo X do innerCard
+ *       .innerCard (white, rounded 37px, h ~581px)
+ *         [camera] .cameraPanel (preview 624px + sidebar 554px)
+ *         [manual] .manualPanel (centralizado vertical)
+ *         .innerFooter (divisor 554px + Ultima leitura | Ver historico)
+ *
+ * Tokens canonicos do Figma:
+ *   - bg wrapper: #eaeaea
+ *   - subtitulo: #575757
+ *   - sidebar title: #0e0e0e
+ *   - sidebar desc: #5a5a5a (line-height 20.8px)
+ *   - footer + hint: #7a7a7a
+ *   - brackets: #f5c518 (AMARELO!)
+ *   - preview slot bg: gradient #fafafa → #f1f1f1, border 1px #ececec
+ *   - mini-card branco: white, border 1px #ececec, shadow especifico
+ *   - input wrapper (manual): bg #fafafa, border 1px #e3e3e3, rounded 12px
+ *   - input prefix: #9a9a9a JetBrains Mono 13px
+ *   - input placeholder: #757575 JetBrains Mono 16px
+ *   - botao Buscar prova: bg #dcdcdc (desabilitado), texto #9a9a9a
+ *
+ * Acessibilidade preservada (role=tab, aria-selected, role=alert,
+ * prefers-reduced-motion).
+ * ──────────────────────────────────────────────────────────────────── */
 
-/* ── Header ───────────────────────────────────────────────────────────── */
-
-.pageHeader {
+.pageWrapper {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 2.5rem;
-  flex-wrap: wrap;
+  flex-direction: column;
+  padding: 1.5rem 2rem 1.5rem 2rem;
+  min-height: 100%;
+}
+
+/* ─── Wrapper externo cinza claro ─────────────────────────────────── */
+
+.wrapper {
+  background: #eaeaea;
+  border-radius: 43px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  flex: 1;
+  min-height: 720px;
+}
+
+/* ─── Header ──────────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  /* Titulo e subtitulo alinhados a esquerda — mesmo X que o innerCard
+   * comeca (sem padding extra). */
 }
 
 .title {
-  font-size: clamp(2.5rem, 5vw, 4rem);
-  font-weight: 500;
-  line-height: 1.05;
-  color: var(--color-card-text);
+  font-size: clamp(2.5rem, 4.2vw, 4rem);
+  font-weight: 400;
+  color: #000000;
   letter-spacing: -0.02em;
+  margin: 0;
+  line-height: 1;
 }
 
 .subtitle {
-  font-size: var(--fs-base);
-  color: var(--color-card-text-muted);
-  margin-top: 0.5rem;
-}
-
-/* ── Idle state: call-to-action grande ─────────────────────────────────── */
-
-.idleCard {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1.5rem;
-  padding: 4rem 2rem;
-  background: var(--color-card-surface);
-  border-radius: var(--radius-card-lg);
-  text-align: center;
-  min-height: 320px;
-}
-
-.idleIcon {
-  width: 64px;
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-card-surface-alt);
-  border-radius: 50%;
-  color: var(--color-card-text);
-}
-
-.idleTitle {
-  font-size: var(--fs-h2);
-  font-weight: 500;
-  color: var(--color-card-text);
-}
-
-.idleDescription {
-  font-size: var(--fs-base);
-  color: var(--color-card-text-muted);
-  max-width: 480px;
-}
-
-/* ── Botao primario (amarelo pill) ─────────────────────────────────────── */
-
-.primaryButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.85rem 2rem;
-  background: var(--color-accent);
-  color: var(--color-text-dark);
-  border: none;
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-base);
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.primaryButton:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-
-.primaryButton:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* ── Entrada manual do codigo ─────────────────────────────────────────── */
-
-.manualInputWrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.75rem;
-  width: 100%;
-  max-width: 420px;
-}
-
-.manualLabel {
-  font-size: var(--fs-sm);
-  color: var(--color-card-text-muted);
-  text-align: center;
-}
-
-.manualInput {
-  width: 100%;
-  padding: 0.85rem 1rem;
-  font-size: var(--fs-base);
-  color: var(--color-card-text);
-  background: var(--color-card-bg);
-  border: 1px solid var(--color-card-border);
-  border-radius: var(--radius-pill);
-  text-align: center;
-}
-
-.manualInput:focus {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-/* ── Botao escuro (buscar) ────────────────────────────────────────────── */
-
-.darkButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.85rem 2rem;
-  background: var(--color-card-text);
-  color: var(--color-card-bg);
-  border: none;
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-base);
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.15s ease;
-  min-width: 140px;
-}
-
-.darkButton:hover:not(:disabled) {
-  opacity: 0.85;
-}
-
-.darkButton:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* ── Botao secundario (outline) ────────────────────────────────────────── */
-
-.secondaryButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.75rem 1.5rem;
-  background: transparent;
-  color: var(--color-card-text);
-  border: 1px solid var(--color-card-border);
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-base);
+  font-size: 1.125rem; /* 18px */
   font-weight: 400;
-  cursor: pointer;
-  transition: background 0.15s ease;
+  color: #575757;
+  margin: 0;
+  max-width: 60ch;
+  line-height: 1.45;
 }
 
-.secondaryButton:hover:not(:disabled) {
-  background: var(--color-card-surface-alt);
+/* ─── Toggle pill (Camera / Manual) ───────────────────────────────── */
+
+/* Tabs alinhados a ESQUERDA do wrapper (mesmo X que o innerCard).
+ * Nao centralizado horizontalmente. */
+.tabsRow {
+  display: flex;
+  justify-content: flex-start;
 }
 
-/* ── Botao destrutivo (reprovar) ───────────────────────────────────────── */
+.tabs {
+  display: inline-flex;
+  align-items: center;
+  background: #ffffff;
+  border-radius: 39px;
+  padding: 5px;
+  gap: 5px;
+  height: 58px;
+  /* No Figma o container tem 513px fixo. Em telas pequenas usamos
+   * largura maxima da viewport.  */
+  width: min(513px, 100%);
+}
 
-.dangerButton {
+.tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.85rem 2rem;
-  background: var(--color-danger);
-  color: #ffffff;
+  flex: 1; /* cada tab divide a largura igualmente */
+  height: 48px;
   border: none;
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-base);
-  font-weight: 500;
+  background: transparent;
+  color: #000000;
+  border-radius: 39px;
+  font: inherit;
+  font-weight: 400;
+  font-size: 1.125rem; /* 18px */
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: color 180ms ease;
 }
 
-.dangerButton:hover:not(:disabled) {
-  background: var(--color-danger-hover);
+/* Pill preto animado — framer-motion `layoutId="scanner-tab-pill"`
+ * desliza entre as 2 tabs quando o usuario troca. Espelho do
+ * `.segmentPill` da /nova-prova (Wave 2 v4.0 C06 Visual Refresh v2). */
+.tabPill {
+  position: absolute;
+  inset: 0;
+  background: #000000;
+  border-radius: 39px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  z-index: 0;
 }
 
-.dangerButton:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+/* Label fica POR CIMA do pill animado. */
+.tabLabel {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-/* ── Scanner ativo ─────────────────────────────────────────────────────── */
+.tabActive {
+  color: #ffffff;
+}
 
-.scannerWrapper {
+.tab:focus-visible {
+  outline: 2px solid #000000;
+  outline-offset: 2px;
+}
+
+/* ─── Card branco interno ─────────────────────────────────────────── */
+
+.innerCard {
+  background: #ffffff;
+  border-radius: 37px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 480px;
+  padding: 2rem;
+  /* `overflow: hidden` evita que o motion.div em transicao "vaze"
+   * dos cantos arredondados durante a animacao (iteracao 9). */
+  overflow: hidden;
+}
+
+/* Iteracao 9 — wrapper do AnimatePresence/motion.div que envolve
+ * os panels Camera/Manual. Precisa esticar para ocupar todo o
+ * innerCard (flex column flex: 1) para que os panels filhos com
+ * `flex: 1` continuem funcionando dentro dele. `min-height: 0`
+ * evita overflow vertical em telas estreitas. */
+.panelMotion {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+
+/* ─── Camera panel (lado a lado) ──────────────────────────────────── */
+
+/* Iteracao 5 (pos-feedback Mario): align-items: stretch para que a
+ * coluna direita (.cameraSidebar) ocupe a altura toda do panel —
+ * permitindo justify-content space-between separar topo (texto+CTA
+ * centralizado verticalmente) e fundo (footer com divisor). */
+.cameraPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 2rem;
+  flex: 1;
+  align-items: stretch;
+}
+
+/* Preview slot: gradient sutil, border, brackets externos amarelos. */
+.previewSlot {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.5rem;
-  padding: 2rem;
-  background: var(--color-card-surface);
-  border-radius: var(--radius-card-lg);
-}
-
-.scannerContainer {
+  justify-content: center;
+  background: linear-gradient(180deg, #fafafa 0%, #f1f1f1 100%);
+  border: 1px solid #ececec;
+  border-radius: 16px;
+  padding: 3rem;
+  min-height: 380px;
+  aspect-ratio: 1.18 / 1;
   width: 100%;
-  max-width: 360px;
-  aspect-ratio: 1 / 1;
-  background: #000000;
-  border-radius: var(--radius-card);
-  overflow: hidden;
-  position: relative;
 }
 
-/* O html5-qrcode injeta um <video> e overlays dentro do container. */
-.scannerContainer :global(video) {
+.previewHint {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: #7a7a7a;
+  margin: 0;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* qrMockBox: wrapper que aninha o card branco/camera live + os 4
+ * brackets amarelos. Position relative para que os brackets se
+ * posicionem com inset -10px relativo a este box. */
+.qrMockBox {
+  position: relative;
+  width: clamp(220px, 75%, 300px);
+  aspect-ratio: 1;
+}
+
+/* Mini-card branco com QR mock (estado idle).
+ * Specs Figma: white, border 1px #ececec, rounded 16px,
+ * shadow `0 12px 36px -12px rgba(0,0,0,0.18)`. Ocupa 100% do qrMockBox. */
+.qrMockCard {
+  background: #ffffff;
+  border: 1px solid #ececec;
+  border-radius: 16px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0px 12px 36px -12px rgba(0, 0, 0, 0.18),
+    0px 1px 0px 0px rgba(0, 0, 0, 0.04);
+}
+
+/* Faixa amarela superior — gradient sutil simulando o destaque
+ * do design (Figma node 240:6278, height 60px, gradient 0→0.14→0).
+ *
+ * Iteracao 7 (pos-Mario): adicionada animacao infinita de
+ * escaneamento — o feixe sobe e desce entre o topo (top: 12px) e o
+ * rodape (top: calc(100% - 72px) = parent_h - beam_h - gap_inf) do
+ * mini-card. `ease-in-out` faz pausa visivel nas pontas, simulando
+ * um beam de scanner real. `prefers-reduced-motion` desabilita
+ * (RN-012, RNF-010, WCAG 2.3.3). */
+.qrMockYellowBar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  height: 60px;
+  background: linear-gradient(
+    180deg,
+    rgba(245, 197, 24, 0) 0%,
+    rgba(245, 197, 24, 0.14) 50%,
+    rgba(245, 197, 24, 0) 100%
+  );
+  border-radius: 8px;
+  pointer-events: none;
+  animation: qrScanBeam 2.2s ease-in-out infinite;
+  will-change: top;
+}
+
+@keyframes qrScanBeam {
+  0%,
+  100% {
+    top: 12px;
+  }
+  50% {
+    /* 60px (height do beam) + 12px (gap inferior espelhado) = 72px
+     * de subtraido do 100% para o beam parar com folga no rodape. */
+    top: calc(100% - 72px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qrMockYellowBar {
+    animation: none;
+  }
+}
+
+/* SVG QR centralizado, 120x120 conforme Figma. */
+.qrMockSvg {
+  width: 120px;
+  height: 120px;
+  position: relative;
+  z-index: 1;
+}
+
+.bracketTopLeft,
+.bracketTopRight,
+.bracketBottomLeft,
+.bracketBottomRight {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-color: #f5c518; /* AMARELO! */
+  border-style: solid;
+  border-width: 0;
+  pointer-events: none;
+}
+
+.bracketTopLeft {
+  top: -10px;
+  left: -10px;
+  border-top-width: 2px;
+  border-left-width: 2px;
+}
+
+.bracketTopRight {
+  top: -10px;
+  right: -10px;
+  border-top-width: 2px;
+  border-right-width: 2px;
+}
+
+.bracketBottomLeft {
+  bottom: -10px;
+  left: -10px;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+}
+
+.bracketBottomRight {
+  bottom: -10px;
+  right: -10px;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+}
+
+/* ─── Camera live (estado scanning) — ocupa o qrMockBox ──────────── */
+
+.cameraLiveWrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #000000;
+  border: 1px solid #ececec;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0px 12px 36px -12px rgba(0, 0, 0, 0.18),
+    0px 1px 0px 0px rgba(0, 0, 0, 0.04);
+}
+
+.cameraLive {
+  width: 100%;
+  height: 100%;
+}
+
+.cameraLive :global(video) {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover;
 }
 
-.scannerStatus {
-  font-size: var(--fs-base);
-  color: var(--color-card-text);
-  text-align: center;
+.cameraStatus {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.85rem;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  margin: 0;
 }
 
-.scannerError {
-  font-size: var(--fs-sm);
-  color: var(--color-danger);
-  text-align: center;
-  padding: 0.75rem 1rem;
-  background: var(--color-danger-soft);
-  border-radius: var(--radius-sm);
-  max-width: 400px;
-}
+/* ─── Sidebar (lado direito do cameraPanel) ───────────────────────── */
 
-/* ── Preview da prova ──────────────────────────────────────────────────── */
-
-.provaCard {
+/* Sidebar agora aninha 2 blocos:
+ *   .cameraSidebarTop (titulo + descricao + CTA — alinhado ao TOPO)
+ *   <InnerFooter />    (divisor + Ultima leitura | Ver historico — BOTTOM)
+ * Justify space-between separa os 2. Specs Figma node 240:6339:
+ * divisor w[554px] e footer ocupam apenas a coluna direita. */
+.cameraSidebar {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
-  padding: 2rem;
-  background: var(--color-card-surface);
-  border-radius: var(--radius-card-lg);
-}
-
-.provaCardHeader {
-  display: flex;
-  align-items: flex-start;
   justify-content: space-between;
+  align-items: stretch;
+  max-width: 554px;
+  align-self: stretch;
+  /* Sem height fixo — align-self stretch + grid stretch cuidam disso. */
+}
+
+/* Iteracao 6 (pos-feedback Mario: imagem 5):
+ * Modo CAMERA → bloco texto+CTA fica alinhado ao TOPO da coluna
+ * direita (corresponde aos specs Figma: titulo "Pronto para
+ * escanear" tem top 562 vs innerCard top 448, ou seja, ~94px de
+ * gap do topo — nao centralizado).
+ * Modo MANUAL fica centralizado (`.manualPanelTop` mantem `center`).
+ *
+ * `flex: 1` continua ocupando o espaco entre o topo da sidebar e o
+ * footer; `justify-content: flex-start` alinha o conteudo no TOPO. */
+.cameraSidebarTop {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
   gap: 1rem;
-  flex-wrap: wrap;
+  flex: 1;
+  padding: 3rem 0;
 }
 
-.provaNome {
-  font-size: var(--fs-h2);
-  font-weight: 500;
-  color: var(--color-card-text);
-  margin-bottom: 0.25rem;
+.panelTitle {
+  font-size: clamp(1.75rem, 2.5vw, 2.5rem); /* 40px alvo */
+  font-weight: 500; /* Inter Medium */
+  color: #0e0e0e;
+  margin: 0;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
 }
 
-.provaNroReq {
-  font-size: var(--fs-sm);
-  color: var(--color-card-text-muted);
-  font-family: var(--font-family);
-  letter-spacing: 0.02em;
+.panelDescription {
+  font-size: 1rem; /* 18px */
+  color: #5a5a5a;
+  line-height: 20.8px; /* spec Figma */
+  max-width: 500px;
+  margin: 0;
 }
 
-.statusBadge {
+/* Botao "Abrir camera": preto, rounded 17, w 494, h 50, texto 16px. */
+.cameraCta {
   display: inline-flex;
   align-items: center;
-  padding: 0.4rem 0.9rem;
-  background: var(--color-accent-soft);
-  color: var(--color-card-text);
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-sm);
-  font-weight: 500;
-}
-
-.provaInfoGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--color-card-divider);
-}
-
-.provaInfoLabel {
-  font-size: var(--fs-xs);
-  color: var(--color-card-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 0.25rem;
-}
-
-.provaInfoValue {
-  font-size: var(--fs-base);
-  color: var(--color-card-text);
-}
-
-/* ── Lista de transicoes disponiveis ───────────────────────────────────── */
-
-.actionsWrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  padding: 2rem;
-  background: var(--color-card-surface);
-  border-radius: var(--radius-card-lg);
-}
-
-.actionsTitle {
-  font-size: var(--fs-lg);
-  font-weight: 500;
-  color: var(--color-card-text);
-}
-
-.actionsHint {
-  font-size: var(--fs-sm);
-  color: var(--color-card-text-muted);
-}
-
-.actionsList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
+  justify-content: center;
+  gap: 0.625rem;
+  width: 100%;
+  max-width: 494px;
+  height: 50px;
+  font: inherit;
+  font-weight: 400;
+  font-size: 1rem; /* 16px */
+  background: #000000;
+  color: #ffffff;
+  border: none;
+  border-radius: 17px;
+  cursor: pointer;
+  transition: background-color 180ms ease, transform 120ms ease;
   margin-top: 0.5rem;
 }
 
-.noActions {
-  font-size: var(--fs-base);
-  color: var(--color-card-text-muted);
-  padding: 1rem 0;
+.cameraCta:hover:not(:disabled) {
+  background-color: rgba(0, 0, 0, 0.85);
 }
 
-/* ── Modal (assinatura + reprovar) ─────────────────────────────────────── */
+.cameraCta:active:not(:disabled) {
+  transform: translateY(1px);
+}
 
-.modalBackdrop {
-  position: fixed;
-  inset: 0;
-  background: var(--color-overlay);
+.cameraCta:focus-visible {
+  outline: 2px solid #000000;
+  outline-offset: 3px;
+}
+
+.cameraCta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.linkButton {
+  background: transparent;
+  border: none;
+  color: #000000;
+  font: inherit;
+  font-weight: 500;
+  font-size: 0.95rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  align-self: flex-start;
+}
+
+.linkButton:hover {
+  text-decoration: none;
+}
+
+/* ─── Banner de erro inline ───────────────────────────────────────── */
+
+.errorBanner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  background: rgba(185, 28, 28, 0.08);
+  color: #7f1d1d;
+  border-left: 3px solid #b91c1c;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.errorBanner strong {
+  font-weight: 600;
+}
+
+/* ─── Manual panel ────────────────────────────────────────────────── */
+
+/* Iteracao 5 (pos-feedback Mario):
+ *   - justify-content: space-between separa bloco superior (texto +
+ *     input + CTA — centralizado vertical) do footer.
+ *   - .manualPanelTop ocupa flex: 1 entre topo e footer com
+ *     justify-content: center para centralizar verticalmente. */
+.manualPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex: 1;
+  padding: 0;
+  /* No Figma o conteudo manual fica em left 956 dentro do innerCard
+   * (left 528, w 1342) — empurrado para o centro-direita. */
+  padding-left: clamp(0px, 12vw, 28%);
+}
+
+.manualPanelTop {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1rem;
+  flex: 1;
+  width: 100%;
+  max-width: 554px;
+  padding-bottom: 1.5rem;
+}
+
+.panelTitleManual {
+  font-size: clamp(1.75rem, 2.5vw, 2.5rem); /* 40px */
+  font-weight: 500; /* Inter Medium */
+  color: #0e0e0e;
+  margin: 0;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+}
+
+.panelDescriptionManual {
+  font-size: 1rem; /* 18px */
+  color: #5a5a5a;
+  line-height: 20.8px;
+  margin: 0;
+  max-width: 554px;
+}
+
+/* Input wrapper com prefixo monospace.
+ * Specs Figma: bg #fafafa, border 1px #e3e3e3, rounded 12px, w 520px,
+ * pl 17px, pr 7px, py 7px, gap 10px. */
+.manualInputWrapper {
+  width: min(520px, 100%);
   display: flex;
   align-items: center;
+  gap: 10px;
+  background: #fafafa;
+  border: 1px solid #e3e3e3;
+  border-radius: 12px;
+  padding: 7px 7px 7px 17px;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.manualInputWrapper:focus-within {
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.manualInputWrapper[aria-invalid="true"] {
+  border-color: #b91c1c;
+}
+
+/* Prefixo "PRV-" — Q4 do Mario: formato real do produto.
+ * Estilo identico ao Figma (JetBrains Mono 13px #9a9a9a tracking 0.65px). */
+.manualInputPrefix {
+  font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular,
+    "SF Mono", Menlo, Consolas, monospace;
+  font-size: 13px;
+  font-weight: 400;
+  color: #9a9a9a;
+  letter-spacing: 0.65px;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Input campo — JetBrains Mono 16px #757575 tracking 0.8px. */
+.manualInput {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 0;
+  font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular,
+    "SF Mono", Menlo, Consolas, monospace;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0.8px;
+  background: transparent;
+  color: #000000;
+  border: none;
+  outline: none;
+}
+
+.manualInput::placeholder {
+  color: #757575;
+  font-family: inherit;
+  letter-spacing: 0.8px;
+}
+
+.manualInput:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Botao "Buscar prova":
+ * - Desabilitado: bg #dcdcdc, texto #9a9a9a (Inter Medium 13.2px)
+ * - Habilitado: bg #000000, texto #ffffff
+ * Rounded 12px (nao pill), padding py 14px. */
+.manualCta {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  z-index: 1000;
-  padding: 1rem;
+  gap: 8px;
+  width: min(520px, 100%);
+  padding: 14px 18px;
+  font: inherit;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-weight: 500; /* Inter Medium */
+  font-size: 13.2px;
+  background: #dcdcdc;
+  color: #9a9a9a;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
-.modalCard {
-  background: var(--color-card-bg);
-  border-radius: var(--radius-card-lg);
-  padding: 2rem;
-  max-width: 560px;
+.manualCta:not(:disabled) {
+  background: #000000;
+  color: #ffffff;
+}
+
+.manualCta:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.manualCta:disabled {
+  cursor: not-allowed;
+}
+
+.manualCta:focus-visible {
+  outline: 2px solid #000000;
+  outline-offset: 2px;
+}
+
+/* ─── Footer dentro do innerCard branco ───────────────────────────── */
+
+/* Wave 3 v4.0 (C10) — footer vive dentro de .cameraSidebar (modo
+ * camera) e .manualPanel (modo manual), nao mais filho direto do
+ * .innerCard. `width: 100%` + `max-width: 554px` herdam a largura
+ * da coluna pai.
+ *
+ * `align-self: stretch` (iteracao 8) defende contra `align-items:
+ * flex-start` do `.manualPanel`, que fazia o footer pegar o tamanho
+ * intrinseco do conteudo — colando "Ultima leitura ha —" e "Ver
+ * historico" no centro em vez de espalhados nas pontas. */
+.innerFooter {
   width: 100%;
-  max-height: 90vh;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.modalTitle {
-  font-size: var(--fs-h2);
-  font-weight: 500;
-  color: var(--color-card-text);
-}
-
-.modalDescription {
-  font-size: var(--fs-base);
-  color: var(--color-card-text-muted);
-}
-
-.modalTransicao {
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  color: var(--color-card-text);
-  padding: 0.5rem 0.75rem;
-  background: var(--color-card-surface-alt);
-  border-radius: var(--radius-sm);
-}
-
-.modalField {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.modalLabel {
-  font-size: var(--fs-sm);
-  font-weight: 500;
-  color: var(--color-card-text);
-}
-
-.modalTextarea {
-  width: 100%;
-  min-height: 80px;
-  padding: 0.75rem 1rem;
-  background: var(--color-card-bg);
-  border: 1px solid var(--color-card-border);
-  border-radius: var(--radius-card);
-  font-family: var(--font-family);
-  font-size: var(--fs-base);
-  color: var(--color-card-text);
-  resize: vertical;
-}
-
-.modalTextarea:focus {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 1px;
-}
-
-/* ── Canvas de assinatura ──────────────────────────────────────────────── */
-
-.signatureWrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.signatureCanvas {
-  background: #ffffff;
-  border: 2px dashed var(--color-card-border);
-  border-radius: var(--radius-card);
-  width: 100%;
-  touch-action: none;
-  cursor: crosshair;
-}
-
-.signatureActions {
+  max-width: 554px;
+  align-self: stretch;
+  margin-top: auto;
+  padding-top: 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+  font-size: 11px;
+  color: #7a7a7a;
+  border-top: 1px solid #e9e9e9;
 }
 
-.signatureHint {
-  font-size: var(--fs-xs);
-  color: var(--color-card-text-muted);
+.innerFooterLabel {
+  font-weight: 400;
 }
 
-.clearButton {
-  background: none;
-  border: none;
-  color: var(--color-card-text-muted);
-  cursor: pointer;
-  font-size: var(--fs-sm);
-  padding: 0.25rem 0.5rem;
-  text-decoration: underline;
-}
-
-.clearButton:hover {
-  color: var(--color-card-text);
-}
-
-/* ── Modal footer ──────────────────────────────────────────────────────── */
-
-.modalFooter {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  margin-top: 0.5rem;
-}
-
-.modalError {
-  padding: 0.75rem 1rem;
-  background: var(--color-danger-soft);
-  color: var(--color-danger);
-  border-radius: var(--radius-sm);
-  font-size: var(--fs-sm);
-}
-
-/* ── Estados de feedback (sucesso/erro) ────────────────────────────────── */
-
-.successCard {
-  display: flex;
-  flex-direction: column;
+.innerFooterLink {
+  color: #7a7a7a;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 3rem 2rem;
-  background: var(--color-card-surface);
-  border-radius: var(--radius-card-lg);
-  text-align: center;
-  min-height: 280px;
+  gap: 6px;
 }
 
-.successIcon {
-  width: 72px;
-  height: 72px;
-  display: flex;
+.innerFooterLinkDisabled {
+  color: #7a7a7a;
+  opacity: 0.7;
+  cursor: not-allowed;
+  user-select: none;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  background: var(--color-success);
-  color: #ffffff;
-  border-radius: 50%;
-  font-size: 2.5rem;
-  font-weight: 300;
+  gap: 6px;
 }
 
-.successTitle {
-  font-size: var(--fs-h2);
-  font-weight: 500;
-  color: var(--color-card-text);
+/* No modo manual, o footer no Figma fica numa posicao especifica do
+ * innerCard. Alinhamento se mantem identico ao modo camera (auto-margin). */
+
+/* ─── Acessibilidade ──────────────────────────────────────────────── */
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.successMessage {
-  font-size: var(--fs-base);
-  color: var(--color-card-text-muted);
-  max-width: 440px;
+/* ─── Responsividade ──────────────────────────────────────────────── */
+
+@media (max-width: 1100px) {
+  .cameraPanel {
+    gap: 2.5rem;
+  }
+  .manualPanel {
+    padding-left: clamp(0px, 8vw, 20%);
+  }
 }
 
-.errorCard {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
-  padding: 3rem 2rem;
-  background: var(--color-card-surface);
-  border-radius: var(--radius-card-lg);
-  text-align: center;
-  min-height: 240px;
-}
-
-.errorTitle {
-  font-size: var(--fs-h2);
-  font-weight: 500;
-  color: var(--color-danger);
-}
-
-.errorMessage {
-  font-size: var(--fs-base);
-  color: var(--color-card-text-muted);
-  max-width: 440px;
-}
-
-/* ── Layout da pagina ──────────────────────────────────────────────────── */
-
-.pageWrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  max-width: 760px;
-  margin: 0 auto;
-}
-
-/* ── Responsivo mobile ─────────────────────────────────────────────────── */
-
-@media (max-width: 640px) {
-  .pageHeader {
-    margin-bottom: 1.5rem;
+@media (max-width: 900px) {
+  .pageWrapper {
+    padding: 1rem;
   }
 
-  .idleCard,
-  .scannerWrapper,
-  .provaCard,
-  .actionsWrapper {
-    padding: 1.5rem 1rem;
+  .wrapper {
+    padding: 1.75rem 1.5rem 1.5rem;
+    border-radius: 28px;
   }
 
-  .modalCard {
-    padding: 1.25rem;
+  .innerCard {
+    padding: 1.75rem 1.5rem 1.25rem;
+    border-radius: 24px;
   }
 
-  .signatureCanvas {
-    height: 180px;
+  .cameraPanel {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  .manualPanel {
+    padding-left: 0;
+    align-items: stretch;
+  }
+
+  .panelDescription,
+  .panelDescriptionManual {
+    max-width: none;
+  }
+}
+
+@media (max-width: 540px) {
+  .wrapper {
+    padding: 1.25rem 1rem;
+    border-radius: 20px;
+  }
+
+  .innerCard {
+    padding: 1.5rem 1.25rem 1rem;
+    border-radius: 18px;
+  }
+
+  .tabs {
+    height: 52px;
+  }
+
+  .tab {
+    height: 42px;
+    font-size: 1rem;
+  }
+}
+
+/* ─── prefers-reduced-motion (RN-012, RNF-010) ────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .tab,
+  .cameraCta,
+  .manualCta,
+  .manualInput,
+  .manualInputWrapper {
+    transition: none;
   }
 }

@@ -2,6 +2,204 @@
 
 ---
 
+## v4.0 — Wave 3 — Componente 10 (atualizacao v4.0) — Scanner reformulado + Camada de servico desacoplada
+**Data:** 2026-05-06
+**Branch:** `wave3-v4/componente-10`
+**Status:** Implementacao Gate 2 completa, aguardando smoke-validation.md (humano) + PR final.
+
+### Adicionado
+- **`frontend/src/lib/services/identificacao-prova.ts`** — camada de servico
+  desacoplada de hardware/DOM. Funcoes `identificarProvaPorPayload`
+  (camera) e `identificarProvaPorCodigo` (manual / contrato C19). Tipos
+  `CodigoErro` (5 codigos: `QR_INVALIDO`, `PROVA_NAO_ENCONTRADA`,
+  `DISPOSITIVO_SEM_CAMERA`, `ERRO_REDE`, `SESSAO_EXPIRADA`) e
+  `ResultadoIdentificacao` (tagged union sucesso | erro). Mensagens em
+  pt-BR pre-resolvidas. Helper `criarErro(codigo)`.
+- **`frontend/src/lib/services/__tests__/identificacao-prova.test.ts`**
+  — 16 testes Vitest em `environment: node`, cobrindo: caminho payload
+  com 200 e 5 erros; caminho codigo com 200 e 5 erros; getToken
+  null/throw; body XOR; Authorization header; mensagens pt-BR;
+  helper `criarErro`; teste anti-acoplamento (regex contra DOM).
+- **`docs/wave3-v4-c10/analysis.md`** — Gate 1 (read-only) + Secao
+  Execucao (diff entre proposto e entregue, riscos materializados,
+  plano para C19/C11).
+- **`docs/wave3-v4-c10/contrato-c19.md`** — documento dedicado para
+  o C19 ler. Tipos, funcoes, casos de uso, roteiro de implementacao.
+- **`docs/wave3-v4-c10/smoke-validation.md`** — 20 cenarios para
+  Mario percorrer antes do PR final.
+- **`docs/wave3-v4-c10/figma-references.md`** — guia para Mario
+  adicionar os PNGs do Figma ao repo.
+- **`backend/app/api/v1/provas.py:_carregar_prova_por_codigo_publico_com_scoping`**
+  — helper canonico v4.0+ usando `idx_provas_codigo_publico`.
+- **3 novos icones** em `components/icons.tsx`: `CameraIcon`,
+  `KeyIcon`, `ArrowRightIcon`.
+
+### Modificado
+- **Bug em producao corrigido (R-1):** `scan_prova` agora detecta
+  formato no segundo campo do payload (`validar_formato_codigo_publico`)
+  e usa o lookup correto. Provas v4.0 (1 hoje, mais conforme uso)
+  voltam a escanear. Provas legacy v3.0 continuam funcionando via
+  fallback.
+- **`backend/app/domain/schemas/prova.py:ScanRequest`** — agora aceita
+  `payload: str | None` XOR `codigo: str | None` via `model_validator`.
+  Mensagem clara quando ambos ou nenhum vem preenchidos.
+- **`backend/app/api/v1/provas.py:scan_prova`** — handler reescrito
+  com 2 caminhos (camera/manual) + lookup polimorfico. Audit log
+  inclui novo campo `origem` ('camera' | 'manual') e sempre inclui
+  `codigo_publico` da prova.
+- **`frontend/src/hooks/useScanner.ts`** — agora expoe
+  `errorCode: CodigoErro | null` (sempre `DISPOSITIVO_SEM_CAMERA` em
+  falha) alem do `error: string` legacy.
+- **`frontend/src/lib/types/prova.ts:ScanRequest`** — tipos atualizados
+  para suportar `payload?` XOR `codigo?`.
+- **`frontend/src/components/icons.tsx`** — +3 icones.
+
+### Reescrito
+- **`frontend/src/app/(dashboard)/escanear/page.tsx`** — 740 LOC v3.0 →
+  414 LOC v4.0. Removidos `AssinaturaModal`, `ScanReadyView`,
+  `DoneView`, `ACTION_LABELS`, `useExecutarTransicao` (transicao
+  migra para `/provas/[id]` no C11 v4.0). Nova UI fiel ao Figma:
+  toggle pill Camera/Manual, painel da camera com preview/live,
+  painel manual com input PRV + botao "Buscar prova →", footer
+  placeholder, banners de erro contextuais.
+- **`frontend/src/app/(dashboard)/escanear/escanear.module.css`** —
+  589 LOC v3.0 → 433 LOC v4.0. Tokens canonicos do projeto. Sem
+  cores hardcoded. Brackets viewfinder, QR mock decorativo, camera
+  live overlay, responsividade em 2 breakpoints,
+  `prefers-reduced-motion` respeitado.
+
+### Removido
+- **`frontend/src/hooks/useScanProva.ts`** — superseded pela camada
+  de servico desacoplada.
+- Codigo morto da v3.0: maquina de estados PageState completa
+  (signing/submitting/done), modal de assinatura,
+  `react-signature-canvas` import, lista de transicoes na pagina.
+
+### Cobertura
+- Backend: **825 testes (816 passed + 9 skipped)** — era 805 + 9.
+  +20 testes novos.
+- Frontend Vitest: **44 testes (4 test files)** — era 28. +16 novos.
+- TypeScript: `npx tsc --noEmit` exit 0.
+- Build: `npx next build` 13/13 paginas. `/escanear` 5.25 kB / 168 kB
+  First Load (era ~9 kB / 175 kB).
+- Advisor MCP Supabase: sem novos alertas.
+
+### Migrations
+- **Zero.** Coluna + indice unique de `codigo_publico` ja em
+  producao via migration 012 (Wave 2 v4.0). RLS inalterada.
+
+### ADRs novos
+- **ADR-132** — Lookup polimorfico no scan (codigo_publico vs nro_requerimento).
+- **ADR-133** — Camada de servico de identificacao desacoplada de hardware.
+- **ADR-134** — Tab Manual entregue como shell funcional + placeholder PRV-AAAA-MM-NNNNNN.
+
+### Pendencias
+- Smoke E2E manual (Mario percorre `smoke-validation.md` 20 cenarios)
+  antes do PR para `development`.
+- Adicao manual dos PNGs do Figma ao repo (instrucoes em
+  `docs/wave3-v4-c10/figma-references.md`).
+
+### Refinamento visual pos-feedback Mario (iteracoes 4-7)
+
+Apos a entrega inicial, Mario apontou 4 rounds de discrepancias visuais.
+Cada round virou commit cirurgico dedicado:
+
+**Iteracao 4 (commit `16be342`):**
+- Footer (divisor + "Ultima leitura ha 2 min" + "Ver historico") movido
+  de filho do `.innerCard` para dentro da coluna direita
+  (`.cameraSidebar` / `.manualPanel`).
+- Specs Figma confirmaram: divisor `w[554]` em `left[1258]` (Camera)
+  ou `left[956]` (Manual) — alinhado com o conteudo da coluna, NAO
+  atravessando a largura total do card.
+- ADR-136 registrado.
+
+**Iteracao 5 (commit `a923c69`):**
+- Tabs Camera/Manual ganharam pill preto animado via `framer-motion`
+  `layoutId="scanner-tab-pill"` — espelho do `.segmentBtn` da
+  `/nova-prova`. Transition `{ type: "spring", bounce: 0.2,
+  duration: 0.35 }`.
+- `import { motion } from "framer-motion"` adicionado em `page.tsx`.
+- `align-items: stretch` no `.cameraPanel` + `space-between` na sidebar.
+- Bundle `/escanear` subiu de 168 → 208 kB First Load (+40 kB do
+  framer-motion no chunk — outras paginas ja importavam).
+- ADR-135 registrado.
+
+**Iteracao 6 (commit `17fa8ae`):**
+- `.cameraSidebarTop` mudou de `justify-content: center` para
+  `flex-start` — Mario apontou (com print) que o bloco texto+CTA
+  no modo Camera deve ficar **alinhado ao TOPO** da coluna direita
+  (specs Figma: titulo em top 562 vs innerCard top 448, gap ~94px do
+  topo).
+- `.manualPanelTop` mantem `justify-content: center` — modo Manual
+  continua centralizado verticalmente.
+
+**Iteracao 7 (commit `e34cee0`):**
+- Feixe amarelo `.qrMockYellowBar` ganhou animacao infinita CSS:
+  `qrScanBeam 2.2s ease-in-out infinite` — sobe do topo (top: 12px)
+  ao rodape do mini-card (`top: calc(100% - 72px)`) e volta,
+  simulando scanner.
+- `border-radius` ajustado de `8px 8px 0 0` para `8px` em todos os
+  cantos (visivel agora no rodape).
+- `prefers-reduced-motion: reduce { animation: none }` para
+  acessibilidade WCAG 2.3.3 / RN-012.
+- ADR-137 registrado.
+
+### Adicionado (iteracoes 4-7)
+- `src/app/layout.tsx`: importacao de `JetBrains_Mono` via
+  `next/font/google` (iteracao 3 — usada no input do tab Manual).
+- 3 novos icones em `components/icons.tsx` (camera, key, arrow-right)
+  ja entregues na iteracao 1.
+- Estrutura aninhada do `.cameraSidebar` e `.manualPanel` com
+  `space-between` (iteracao 4).
+- Componente `<Brackets />` reutilizavel (iteracao 3).
+
+### Modificado (iteracoes 4-7)
+- `.qrMockYellowBar`: border-radius 8px (todos cantos) +
+  `animation: qrScanBeam` (iteracao 7).
+- Estrutura JSX dos tabs em `ScannerTabs`: pill com `motion.span` +
+  `tabLabel` com z-index (iteracao 5).
+- `.cameraSidebarTop`: `justify-content: flex-start` (iteracao 6).
+- `.manualPanelTop` adicionado: centraliza verticalmente
+  (iteracao 5).
+- `.cameraPanel`: `align-items: stretch` (iteracao 5).
+
+### ADRs novos (iteracoes 4-7)
+- **ADR-135** — Pill preto animado nos tabs Camera/Manual via
+  `framer-motion` `layoutId`.
+- **ADR-136** — Footer dentro da coluna direita do innerCard (Figma
+  alignment).
+- **ADR-137** — Scanner beam animation (feixe amarelo infinito) com
+  `prefers-reduced-motion`.
+
+### Total de commits da entrega C10 v4.0
+1. `b86e7fd` — docs: analise read-only pre-execucao (Gate 1)
+2. `08cc174` — feat: backend ScanRequest XOR + lookup polimorfico
+3. `e4d543b` — feat: frontend scanner reformulado + camada de servico
+4. `c18d665` — docs: ADRs 132-134 + CHANGELOG + CLAUDE + contrato-c19
+5. `0a41a4a` — style: estrutura tripla aninhada + tabs centralizados
+   (iteracao 2 — superseded)
+6. `088fe78` — style: refit visual com specs EXATOS do Figma via MCP
+   (iteracao 3)
+7. `16be342` — style: footer no rodape da coluna direita
+   (iteracao 4 — ADR-136)
+8. `a923c69` — style: tabs com pill animado (framer-motion) +
+   centralizacao vertical (iteracao 5 — ADR-135)
+9. `17fa8ae` — style: camera mode com bloco texto+CTA alinhado ao TOPO
+   (iteracao 6)
+10. `e34cee0` — style: animacao do feixe amarelo (scanner beam)
+    (iteracao 7 — ADR-137)
+
+### Validacao final (apos iteracao 7)
+- `pytest backend/tests/`: 825 passed + 9 skipped (sem alteracao).
+- `npx tsc --noEmit`: exit 0.
+- `npx vitest run`: 44 passed.
+- `npx next build`: 13/13 paginas. `/escanear` 5.73 kB / 208 kB
+  First Load.
+- Acessibilidade preservada em todas as iteracoes.
+- Backend, RLS, migrations, schema: intocados.
+
+---
+
 ## [2026-05-05 — Wave 2 v4.0 — Correcoes Pos-Auditoria Senior]
 
 Sessao de correcao dos 26 achados do `docs/wave2-v4/audit-report.md`

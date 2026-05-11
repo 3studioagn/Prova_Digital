@@ -5422,3 +5422,290 @@ positivo de saude do sistema.
 **Consequencias:**
   - Confirma que o escopo do C08 foi respeitado (frontend-only).
   - Proxima auditoria pode usar este ADR como baseline de comparacao.
+---
+
+## ADR-132 — Lookup polimorfico no scan: codigo_publico vs nro_requerimento (Wave 3 v4.0 / Componente 10)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10)
+**Contexto:** A Wave 2 v4.0 (ADR-116) introduziu `codigo_publico` no
+segundo campo do payload do QR Code. As 16 provas pre-migration-012
+ainda tem QR antigo com `nro_requerimento` no segundo campo. A
+1 prova MATRIZ pos-migration tem QR novo. **Bug em producao
+identificado em Gate 1 / R-1:** `scan_prova` fazia lookup por
+`nro_requerimento` mesmo quando recebia `codigo_publico` —
+provas v4.0 nao escaneavam.
+
+**Decisao:** No handler `scan_prova` (apos extrair
+`identificador` do segundo campo do payload), invocar
+`validar_formato_codigo_publico(identificador)`:
+  - Se True → `_carregar_prova_por_codigo_publico_com_scoping`.
+  - Se False → `_carregar_prova_por_nro_req_com_scoping` (fallback
+    legacy).
+
+Ambos os helpers compartilham mesma assinatura/retorno e usam
+`_scoping_filter(user)` (semantica RLS preservada).
+
+**Alternativas:**
+  - Forcar regenarcao das 16 etiquetas legacy ja nesta wave (rejeitado:
+    e Wave 7 / Componente 21 escopo).
+  - Tentar 2 SELECTs sequenciais (1 por codigo_publico, fallback nro_req)
+    (rejeitado: latencia 2x desnecessaria; `validar_formato_codigo_publico`
+    e regex puro <1us).
+  - SELECT com OR `codigo_publico = X OR nro_requerimento = X`
+    (rejeitado: nao usa indice unique, full scan; nao distingue origem).
+
+**Consequencias:**
+  - Provas v4.0 escaneam corretamente (bug R-1 corrigido).
+  - Provas legacy continuam funcionando ate Wave 7.
+  - Audit log inclui `codigo_publico` em ambos os caminhos para
+    rastreabilidade.
+  - Cobertura: `test_scan_camera_v4_qr_com_codigo_publico_resolve_pelo_codigo`
+    + `test_scan_camera_legacy_qr_continua_funcionando_via_fallback`.
+
+---
+
+## ADR-133 — Camada de servico de identificacao desacoplada de hardware (Wave 3 v4.0 / C10)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10)
+**Contexto:** O Backlog v4.0 (Componente 10) e DAT v3.0 §8.1 exigem
+idempotencia entre camera (C10) e digitacao manual (C19) — ambos
+mecanismos resolvem para o mesmo registro pelo mesmo lookup. Sem uma
+camada compartilhada, C19 vai duplicar logica de transporte HTTP +
+mapeamento de erro + autenticacao.
+
+**Decisao:** Criar `frontend/src/lib/services/identificacao-prova.ts`
+com 2 funcoes publicas:
+  - `identificarProvaPorPayload(payload, getToken)` — caminho camera.
+  - `identificarProvaPorCodigo(codigo, getToken)` — caminho manual / C19.
+
+Tipos compartilhados:
+  - `CodigoErro` enum: 5 codigos tipados.
+  - `ResultadoIdentificacao` tagged union (sucesso | erro).
+
+**Constraint dura:** zero acoplamento com DOM/camera/html5-qrcode.
+Vitest roda o modulo em `environment: node`. Teste especial faz
+regex contra `navigator.`/`document.`/`window.`/`html5-qrcode`
+no source — quebra o build se alguem reintroduzir acoplamento.
+
+**Alternativas:**
+  - Hook React `useIdentificarProva` (rejeitado: hook ja exige
+    React + JSDOM; queremos servico testavel em Node puro).
+  - Fetch direto na page (rejeitado: duplicaria logica entre /escanear
+    e o futuro componente do C19).
+  - Backend separado (rejeitado: Backlog v4.0 nao requer endpoint
+    novo; `/scan` ja foi estendido).
+
+**Consequencias:**
+  - C19 herda contrato pronto. Documentado em `docs/wave3-v4-c10/contrato-c19.md`.
+  - Camada e testavel sem mock de camera (16 testes Vitest verdes).
+  - Tipos sao reusaveis em qualquer ponto futuro que precise mapear
+    erros do scan.
+
+---
+
+## ADR-134 — Tab Manual entregue como shell funcional + placeholder PRV-AAAA-MM-NNNNNN (Wave 3 v4.0 / C10)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10)
+**Contexto:** Tres orientacoes do Mario no pre-Gate-2 convergem:
+  1. Q2: implementar a tab Manual como **shell funcional** (input +
+     botao chamando a camada de servico) sem mascara/realtime-validate
+     — esses sao escopo do C19.
+  2. Q3: footer "Ultima leitura ha N min" + link "Ver historico" virou
+     placeholder visual — sem dados reais.
+  3. Q4: input usa `PRV-AAAA-MM-NNNNNN` (formato real do produto)
+     em vez de `3S- XXXX-XXXX` que o Figma ainda mostrava.
+
+**Decisao 1 (Q2):** `<ManualPanel>` na page renderiza:
+  - h2 + descricao com `<code>PRV-AAAA-MM-NNNNNN</code>`.
+  - Input com `placeholder=PRV-AAAA-MM-NNNNNN`, `autoCapitalize=characters`,
+    `spellCheck=false`, `aria-invalid`/`aria-describedby`.
+  - Botao "Buscar prova →" desabilita quando vazio.
+  - Submit chama `identificarProvaPorCodigo` direto + redireciona
+    para `/provas/[id]` em sucesso.
+  - Banner de erro inline com `role="alert"`.
+
+**Decisao 2 (Q3):** `<CardFooter>` renderiza:
+  - "Ultima leitura ha —" (em-dash literal, sem dados).
+  - Link "Ver historico →" com `aria-disabled` + cor desbotada +
+    `title="Disponivel em breve"`.
+
+**Decisao 3 (Q4):** Placeholder do input segue formato real. Divergencia
+explicita do Figma documentada em `figma-references.md`.
+
+**Alternativas:**
+  - Q2 alternativa: tab Manual como skeleton estatico (rejeitado: quebraria
+    o fluxo "shell + chamada do servico" que da contrato pronto ao C19).
+  - Q3 alternativa: omitir o footer (rejeitado: divergiria visualmente
+    do Figma sem motivo forte).
+  - Q4 alternativa: usar `3S-` no placeholder e implementar mapeamento
+    no backend (rejeitado: confunde produto, requer migration adicional).
+
+**Consequencias:**
+  - C19 nao precisa rewrite do tab Manual — apenas adiciona mascara,
+    auto-uppercase, validacao client-side, rate-limit.
+  - Footer fica como TODO de uma wave futura quando o endpoint de
+    "ultima leitura" existir (audit_log filtrado por user, ja disponivel
+    via C18). A11y mantida.
+  - Mario aprovou as 3 decisoes na resposta pre-Gate-2.
+---
+
+## ADR-135 — Pill preto animado nos tabs Camera/Manual via `framer-motion` `layoutId`
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10 — Iteracao 5)
+**Contexto:** Apos a entrega inicial do C10 v4.0 (iteracoes 1-3), Mario
+pediu que os tabs Camera/Manual usem a **mesma animacao do
+`.segmentBtn` da `/nova-prova`** (Wave 2 v4.0 C06 Visual Refresh v2 —
+ADR-118 SUPERSEDIDO + visual refresh): quando o usuario muda de tab,
+o "pill preto" desliza entre as 2 celulas em vez de aparecer/desaparecer.
+
+**Decisao:** Adotar o **mesmo padrao** do `.segmentPill` no
+`/nova-prova` para os tabs do scanner. Implementacao em 3 partes:
+
+1. **JSX (`escanear/page.tsx`):** novo componente `<motion.span>`
+   renderizado condicionalmente dentro do tab ativo, com:
+   ```tsx
+   <motion.span
+     layoutId="scanner-tab-pill"
+     className={styles.tabPill}
+     transition={{ type: "spring", bounce: 0.2, duration: 0.35 }}
+     aria-hidden="true"
+   />
+   ```
+   `<span className={styles.tabLabel}>` aninha o icone + label e
+   fica POR CIMA do pill via `z-index: 1`.
+
+2. **CSS (`escanear.module.css`):**
+   - `.tabPill`: `position: absolute; inset: 0; background: #000000;
+     border-radius: 39px; z-index: 0;`
+   - `.tabLabel`: `position: relative; z-index: 1; display: inline-flex;`
+   - `.tabActive`: agora SO muda a cor do texto para `#ffffff`
+     (background passa a ser responsabilidade do pill animado).
+   - `.tab`: removida `transition: background-color`; permanece
+     `transition: color` (para o fade do texto quando muda).
+
+3. **Layout:** `position: relative` no `.tab` para que o pill
+   absoluto se posicione corretamente.
+
+**Alternativas:**
+  - CSS transition `background-color` (rejeitado: nao consegue
+    animar entre 2 elementos diferentes — apenas dentro do mesmo
+    elemento).
+  - CSS `view-transition-name` (rejeitado: suporte parcial em
+    browsers, alem de exigir refatoracao significativa).
+  - JS imperativo com `getBoundingClientRect` (rejeitado: framer-motion
+    `layoutId` ja faz isso bem).
+
+**Consequencias:**
+  - Tab switch tem a **mesma animacao spring** do segment de rota da
+    `/nova-prova` — consistencia visual em todo o produto.
+  - `prefers-reduced-motion` respeitado nativamente pelo framer-motion
+    (via `useReducedMotion` interno).
+  - Bundle `/escanear`: 168 kB → 208 kB First Load (+40 kB do
+    framer-motion no chunk compartilhado). Como outras paginas ja
+    importam framer-motion, o overhead real ja estava no shared chunk —
+    apenas a contagem por pagina muda.
+
+---
+
+## ADR-136 — Footer dentro da coluna direita do innerCard (alinhamento Figma)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10 — Iteracao 4)
+**Contexto:** Mario apontou (com screenshot) que o footer (divisor +
+"Ultima leitura ha 2 min" + "Ver historico") atravessava a largura
+total do `.innerCard`, mas o Figma mostra o footer **apenas dentro da
+coluna direita** (alinhado com o conteudo da sidebar/painel manual).
+
+Specs Figma confirmando:
+  - Camera (node 240:6339): divisor `left[1258] w[554]` — comeca no
+    mesmo X que o titulo "Pronto para escanear" (1258px), tem so 554px
+    de largura (nao os 1342px do innerCard inteiro).
+  - Manual (node 240:6611): divisor `left[956] w[554]` — alinhado com
+    o conteudo manual em left 956.
+
+**Decisao:** Mover `<InnerFooter />` de filho direto do `.innerCard`
+para dentro dos painels (camera/manual), aninhado no `flex column
+space-between` da sidebar/panel-pai. Estrutura final:
+
+```
+.innerCard (white, rounded 37px)
+  .cameraPanel (grid 2 col, align-items: stretch)
+    .previewSlot (col 1 — altura toda)
+    .cameraSidebar (col 2, flex column space-between)
+      .cameraSidebarTop (titulo + descricao + CTA)
+      <InnerFooter />   (← AQUI, nao mais filho do innerCard)
+
+ou
+
+  .manualPanel (flex column space-between)
+    .manualPanelTop (titulo + descricao + input + CTA)
+    <InnerFooter />
+```
+
+Com `width: 100%; max-width: 554px;` no `.innerFooter`, ele herda a
+largura da coluna pai naturalmente.
+
+**Alternativas:**
+  - Manter no innerCard com `width: 554px` fixo posicionado a direita
+    (rejeitado: nao se adapta a redimensionamento; quebra em telas
+    pequenas).
+  - Footer separado para cada modo (rejeitado: duplicacao
+    desnecessaria — componente eh o mesmo).
+
+**Consequencias:**
+  - Footer respeita o layout do Figma em ambos os modos.
+  - `.cameraSidebar` e `.manualPanel` agora dao `justify-content:
+    space-between` para separar topo (texto+CTA) do rodape (footer).
+  - `.cameraPanel` mudou de `align-items: center` para `align-items:
+    stretch` — coluna direita ocupa altura toda para que o footer
+    consiga encostar no fundo via `margin-top: auto` implicito do
+    `space-between`.
+
+---
+
+## ADR-137 — Scanner beam animation (feixe amarelo infinito)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10 — Iteracao 7)
+**Contexto:** Mario pediu que o feixe amarelo no mini-card branco do
+QR mock **suba e desca infinitamente**, simulando um scanner real.
+
+Originalmente o feixe (`.qrMockYellowBar`) era estatico no topo do
+mini-card (top: 12px, height: 60px, gradient amarelo sutil 0→0.14→0).
+
+**Decisao:** Animacao CSS pura com `@keyframes` + `prefers-reduced-motion`:
+
+```css
+.qrMockYellowBar {
+  /* specs existentes preservados */
+  border-radius: 8px;  /* todos os cantos — antes era so superiores */
+  animation: qrScanBeam 2.2s ease-in-out infinite;
+  will-change: top;
+}
+
+@keyframes qrScanBeam {
+  0%, 100% { top: 12px; }                  /* topo */
+  50%      { top: calc(100% - 72px); }     /* rodape com gap simetrico */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qrMockYellowBar { animation: none; }    /* feixe estatico no topo */
+}
+```
+
+**Calculo do `top: calc(100% - 72px)`:** o `100%` em `top` de elemento
+absolute refere-se ao altura do parent (`.qrMockCard`, que tem
+aspect-ratio 1 e width clamp 220-300px). Subtrair 72px = beam height
+(60) + gap inferior espelhado (12) garante que o beam **NAO sai** do
+mini-card no extremo inferior.
+
+**Por que CSS animation em vez de framer-motion:**
+  - Animacao continua e simples — `@keyframes` e suficiente.
+  - Zero overhead JS por frame (CSS animations rodam no compositor GPU).
+  - `will-change: top` da hint para o navegador.
+  - `prefers-reduced-motion` desabilita trivialmente (regra CSS pura).
+
+**Alternativas:**
+  - Framer Motion `motion.div` com `animate={{ top: [...] }}`
+    (rejeitado: overhead JS desnecessario para animacao puramente
+    decorativa).
+  - SVG animation (rejeitado: o feixe e um gradient, nao um SVG).
+  - Lottie (rejeitado: dependencia nova para 1 animacao trivial).
+
+**Consequencias:**
+  - Mais imersao visual no estado idle do scanner.
+  - Acessibilidade preservada via `prefers-reduced-motion`.
+  - Sem impacto em performance (CSS animation GPU-accelerated).
+  - `/escanear` 5.71 → 5.73 kB (+0.02 kB do CSS novo).
