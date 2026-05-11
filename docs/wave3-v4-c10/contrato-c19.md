@@ -57,6 +57,17 @@ export type CodigoErro =
 export type ResultadoIdentificacao =
   | { tipo: "sucesso"; prova: ScanResponse }
   | { tipo: "erro"; codigo: CodigoErro; mensagem: string };
+
+/**
+ * Record exhaustivo de mensagens padrao em pt-BR — exportado em
+ * pos-auditoria 2026-05-11 (AUD-W3C10-020) para C19 customizar.
+ * `Record<CodigoErro, string>` forca TypeScript a barrar entrada
+ * orfa ou faltante quando a uniao mudar.
+ */
+export const MENSAGENS_ERRO_PADRAO: Record<CodigoErro, string>;
+
+/** Helper que retorna a mensagem padrao para um codigo. */
+export function mensagemPara(codigo: CodigoErro): string;
 ```
 
 ### 2.2 Funcao que o C19 vai consumir
@@ -129,7 +140,12 @@ O Componente 10 v4.0 entregou o **shell visual** do tab "Manual" em
 1. **Mascara de digitacao em tempo real** — input formata
    automaticamente `PRV-AAAA-MM-NNNNNN`, separadores aparecem
    conforme o usuario digita. Sugestao: lib `imask` ou implementacao
-   manual com `useState` no `onChange`.
+   manual com `useState` no `onChange`. **Limite hard:** `max_length=32`
+   no backend (AUD-W3C10-012; era 64) — o C19 deve respeitar esse teto.
+   Codigos plausiveis tem 18 chars; folga ate 32 cobre typos sem
+   inflar superficie. Acima de 32 chars o backend retorna 422 Pydantic
+   (distinguivel de 404 generico — aceito por estar fora da faixa
+   plausivel).
 2. **Validacao client-side antes do submit** — rejeitar formato
    invalido sem chamar a API. Sugestao: regex igual ao
    `validar_formato_codigo_publico` do backend (alfabeto sem 0/O e
@@ -143,7 +159,8 @@ O Componente 10 v4.0 entregou o **shell visual** do tab "Manual" em
 6. **Mensagens de erro ricas** — alem do `result.mensagem` retornado
    pelo servico, C19 pode condicionar mensagens custom por tipo
    (e.g. "Formato invalido — confira a etiqueta" para erros do regex
-   client-side).
+   client-side). Para reutilizar a mensagem padrao do C10, importar
+   `mensagemPara(codigo)` (AUD-W3C10-020) ou `MENSAGENS_ERRO_PADRAO[codigo]`.
 
 ### 3.2 Backend (NADA NOVO necessario)
 
@@ -182,6 +199,56 @@ A camada de servico ja tem 16 testes em
   de tentativas).
 - Smoke E2E manual conforme `smoke-validation.md` (apos C19 integrar
   com o tab Manual).
+
+---
+
+### 3.5 Customizando mensagens no C19 (AUD-W3C10-020)
+
+A camada de servico ja resolve a mensagem em pt-BR via
+`result.mensagem`. O C19 pode usar diretamente:
+
+```tsx
+const resultado = await identificarProvaPorCodigo(codigo, { getToken });
+if (resultado.tipo === "erro") {
+  setMensagem(resultado.mensagem); // texto padrao em pt-BR
+}
+```
+
+Para **sobrescrever** mensagens (e.g. mensagem mais detalhada para
+o caso `PROVA_NAO_ENCONTRADA` quando o regex client-side ja confirmou
+formato OK):
+
+```tsx
+import {
+  identificarProvaPorCodigo,
+  mensagemPara,           // helper que retorna a mensagem padrao
+  MENSAGENS_ERRO_PADRAO,  // record completo, se quiser iterar
+  type CodigoErro,
+} from "@/lib/services/identificacao-prova";
+
+const MENSAGENS_C19: Partial<Record<CodigoErro, string>> = {
+  PROVA_NAO_ENCONTRADA:
+    "Codigo nao encontrado. Confira na etiqueta — formato PRV-AAAA-MM-NNNNNN.",
+};
+
+function mensagemFinal(codigo: CodigoErro): string {
+  // Fallback para mensagem padrao se C19 nao customizou.
+  return MENSAGENS_C19[codigo] ?? mensagemPara(codigo);
+}
+```
+
+**Importante:**
+
+- O C19 NAO precisa modificar `identificacao-prova.ts`. A logica de
+  apresentacao fica encapsulada na camada do C19.
+- Manter as **mesmas decisoes de anti-enumeracao** ao sobrescrever:
+  `PROVA_NAO_ENCONTRADA` continua sendo a mesma resposta para
+  "formato invalido", "inexistente" e "fora do scope". C19 nao deve
+  distinguir esses 3 casos para o usuario.
+- Se C19 adicionar codigo novo (ex.: `RATE_LIMITED`), estender
+  `CodigoErro` na camada de servico (PR no `identificacao-prova.ts`)
+  + adicionar entrada em `MENSAGENS_ERRO_PADRAO` (TypeScript barra
+  build se faltar) + atualizar este documento.
 
 ---
 

@@ -830,3 +830,58 @@ Inspecao do source de `frontend/src/lib/services/identificacao-prova.ts`:
 ---
 
 **Fim do relatorio.** Aguardando decisao humana sobre como proceder. Se vier instrucao de abrir sessao de correcao, ela vira em prompt separado.
+
+---
+
+## Apendice B — Status final por achado (sessao de correcao 2026-05-11)
+
+Sessao de correcao executada em `wave3-v4-c10/fixes/execution`. Veredito
+de execucao: **22/22 acionaveis tratados em 11 commits atomicos**
+(13 planejados, 2 consolidados por compartilharem arquivos doc).
+
+| ID | Sev | Status | Commit SHA | Evidencia / Criterio objetivo |
+|---|---|---|---|---|
+| AUD-W3C10-001 | INFO | RESOLVIDO_POR_DECISAO | (decisao Mario 2026-05-11 — sem commit de codigo) | Layout chancelado pelo dono; risco residual aceito. |
+| AUD-W3C10-002 | ALTO | RESOLVIDO | `c8c7d74` | ADR-138 + ADR-139 + CHANGELOG iteracoes 8/9 publicados em `DECISIONS.md` + `CHANGELOG.md`. |
+| AUD-W3C10-003 | ALTO | DEFERRED (humano) | (sem commit) | `smoke-validation.md` (20 cenarios) executado por Mario em producao antes do PR final. Bug encontrado vira nova sessao. |
+| AUD-W3C10-004 | ALTO | RESOLVIDO | `e562859` | `handleDetect` agora usa updater function com guard `prev.kind === "scanning"`. `useEffect` com deps completas `[cameraState, getToken, router]`. `eslint-disable` removido. |
+| AUD-W3C10-005 | MEDIO | RESOLVIDO_POR_DOC | `b4efaf4` | ADR-140 documenta timing differential como defesa em profundidade. Vetor real = 0 confirmado (RLS precede hash check). |
+| AUD-W3C10-006 | MEDIO | RESOLVIDO | `c8c7d74` | ADR-138 documenta panel crossfade + confirma `prefers-reduced-motion` via `useReducedMotion` interno do framer-motion + comportamento durante transicao Camera->Manual. |
+| AUD-W3C10-007 | MEDIO | RESOLVIDO | `c8c7d74` | ADR-139 documenta footer manual width fix (3 regras CSS). |
+| AUD-W3C10-008 | MEDIO | RESOLVIDO | `018c186` | `analysis.md` §Refinamento Visual ganha R8 + R9. Cross-link com ADR-138/139. |
+| AUD-W3C10-009 | BAIXO | RESOLVIDO | `c8c7d74` | Apendice do ADR-135 documenta historico framer-motion (pre-existente desde Wave 3 v3.0). |
+| AUD-W3C10-010 | BAIXO | RESOLVIDO | `1e6508c` | Audit log do scan grava `detalhes['payload_recebido']` (camera, 64 chars) + `detalhes['codigo_recebido']` (manual). 2 testes atualizados verdes. |
+| AUD-W3C10-011 | MEDIO | RESOLVIDO | `7b54693` | `useScanner` tem `stoppingRef` que captura promise do `stop()`. Proximo `start` await antes de instanciar. |
+| AUD-W3C10-012 | BAIXO | RESOLVIDO | `9f1daa7` | `ScanRequest.codigo` `max_length=32` (era 64). Teste novo confirma 422 Pydantic para >32 chars. |
+| AUD-W3C10-013 | BAIXO | RESOLVIDO | `88ed5d7` | 2 testes novos: `test_scan_camera_v4_db_error_retorna_502` + `test_scan_camera_legacy_db_error_retorna_502`. |
+| AUD-W3C10-014 | INFO | RESOLVIDO_POR_DESIGN | (sem commit) | Seq Scan em base de 17 linhas e comportamento esperado; index `idx_provas_codigo_publico` UNIQUE sera usado em escala >100 linhas. |
+| AUD-W3C10-015 | BAIXO | RESOLVIDO | `018c186` | Bundle 208 kB First Load registrado no CHANGELOG como custo aceito do ADR-135. |
+| AUD-W3C10-016 | BAIXO | RESOLVIDO | `018c186` | LOC reais (page.tsx 658, css 802) atualizados no CHANGELOG. |
+| AUD-W3C10-017 | INFO | RESOLVIDO_POR_DESIGN | (sem commit) | Audit log com `transicoes_permitidas` e proposital (C11 v4.0 consumira via detalhe, nao mais via scan response — decisao ADR-132). |
+| AUD-W3C10-018 | BAIXO | RESOLVIDO | `e562859` | `eslint-disable` removido junto com fix do AUD-004 (deps agora completas). |
+| AUD-W3C10-019 | BAIXO | RESOLVIDO | `c8c7d74` | CHANGELOG nova secao "Correcoes Pos-Auditoria" lista bugs corrigidos com IDs. |
+| AUD-W3C10-020 | MEDIO | RESOLVIDO | `5fa9f3c` | `MENSAGENS_ERRO_PADRAO` exportada + helper `mensagemPara(codigo)`. 2 testes Vitest novos cobrindo exhaustividade + equivalencia helper<->record. |
+| AUD-W3C10-021 | INFO | RESOLVIDO_POR_DESIGN | (sem commit) | `useExecutarTransicao` preservado para C11 v4.0 consumir. Escopo explicitamente protegido pela autorizacao do prompt original. |
+| AUD-W3C10-022 | INFO | RESOLVIDO | `4c91fd8` | `qrbox` agora e funcao responsiva — teto 250, floor 120, margem 20px. Degrada elegantemente em viewports <270px. |
+
+**Distribuicao de status:**
+
+| Status | Quantidade |
+|---|---|
+| RESOLVIDO (com codigo + testes) | 13 |
+| RESOLVIDO_POR_DOC (ADR sem mudanca de codigo) | 1 (AUD-005) |
+| RESOLVIDO_POR_DECISAO (chancelado pelo dono) | 1 (AUD-001) |
+| RESOLVIDO_POR_DESIGN (comportamento intencional) | 3 (AUD-014, 017, 021) |
+| DEFERRED (humano executa em producao) | 1 (AUD-003 — smoke-validation) |
+| Bloqueados por divergencia | 0 |
+| **Total** | **22** |
+
+**Recomendacao final desta sessao:** abrir nova rodada de auditoria independente
+em sessao separada, usando `PROMPT_Auditoria_PosWave3_C10_v4.md` (ou equivalente),
+para confirmar que (a) achados originais foram resolvidos, (b) correcoes nao
+introduziram novos problemas, (c) o C19 continua viavel (camada de servico de
+fato desacoplada + `MENSAGENS_ERRO_PADRAO` exportada), (d) anti-enumeracao
+preservada no backend (mensagens 404 genericas para faixa plausivel de input).
+
+Para detalhes de cada correcao: ver `docs/wave3-v4-c10/fix-validation.md`.
+

@@ -549,9 +549,18 @@ backend, etc.).
   a camada de servico.
 - NUNCA importar `html5-qrcode` na camada de servico.
 - Se precisar adicionar codigo de erro novo, estender `CodigoErro`
-  + `MENSAGENS_ERRO` + atualizar `contrato-c19.md`.
+  + `MENSAGENS_ERRO_PADRAO` + atualizar `contrato-c19.md`. O record
+  e `Record<CodigoErro, string>` — TypeScript barra build se faltar
+  entrada para um codigo novo.
 - Mensagem 404 generica nao pode ser quebrada: introduzir distincao
   entre "inexistente" e "fora do scope" abre vetor de enumeracao.
+- **`max_length` do `body.codigo`** e **32** (era 64 ate AUD-W3C10-012
+  da auditoria do C10 v4.0). Folga sobre os 18 chars do
+  `PRV-AAAA-MM-NNNNNN`. Acima de 32 retorna 422 Pydantic — fora da
+  faixa plausivel. C19 deve respeitar.
+- **`MENSAGENS_ERRO_PADRAO`** e **`mensagemPara(codigo)`** sao
+  exportados (AUD-W3C10-020 da auditoria do C10 v4.0) — C19 pode
+  reutilizar/sobrescrever mensagens condicionando por `result.codigo`.
 
 **Notas visuais consolidadas (pos-iteracoes 4-7 do C10):**
 - Estrutura visual da pagina: `.pageWrapper` → `.wrapper` (cinza
