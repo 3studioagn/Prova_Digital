@@ -236,7 +236,14 @@
 }
 
 /* Faixa amarela superior — gradient sutil simulando o destaque
- * do design (Figma node 240:6278, height 60px, gradient 0→0.14→0). */
+ * do design (Figma node 240:6278, height 60px, gradient 0→0.14→0).
+ *
+ * Iteracao 7 (pos-Mario): adicionada animacao infinita de
+ * escaneamento — o feixe sobe e desce entre o topo (top: 12px) e o
+ * rodape (top: calc(100% - 72px) = parent_h - beam_h - gap_inf) do
+ * mini-card. `ease-in-out` faz pausa visivel nas pontas, simulando
+ * um beam de scanner real. `prefers-reduced-motion` desabilita
+ * (RN-012, RNF-010, WCAG 2.3.3). */
 .qrMockYellowBar {
   position: absolute;
   top: 12px;
@@ -249,8 +256,28 @@
     rgba(245, 197, 24, 0.14) 50%,
     rgba(245, 197, 24, 0) 100%
   );
-  border-radius: 8px 8px 0 0;
+  border-radius: 8px;
   pointer-events: none;
+  animation: qrScanBeam 2.2s ease-in-out infinite;
+  will-change: top;
+}
+
+@keyframes qrScanBeam {
+  0%,
+  100% {
+    top: 12px;
+  }
+  50% {
+    /* 60px (height do beam) + 12px (gap inferior espelhado) = 72px
+     * de subtraido do 100% para o beam parar com folga no rodape. */
+    top: calc(100% - 72px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qrMockYellowBar {
+    animation: none;
+  }
 }
 
 /* SVG QR centralizado, 120x120 conforme Figma. */
