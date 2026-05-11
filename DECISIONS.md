@@ -5709,3 +5709,122 @@ mini-card no extremo inferior.
   - Acessibilidade preservada via `prefers-reduced-motion`.
   - Sem impacto em performance (CSS animation GPU-accelerated).
   - `/escanear` 5.71 → 5.73 kB (+0.02 kB do CSS novo).
+
+---
+
+## Apendice ao ADR-135 — Nota historica framer-motion (AUD-W3C10-009)
+
+**Data:** 2026-05-11 (Wave 3 v4.0 — Pos-Auditoria)
+**Contexto:** o `analysis.md` do C10 declarou "sem Framer Motion novo"
+como cerca do escopo da entrega. A iteracao 5 (commit `a923c69`) e a
+iteracao 9 (commit `bffe30b`) introduziram `motion`/`AnimatePresence`
+em `/escanear`, levantando duvida na auditoria sobre se isso violou a
+cerca.
+
+**Esclarecimento:** `framer-motion` foi adicionado em `package.json`
+no commit `86b0f9d` (Wave 3 v3.0 / Componente 12 — Timeline). Era ja
+dependencia pre-existente. O que o C10 v4.0 fez foi importar pela
+**primeira vez em `/escanear`**, nao adicionar nova dependencia. A
+cerca "sem Framer Motion novo" referia-se a "nao introduzir nova
+biblioteca de animacao" — interpretacao validada pelo dono do projeto.
+
+---
+
+## ADR-138 — Panel crossfade Camera ↔ Manual via `AnimatePresence` (iteracao 9)
+
+**Data:** 2026-05-11 (Wave 3 v4.0 — Componente 10 — Iteracao 9, commit `bffe30b`)
+**Resolve:** AUD-W3C10-006 (medio — sem ADR original) + AUD-W3C10-002 (alto — documentacao incompleta)
+
+**Contexto:** apos as iteracoes 4-7 terem refinado o layout visual,
+Mario pediu que a troca entre os panels Camera e Manual fosse
+**animada** (em vez de troca instantanea). Originalmente o `{tab === "camera" ? <CameraPanel /> : <ManualPanel />}` simplesmente
+substituia o JSX render-a-render.
+
+**Decisao:** envolver os dois panels com `AnimatePresence mode="wait"`
+da `framer-motion` (ja importada no commit `86b0f9d` da Wave 3 v3.0,
+ver apendice ADR-135). `mode="wait"` garante que o panel atual sai
+**antes** do novo entrar — evita sobreposicao. Transicao curta
+(`duration: 0.26s`) com easing canonico do projeto (`ENTER_EASE = [0.32, 0.72, 0, 1]`, espelhando `/nova-prova` e Wave 2 v4.0).
+
+```tsx
+<AnimatePresence mode="wait" initial={false}>
+  <motion.div
+    key={tab}
+    initial={{ opacity: 0, scale: 0.985, y: 6 }}
+    animate={{ opacity: 1, scale: 1, y: 0 }}
+    exit={{ opacity: 0, scale: 0.985, y: -6 }}
+    transition={{ duration: 0.26, ease: ENTER_EASE }}
+  >
+    {tab === "camera" ? <CameraPanel ... /> : <ManualPanel ... />}
+  </motion.div>
+</AnimatePresence>
+```
+
+**Trade-offs avaliados:**
+
+- **Bundle:** zero crescimento adicional — `framer-motion` ja estava
+  no chunk de `/escanear` por causa do pill animado (ADR-135). Bundle
+  permanece em 208 kB First Load.
+- **A11y (`prefers-reduced-motion`):** `framer-motion` chama
+  `useReducedMotion` internamente nos componentes `motion.*`/`AnimatePresence` por padrao e degrada elegantemente (transicao
+  vira instantanea). Sem necessidade de regra CSS adicional para essa
+  animacao especifica.
+- **Comportamento durante transicao Camera->Manual com camera ativa:**
+  o handler `trocarParaManual` em `page.tsx:144-147` ja chama
+  `setCameraState({ kind: "idle" })` ANTES da troca de tab. Isso
+  desliga o `useScanner` (via `enabled: cameraState.kind === "scanning"`)
+  antes do panel sair com fade-out. Sem race entre a animacao de saida
+  e o cleanup da camera.
+- **Performance:** `motion.div` com `opacity`/`scale`/`y` transforma
+  para o compositor GPU. Animacao 26ms — usuario nao percebe lag.
+
+**Alternativas rejeitadas:**
+
+- CSS `@keyframes` puras com `key={tab}` forcando remount: rejeitada
+  porque `mode="wait"` da framer-motion gerencia melhor a sequencia
+  enter/exit sem requerer 2 elementos sobrepostos.
+- Sem animacao (estado anterior): rejeitado pelo Mario apos teste
+  visual da iteracao 8.
+
+**Validacao:** smoke manual confirmou que a troca e fluida; sem
+overflow; sem flash de cor; respeita `prefers-reduced-motion` no
+emulator do DevTools.
+
+---
+
+## ADR-139 — Footer manual com width 100% da coluna (iteracao 8)
+
+**Data:** 2026-05-11 (Wave 3 v4.0 — Componente 10 — Iteracao 8, commit `dc7d347`)
+**Resolve:** AUD-W3C10-007 (medio — sem ADR original) + AUD-W3C10-002 (alto — documentacao incompleta)
+
+**Contexto:** a iteracao 4 (ADR-136) posicionou o `<InnerFooter>`
+dentro da coluna direita do innerCard, alinhado com o divisor de 554px
+do Figma (node 240:6611). Funcionou no tab Camera porque o pai e
+`flex-direction: column; width: 100%` herdada. No tab Manual, o pai
+`.manualPanel` aplicou `width: auto` ao footer porque o elemento
+nao tinha largura explicita — resultado: footer collapse no
+conteudo (em vez de esticar para 554px).
+
+**Decisao:** adicionar 3 regras em `.innerFooter` no CSS:
+
+```css
+.innerFooter {
+  /* specs existentes do ADR-136 preservados */
+  width: 100%;          /* preenche a coluna pai */
+  max-width: 554px;     /* respeita o divisor Figma */
+  align-self: stretch;  /* obriga o flex pai a respeitar 100% */
+}
+```
+
+A mudanca e estritamente de CSS — sem tocar TypeScript, hooks ou layout
+JSX. Camera tab ja exibia comportamento correto por coincidencia
+(flex container do `.cameraSidebar` ja propagava 100%); a regra agora
+e explicita para os dois lados.
+
+**Trade-offs avaliados:** nenhum. Fix trivial de regressao da iteracao
+4 que so afetou o tab Manual.
+
+**Validacao:** smoke visual em browser real confirmou alinhamento
+identico nos 2 tabs apos a correcao.
+
+---

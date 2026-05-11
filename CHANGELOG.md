@@ -2,6 +2,51 @@
 
 ---
 
+## v4.0 — Wave 3 — Componente 10 — Correcoes Pos-Auditoria (2026-05-11)
+**Data:** 2026-05-11
+**Branch:** `wave3-v4-c10/fixes/execution`
+**Status:** 22 achados do `docs/wave3-v4-c10/audit-report.md` tratados em 13 commits atomicos.
+Auditoria original veredito: APROVAR COM CORRECOES (0 CRITICO + 3 ALTOS + 6 MEDIOS + 8 BAIXOS + 5 INFO).
+
+### Achados de codigo corrigidos (7 commits funcionais)
+
+- **AUD-W3C10-020 (MEDIO, C19):** `MENSAGENS_ERRO_PADRAO` exportada + `mensagemPara(codigo)` helper em `identificacao-prova.ts` — C19 pode reutilizar/customizar mensagens. 2 testes Vitest novos cobrindo exhaustividade.
+- **AUD-W3C10-004 (ALTO):** race em `handleDetect` corrigida com updater function `prev.kind === "scanning"`. Deps do `useEffect` agora completas `[cameraState, getToken, router]` — eslint-disable removido (resolve tambem AUD-018).
+- **AUD-W3C10-011 (MEDIO):** `useScanner` cleanup guarda promise do `stop()` em `stoppingRef` — proximo `start` aguarda antes de instanciar nova camera. Previne bug "Cannot stop, scanner is not running".
+- **AUD-W3C10-022 (INFO):** `qrbox` agora e funcao responsiva `(vw, vh) => max(120, min(vw, vh, 250) - 20)`. Mantem teto 250; degrada em viewports <270px.
+- **AUD-W3C10-010 (BAIXO):** audit log do scan grava `detalhes['payload_recebido']` (camera, truncado em 64) ou `detalhes['codigo_recebido']` (manual) para rastreabilidade forense.
+- **AUD-W3C10-012 (BAIXO, C19):** `ScanRequest.codigo` `max_length` 64 -> 32. Folga sobre os 18 chars do PRV-AAAA-MM-NNNNNN; 422 Pydantic acima de 32 esta fora da faixa plausivel. C19 deve respeitar.
+- **AUD-W3C10-013 (BAIXO):** 2 testes novos cobrindo DB error nos caminhos camera v4.0 (lookup polimorfico) + camera legacy (fallback `nro_requerimento`).
+
+### Documentacao acumulada (3 commits docs)
+
+- **AUD-W3C10-002 + 006 + 007 + 019:** ADR-138 (panel crossfade — iteracao 9), ADR-139 (footer width fix — iteracao 8) registrados em `DECISIONS.md`. Apendice do ADR-135 documenta historico framer-motion (AUD-009). Secao "Erros conhecidos" implicita nesta secao.
+- **AUD-W3C10-005:** ADR-140 documenta timing differential 422 vs 404 no caminho camera como **defesa em profundidade** (vetor real = 0 — RLS filtra fora-do-scope antes do hash check).
+- **AUD-W3C10-008:** `analysis.md` §Refinamento Visual ganha R8 + R9 documentando iteracoes 8 e 9.
+- **AUD-W3C10-016:** LOC reais atualizados (`page.tsx` 658 LOC, `escanear.module.css` 802 LOC pos-iteracoes 3-9).
+- **AUD-W3C10-015:** bundle 208 kB confirmado como custo aceito da iteracao 5 (pill animado).
+
+### INFO sem mudanca de codigo (apendice no audit-report.md)
+
+- **AUD-W3C10-001:** figma-reference PNG ausente — CHANCELADO pelo Mario em 2026-05-11.
+- **AUD-W3C10-003:** smoke-validation.md (20 cenarios) — **deferred para Mario executar** antes do PR final em producao.
+- **AUD-W3C10-014:** Seq Scan em base de 17 linhas — comportamento esperado do planner.
+- **AUD-W3C10-017:** Audit log com `transicoes_permitidas` proposital — C11 v4.0 consumira via detalhe.
+- **AUD-W3C10-021:** `useExecutarTransicao` orfao — escopo explicitamente protegido para C11 v4.0.
+
+### Validacao final pos-correcoes
+- `python -m pytest backend/tests/test_provas_api.py`: passa (sera relatado no fix-validation.md).
+- `npx vitest run`: 46 testes (era 44 + 2 novos AUD-020).
+- `npx tsc --noEmit`: exit 0.
+- `npx next build`: 13/13 paginas.
+- MCP advisors: sem novos alertas.
+
+### Decisao pendente
+- **smoke-validation.md (AUD-W3C10-003):** Mario executa em producao
+  antes do merge final. Bug encontrado vira nova sessao de correcao.
+
+---
+
 ## v4.0 — Wave 3 — Componente 10 (atualizacao v4.0) — Scanner reformulado + Camada de servico desacoplada
 **Data:** 2026-05-06
 **Branch:** `wave3-v4/componente-10`
