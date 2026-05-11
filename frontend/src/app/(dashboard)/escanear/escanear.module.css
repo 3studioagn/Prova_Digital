@@ -357,14 +357,19 @@
   /* Sem height fixo — align-self stretch + grid stretch cuidam disso. */
 }
 
-/* Iteracao 5: bloco superior centralizado verticalmente.
- * flex: 1 ocupa o espaco entre o topo do sidebar e o footer;
- * justify-content: center alinha conteudo no CENTRO vertical
- * (era no topo na iteracao 4). */
+/* Iteracao 6 (pos-feedback Mario: imagem 5):
+ * Modo CAMERA → bloco texto+CTA fica alinhado ao TOPO da coluna
+ * direita (corresponde aos specs Figma: titulo "Pronto para
+ * escanear" tem top 562 vs innerCard top 448, ou seja, ~94px de
+ * gap do topo — nao centralizado).
+ * Modo MANUAL fica centralizado (`.manualPanelTop` mantem `center`).
+ *
+ * `flex: 1` continua ocupando o espaco entre o topo da sidebar e o
+ * footer; `justify-content: flex-start` alinha o conteudo no TOPO. */
 .cameraSidebarTop {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 1rem;
   flex: 1;
   padding-bottom: 1.5rem;
