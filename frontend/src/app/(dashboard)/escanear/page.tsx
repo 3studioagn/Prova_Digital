@@ -8,7 +8,10 @@ import {
   type FormEvent,
 } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
+
+// Easing canonico do projeto (espelha ENTER_EASE da /nova-prova).
+const ENTER_EASE = [0.32, 0.72, 0, 1] as const;
 
 import { createClient } from "@/lib/supabase/client";
 import { CameraIcon, KeyIcon, ArrowRightIcon } from "@/components/icons";
@@ -183,23 +186,40 @@ export default function EscanearPage() {
         />
 
         <div className={styles.innerCard}>
-          {tab === "camera" ? (
-            <CameraPanel
-              state={cameraState}
-              scanner={scanner}
-              onAbrir={abrirCamera}
-              onCancelar={cancelarCamera}
-              onTentarNovamente={tentarNovamenteCamera}
-              onTrocarParaManual={trocarParaManual}
-            />
-          ) : (
-            <ManualPanel
-              state={manualState}
-              codigo={codigoManual}
-              onChange={setCodigoManual}
-              onSubmit={handleManualSubmit}
-            />
-          )}
+          {/* Iteracao 9 (pos-Mario pedir): crossfade animado entre os
+              panels Camera/Manual. AnimatePresence mode="wait" garante
+              que o panel atual sai antes do novo entrar (evita
+              sobreposicao). Combina fade leve (opacity) + escala
+              imperceptivel (0.98 → 1) para suavizar a troca.
+              `initial={false}` evita animacao no render inicial. */}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={tab}
+              className={styles.panelMotion}
+              initial={{ opacity: 0, scale: 0.985, y: 6 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.985, y: -6 }}
+              transition={{ duration: 0.26, ease: ENTER_EASE }}
+            >
+              {tab === "camera" ? (
+                <CameraPanel
+                  state={cameraState}
+                  scanner={scanner}
+                  onAbrir={abrirCamera}
+                  onCancelar={cancelarCamera}
+                  onTentarNovamente={tentarNovamenteCamera}
+                  onTrocarParaManual={trocarParaManual}
+                />
+              ) : (
+                <ManualPanel
+                  state={manualState}
+                  codigo={codigoManual}
+                  onChange={setCodigoManual}
+                  onSubmit={handleManualSubmit}
+                />
+              )}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </section>
     </div>
