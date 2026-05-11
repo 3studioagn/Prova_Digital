@@ -2671,6 +2671,34 @@ async def test_scan_manual_db_error_retorna_502(admin_user, mock_db):
     assert resp.status_code == 502
 
 
+async def test_scan_camera_v4_db_error_retorna_502(admin_user, mock_db):
+    """AUD-W3C10-013: erro de DB no caminho camera v4.0 (lookup por
+    codigo_publico) tambem cai no handler 502. Espelha o teste do
+    caminho manual mas envia payload v4.0 valido."""
+    _setup(mock_db, user=admin_user)
+    mock_db.execute.side_effect = RuntimeError("DB indisponivel")
+    codigo_publico = "PRV-2026-05-K3T9XB"
+    payload = f"3SD|{codigo_publico}|0123456789abcdef"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+    assert resp.status_code == 502
+
+
+async def test_scan_camera_legacy_db_error_retorna_502(admin_user, mock_db):
+    """AUD-W3C10-013: erro de DB no caminho camera legacy (lookup por
+    nro_requerimento via fallback quando segundo campo do payload NAO
+    casa formato PRV-AAAA-MM-NNNNNN) tambem retorna 502."""
+    _setup(mock_db, user=admin_user)
+    mock_db.execute.side_effect = RuntimeError("DB indisponivel")
+    nro_req_legacy = "REQ-LEGACY-1234"
+    payload = f"3SD|{nro_req_legacy}|0123456789abcdef"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.post(f"{PREFIX}/scan", json={"payload": payload})
+    assert resp.status_code == 502
+
+
 async def test_scan_camera_v4_qr_hash_invalido_retorna_422_apos_lookup(
     vendedor_matriz, mock_db
 ):
