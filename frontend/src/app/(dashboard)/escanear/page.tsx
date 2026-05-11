@@ -73,7 +73,16 @@ export default function EscanearPage() {
   }, []);
 
   const handleDetect = useCallback((payload: string) => {
-    setCameraState({ kind: "identifying", payload });
+    // AUD-W3C10-004 (race fix): html5-qrcode pode disparar onDetect
+    // multiplas vezes em sequencia (frame rate ~10 FPS) ate o cleanup
+    // tomar efeito. Sem este guard, o segundo onDetect substituiria o
+    // payload do primeiro DEPOIS do effect ja ter comecado a identificar
+    // — usuario apontaria para QR A, acabaria em /provas/B.
+    // So aceita transicao a partir de "scanning"; demais estados sao
+    // no-op (incluindo "identifying", "error" e "idle").
+    setCameraState((prev) =>
+      prev.kind === "scanning" ? { kind: "identifying", payload } : prev,
+    );
   }, []);
 
   const scanner = useScanner({
@@ -95,6 +104,12 @@ export default function EscanearPage() {
   }, [cameraState.kind, scanner.errorCode]);
 
   useEffect(() => {
+    // AUD-W3C10-004 + AUD-W3C10-018: deps completas (cameraState, getToken,
+    // router) — sem eslint-disable. O early-return barra recomputacoes
+    // quando kind != "identifying"; o flag `cancelled` previne side-effects
+    // duplicados se um novo payload chegar antes do anterior resolver
+    // (combinado com o guard de handleDetect, essa situacao agora exige
+    // uma volta explicita por "scanning", entao na pratica nao ocorre).
     if (cameraState.kind !== "identifying") return;
     let cancelled = false;
     (async () => {
@@ -115,8 +130,7 @@ export default function EscanearPage() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cameraState.kind]);
+  }, [cameraState, getToken, router]);
 
   const handleManualSubmit = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
