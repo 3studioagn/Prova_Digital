@@ -81,6 +81,12 @@ export function useScanner(options: UseScannerOptions): UseScannerResult {
   onDetectRef.current = onDetect;
   onErrorRef.current = onError;
 
+  // AUD-W3C10-011: track promessa de cleanup pendente para evitar bug
+  // conhecido do html5-qrcode ("Cannot stop, scanner is not running")
+  // quando o usuario cancela e re-abre a camera rapidamente. O start
+  // aguarda o stop anterior completar antes de instanciar nova camera.
+  const stoppingRef = useRef<Promise<void> | null>(null);
+
   useEffect(() => {
     if (!enabled) {
       // Transicao enabled=true -> false: desmonta (cleanup cuida abaixo).
@@ -97,6 +103,17 @@ export function useScanner(options: UseScannerOptions): UseScannerResult {
 
     (async () => {
       try {
+        // AUD-W3C10-011: aguarda cleanup pendente antes de tentar iniciar.
+        // Se nao houver cleanup pendente (stoppingRef.current === null),
+        // o await resolve imediatamente.
+        if (stoppingRef.current) {
+          try {
+            await stoppingRef.current;
+          } catch {
+            /* cleanup anterior falhou — seguimos mesmo assim */
+          }
+          stoppingRef.current = null;
+        }
         const { Html5Qrcode } = await import("html5-qrcode");
         if (!mounted) return;
 
@@ -157,8 +174,12 @@ export function useScanner(options: UseScannerOptions): UseScannerResult {
           | null);
       if (!instance) return;
 
-      // stop() pode rejeitar se o stream ja foi encerrado — try/catch.
-      instance
+      // AUD-W3C10-011: guarda a promise do cleanup em ref para que o
+      // proximo start (cenario: cancelar + abrir de novo rapido)
+      // aguarde antes de tentar Html5Qrcode#start de novo. O stop()
+      // pode rejeitar se o stream ja foi encerrado — try/catch
+      // continua envolvendo. O clear() depois do finally sempre roda.
+      stoppingRef.current = instance
         .stop()
         .catch(() => {
           /* already stopped or never started */
