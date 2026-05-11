@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -16,15 +17,38 @@ const ENTER_EASE = [0.32, 0.72, 0, 1] as const;
 import { createClient } from "@/lib/supabase/client";
 import { CameraIcon, KeyIcon, ArrowRightIcon } from "@/components/icons";
 import { useScanner } from "@/hooks/useScanner";
+import { useCodigoPrvInput } from "@/hooks/useCodigoPrvInput";
 import { useAuthorization } from "@/lib/hooks/use-authorization";
 import { Restricted } from "@/components/Restricted";
 import {
   identificarProvaPorCodigo,
-  identificarProvaPorPayload,
+  mensagemPara,
   type CodigoErro,
   type ResultadoIdentificacao,
+  identificarProvaPorPayload,
 } from "@/lib/services/identificacao-prova";
 import styles from "./escanear.module.css";
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Mensagens customizadas do C19 (Wave 3 v4.0).
+ *
+ * **Anti-enumeracao em camada UI (D7 / R-3):** o `QR_INVALIDO` retornado
+ * tanto pela validacao client-side (regex local) quanto pelo backend
+ * (422 Pydantic para codigo > 32 chars) e uniformizado com a mensagem
+ * de `PROVA_NAO_ENCONTRADA` (404 generico do backend). Sacrificio
+ * deliberado de "feedback de formato" para preservar a anti-enumeracao
+ * DAT v3.0 §8.2 — o atacante nao deve distinguir "formato errado"
+ * de "fora do escopo".
+ *
+ * Demais codigos herdam `mensagemPara(codigo)` da camada de servico do C10.
+ * ──────────────────────────────────────────────────────────────────── */
+const MENSAGENS_C19: Partial<Record<CodigoErro, string>> = {
+  QR_INVALIDO: "Prova nao encontrada.",
+};
+
+function mensagemFinal(codigo: CodigoErro): string {
+  return MENSAGENS_C19[codigo] ?? mensagemPara(codigo);
+}
 
 /* ──────────────────────────────────────────────────────────────────────
  * Pagina /escanear — Wave 3 v4.0, Componente 10 (atualizacao v4.0).
@@ -64,7 +88,11 @@ export default function EscanearPage() {
   const [tab, setTab] = useState<Tab>("camera");
   const [cameraState, setCameraState] = useState<CameraState>({ kind: "idle" });
   const [manualState, setManualState] = useState<ManualState>({ kind: "idle" });
-  const [codigoManual, setCodigoManual] = useState("");
+
+  // Wave 3 v4.0 / C19 — hook que conecta o input do <ManualPanel> aos
+  // utilitarios puros de lib/codigo-publico (mascara, auto-uppercase,
+  // bloqueio rigido por posicao, validacao de formato).
+  const codigoInput = useCodigoPrvInput();
 
   const getToken = useCallback(async () => {
     const supabase = createClient();
@@ -135,8 +163,20 @@ export default function EscanearPage() {
   const handleManualSubmit = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
-      const codigo = codigoManual.trim();
+      const codigo = codigoInput.codigoCompleto;
       if (!codigo) return;
+      // Validacao client-side ANTES de chamar o backend (D7 — anti-enumeracao
+      // uniformizada via mensagemFinal mapeia QR_INVALIDO -> "Prova nao encontrada").
+      // Reduz disparos desnecessarios mas ainda blinda contra timing differential
+      // — mensagem retornada e identica ao 404 generico do backend.
+      if (!codigoInput.isFormatValid) {
+        setManualState({
+          kind: "error",
+          codigo: "QR_INVALIDO",
+          mensagem: mensagemFinal("QR_INVALIDO"),
+        });
+        return;
+      }
       setManualState({ kind: "identifying", codigo });
       const result: ResultadoIdentificacao = await identificarProvaPorCodigo(
         codigo,
@@ -149,10 +189,23 @@ export default function EscanearPage() {
       setManualState({
         kind: "error",
         codigo: result.codigo,
-        mensagem: result.mensagem,
+        mensagem: mensagemFinal(result.codigo),
       });
     },
-    [codigoManual, getToken, router],
+    [codigoInput.codigoCompleto, codigoInput.isFormatValid, getToken, router],
+  );
+
+  // D8 — reset do banner de erro quando usuario comeca a editar de novo.
+  // O hook esta no container, entao envolvemos `setFromInput` para zerar
+  // o estado de erro junto. Sem isso o banner persiste ate o proximo submit.
+  const handleManualChange = useCallback(
+    (raw: string) => {
+      codigoInput.setFromInput(raw);
+      if (manualState.kind === "error") {
+        setManualState({ kind: "idle" });
+      }
+    },
+    [codigoInput, manualState.kind],
   );
 
   const trocarParaManual = useCallback(() => {
@@ -162,6 +215,15 @@ export default function EscanearPage() {
 
   const trocarParaCamera = useCallback(() => {
     setTab("camera");
+    setManualState({ kind: "idle" });
+    // codigoInput preservado intencionalmente (R-9): usuario que digitou
+    // parcialmente nao perde o trabalho ao olhar a camera por um momento.
+  }, []);
+
+  // R-10 — botao "Tentar novamente" no estado de erro de rede: limpa o
+  // banner sem mexer no codigo digitado. Usuario clica "Buscar prova"
+  // novamente apos restabelecer conexao.
+  const tentarNovamenteManual = useCallback(() => {
     setManualState({ kind: "idle" });
   }, []);
 
@@ -227,9 +289,11 @@ export default function EscanearPage() {
               ) : (
                 <ManualPanel
                   state={manualState}
-                  codigo={codigoManual}
-                  onChange={setCodigoManual}
+                  display={codigoInput.display}
+                  isFormatValid={codigoInput.isFormatValid}
+                  onChange={handleManualChange}
                   onSubmit={handleManualSubmit}
+                  onTentarNovamente={tentarNovamenteManual}
                 />
               )}
             </motion.div>
@@ -578,25 +642,49 @@ function QRIconSvg({ className }: { className?: string }) {
 
 interface ManualPanelProps {
   state: ManualState;
-  codigo: string;
+  /** Texto exibido no <input> apos a mascara, sem o prefixo "PRV-". */
+  display: string;
+  /** True quando montarCodigoCompleto(display) casa o regex canonico. */
+  isFormatValid: boolean;
+  /** Recebe valor cru do <input> antes da remascara. */
   onChange: (v: string) => void;
   onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  /** Limpa o banner de erro sem mexer no display (acionado pelo botao
+   *  "Tentar novamente" no estado ERRO_REDE). */
+  onTentarNovamente: () => void;
 }
 
-function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
-  // Wave 3 v4.0 (C10): formato real PRV-AAAA-MM-NNNNNN com estilizacao
-  // 100% Figma (JetBrains Mono, cores #9a9a9a/#757575, bg #fafafa).
+function ManualPanel({
+  state,
+  display,
+  isFormatValid,
+  onChange,
+  onSubmit,
+  onTentarNovamente,
+}: ManualPanelProps) {
+  // Wave 3 v4.0 (C19): valida formato client-side, foco automatico, label
+  // estendida e hint sr-only adicional. Visual identico ao shell do C10
+  // (JetBrains Mono, cores #9a9a9a/#757575, bg #fafafa) — nada de redesign.
   const isLoading = state.kind === "identifying";
   const isError = state.kind === "error";
-  const trimmed = codigo.trim();
-  const submitDisabled = isLoading || trimmed.length === 0;
+  const isErroRede = isError && state.codigo === "ERRO_REDE";
+
+  // Botao habilita SOMENTE quando o formato esta completo e valido.
+  // Reforco UX: usuario nao consegue submeter um display parcial. (D5 +
+  // anti-enumeracao client-side via mensagem uniformizada.)
+  const submitDisabled = isLoading || !isFormatValid;
+
+  // R-8 — foco automatico no mount. Tab "Manual" e remontada cada vez que
+  // o usuario alterna (AnimatePresence mode="wait" desmonta o panel
+  // anterior antes do novo entrar) — o efeito dispara em cada entrada.
+  // Sem dependencias: roda apenas no mount, nao em mudancas posteriores.
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   return (
     <form className={styles.manualPanel} onSubmit={onSubmit}>
-      {/* Bloco superior (conteudo centralizado vertical) + bloco
-          inferior (footer com divisor). justify-content: space-between
-          replica o layout do Figma node 240:6611 (divisor w[554])
-          + 240:6605/6609 (textos do footer). */}
       <div className={styles.manualPanelTop}>
         <h2 className={styles.panelTitleManual}>Inserir codigo manualmente</h2>
         <p className={styles.panelDescriptionManual}>
@@ -612,26 +700,50 @@ function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
             PRV-
           </span>
           <label htmlFor="codigo-manual" className={styles.srOnly}>
-            Codigo da prova
+            Codigo da prova no formato PRV-AAAA-MM-NNNNNN
           </label>
           <input
+            ref={inputRef}
             id="codigo-manual"
             type="text"
             className={styles.manualInput}
-            value={codigo}
+            value={display}
             onChange={(e) => onChange(e.target.value)}
             placeholder="AAAA-MM-NNNNNN"
             autoComplete="off"
             autoCapitalize="characters"
             spellCheck={false}
-            aria-describedby={isError ? "manual-error" : undefined}
+            // D10 — aria-describedby aponta para o banner de erro quando
+            // ha erro; para o hint estatico caso contrario. Garante que
+            // leitores de tela tem orientacao em ambos os modos.
+            aria-describedby={isError ? "manual-error" : "manual-hint"}
             disabled={isLoading}
+            // Limite hard que espelha backend ScanRequest.codigo max_length=32
+            // (AUD-W3C10-012). O codigo final tem 18 chars; aqui usamos
+            // 14 (display sem prefixo) — folga ate 32 e do backend.
+            maxLength={14}
           />
         </div>
 
+        {/* Hint sr-only — D10. Apenas para leitores de tela. */}
+        <span id="manual-hint" className={styles.srOnly}>
+          Digite 4 digitos para o ano, 2 digitos para o mes e 6 caracteres
+          alfanumericos do alfabeto sem chars ambiguos (sem zero, O, um, I
+          ou L). Hifens sao inseridos automaticamente.
+        </span>
+
         {isError && (
           <div id="manual-error" className={styles.errorBanner} role="alert">
-            {state.mensagem}
+            <strong>{state.mensagem}</strong>
+            {isErroRede && (
+              <button
+                type="button"
+                className={styles.linkButton}
+                onClick={onTentarNovamente}
+              >
+                Tentar novamente
+              </button>
+            )}
           </div>
         )}
 
