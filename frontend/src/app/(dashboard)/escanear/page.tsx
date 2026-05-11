@@ -199,7 +199,6 @@ export default function EscanearPage() {
               onSubmit={handleManualSubmit}
             />
           )}
-          <InnerFooter />
         </div>
       </section>
     </div>
@@ -289,35 +288,44 @@ function CameraPanel({
         <p className={styles.previewHint}>Centralize o QR Code no quadro</p>
       </div>
 
-      {/* Lado direito: titulo + descricao + CTA "Abrir camera". */}
+      {/* Lado direito: bloco superior (titulo + descricao + CTA) +
+          bloco inferior (footer com divisor + Ultima leitura + Ver
+          historico). justify-content: space-between separa os dois.
+          Specs Figma: footer no node 240:6339+6336+6300 fica em
+          left[1258], w[554] — alinhado com a coluna direita,
+          NAO com a largura total do innerCard. */}
       <div className={styles.cameraSidebar}>
-        <h2 className={styles.panelTitle}>{titulo}</h2>
-        <p className={styles.panelDescription}>{descricao}</p>
+        <div className={styles.cameraSidebarTop}>
+          <h2 className={styles.panelTitle}>{titulo}</h2>
+          <p className={styles.panelDescription}>{descricao}</p>
 
-        {state.kind === "error" && (
-          <div className={styles.errorBanner} role="alert">
-            <strong>{state.mensagem}</strong>
-            {state.codigo === "DISPOSITIVO_SEM_CAMERA" && (
-              <button
-                type="button"
-                className={styles.linkButton}
-                onClick={onTrocarParaManual}
-              >
-                Ir para digitacao manual →
-              </button>
-            )}
-          </div>
-        )}
+          {state.kind === "error" && (
+            <div className={styles.errorBanner} role="alert">
+              <strong>{state.mensagem}</strong>
+              {state.codigo === "DISPOSITIVO_SEM_CAMERA" && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={onTrocarParaManual}
+                >
+                  Ir para digitacao manual →
+                </button>
+              )}
+            </div>
+          )}
 
-        <button
-          type="button"
-          className={styles.cameraCta}
-          onClick={ctaHandler}
-          disabled={ctaDisabled}
-        >
-          <CameraIcon width={20} height={20} aria-hidden="true" />
-          <span>{ctaLabel}</span>
-        </button>
+          <button
+            type="button"
+            className={styles.cameraCta}
+            onClick={ctaHandler}
+            disabled={ctaDisabled}
+          >
+            <CameraIcon width={20} height={20} aria-hidden="true" />
+            <span>{ctaLabel}</span>
+          </button>
+        </div>
+
+        <InnerFooter />
       </div>
     </div>
   );
@@ -527,49 +535,61 @@ function ManualPanel({ state, codigo, onChange, onSubmit }: ManualPanelProps) {
 
   return (
     <form className={styles.manualPanel} onSubmit={onSubmit}>
-      <h2 className={styles.panelTitleManual}>Inserir codigo manualmente</h2>
-      <p className={styles.panelDescriptionManual}>
-        Digite o codigo da etiqueta no formato PRV-AAAA-MM-NNNNNN. A
-        movimentacao sera registrada apos a confirmacao.
-      </p>
+      {/* Bloco superior (conteudo centralizado vertical) + bloco
+          inferior (footer com divisor). justify-content: space-between
+          replica o layout do Figma node 240:6611 (divisor w[554])
+          + 240:6605/6609 (textos do footer). */}
+      <div className={styles.manualPanelTop}>
+        <h2 className={styles.panelTitleManual}>Inserir codigo manualmente</h2>
+        <p className={styles.panelDescriptionManual}>
+          Digite o codigo da etiqueta no formato PRV-AAAA-MM-NNNNNN. A
+          movimentacao sera registrada apos a confirmacao.
+        </p>
 
-      <div
-        className={styles.manualInputWrapper}
-        aria-invalid={isError ? "true" : "false"}
-      >
-        <span className={styles.manualInputPrefix} aria-hidden="true">
-          PRV-
-        </span>
-        <label htmlFor="codigo-manual" className={styles.srOnly}>
-          Codigo da prova
-        </label>
-        <input
-          id="codigo-manual"
-          type="text"
-          className={styles.manualInput}
-          value={codigo}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="AAAA-MM-NNNNNN"
-          autoComplete="off"
-          autoCapitalize="characters"
-          spellCheck={false}
-          aria-describedby={isError ? "manual-error" : undefined}
-          disabled={isLoading}
-        />
+        <div
+          className={styles.manualInputWrapper}
+          aria-invalid={isError ? "true" : "false"}
+        >
+          <span className={styles.manualInputPrefix} aria-hidden="true">
+            PRV-
+          </span>
+          <label htmlFor="codigo-manual" className={styles.srOnly}>
+            Codigo da prova
+          </label>
+          <input
+            id="codigo-manual"
+            type="text"
+            className={styles.manualInput}
+            value={codigo}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="AAAA-MM-NNNNNN"
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            aria-describedby={isError ? "manual-error" : undefined}
+            disabled={isLoading}
+          />
+        </div>
+
+        {isError && (
+          <div id="manual-error" className={styles.errorBanner} role="alert">
+            {state.mensagem}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          className={styles.manualCta}
+          disabled={submitDisabled}
+        >
+          <span>{isLoading ? "Buscando..." : "Buscar prova"}</span>
+          {!isLoading && (
+            <ArrowRightIcon width={11} height={11} aria-hidden="true" />
+          )}
+        </button>
       </div>
 
-      {isError && (
-        <div id="manual-error" className={styles.errorBanner} role="alert">
-          {state.mensagem}
-        </div>
-      )}
-
-      <button type="submit" className={styles.manualCta} disabled={submitDisabled}>
-        <span>{isLoading ? "Buscando..." : "Buscar prova"}</span>
-        {!isLoading && (
-          <ArrowRightIcon width={11} height={11} aria-hidden="true" />
-        )}
-      </button>
+      <InnerFooter />
     </form>
   );
 }

@@ -49,7 +49,6 @@
 .wrapper {
   background: #eaeaea;
   border-radius: 43px;
-  padding: 2.5rem clamp(2rem, 4vw, 3.5rem) 2rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
@@ -327,12 +326,28 @@
 
 /* ─── Sidebar (lado direito do cameraPanel) ───────────────────────── */
 
+/* Sidebar agora aninha 2 blocos:
+ *   .cameraSidebarTop (titulo + descricao + CTA — alinhado ao TOPO)
+ *   <InnerFooter />    (divisor + Ultima leitura | Ver historico — BOTTOM)
+ * Justify space-between separa os 2. Specs Figma node 240:6339:
+ * divisor w[554px] e footer ocupam apenas a coluna direita. */
 .cameraSidebar {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+  max-width: 554px;
+  height: 100%;
+  align-self: stretch;
+}
+
+.cameraSidebarTop {
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 1rem;
-  max-width: 554px;
+  flex: 1;
+  padding-bottom: 1.5rem;
 }
 
 .panelTitle {
@@ -429,17 +444,34 @@
 
 /* ─── Manual panel ────────────────────────────────────────────────── */
 
+/* Manual panel aninha 2 blocos:
+ *   .manualPanelTop  (titulo + descricao + input + CTA — centro vertical)
+ *   <InnerFooter />  (divisor + Ultima leitura | Ver historico — BOTTOM)
+ * No Figma node 240:6611 a linha divisoria tem w[554] e fica em
+ * left[956] — alinhada com o conteudo manual, NAO com a largura
+ * total do innerCard. */
 .manualPanel {
   display: flex;
   flex-direction: column;
-  align-items: flex-start; /* alinha conteudo a esquerda como no Figma */
-  justify-content: center;
-  gap: 1.25rem;
+  align-items: flex-start;
+  justify-content: space-between;
   flex: 1;
   padding: 0;
   /* No Figma o conteudo manual fica em left 956 dentro do innerCard
    * (left 528, w 1342) — empurrado para o centro-direita. */
   padding-left: clamp(0px, 12vw, 28%);
+}
+
+.manualPanelTop {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1.25rem;
+  flex: 1;
+  width: 100%;
+  max-width: 554px;
+  padding-bottom: 1.5rem;
 }
 
 .panelTitleManual {
@@ -563,10 +595,19 @@
   outline-offset: 2px;
 }
 
-/* ─── Footer dentro do innerCard branco ───────────────────────────── */
+/* ─── Footer dentro da COLUNA DIREITA do innerCard ────────────────── */
 
+/* Wave 3 v4.0 (C10) iteracao 4 — pos-Mario apontar que o footer
+ * fica APENAS na coluna direita do innerCard (specs Figma node
+ * 240:6339 divisor w[554] em left[1258] — alinhado a sidebar), NAO
+ * atravessa a largura total do card.
+ *
+ * Como o footer vive dentro de .cameraSidebar (e .manualPanel), ele
+ * herda a max-width da coluna pai. width 100% + max-width 554px
+ * garantem que se estenda na coluna sem ultrapassar. */
 .innerFooter {
-  margin-top: auto;
+  width: 100%;
+  max-width: 554px;
   padding-top: 1rem;
   display: flex;
   justify-content: space-between;
