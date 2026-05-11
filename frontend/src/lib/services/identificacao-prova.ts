@@ -62,8 +62,14 @@ export type ResultadoIdentificacao =
   | { tipo: "erro"; codigo: CodigoErro; mensagem: string };
 
 /** Mensagens em pt-BR mapeadas por codigo de erro. Sao retornadas ao
- *  chamador via `result.mensagem` para renderizacao direta. */
-const MENSAGENS_ERRO: Record<CodigoErro, string> = {
+ *  chamador via `result.mensagem` para renderizacao direta.
+ *
+ *  **Exportada (AUD-W3C10-020)** para permitir que o Componente 19
+ *  (digitacao manual) customize ou reutilize as mensagens. O record e
+ *  exhaustivo por construcao (`Record<CodigoErro, string>` — TypeScript
+ *  forca uma entrada por codigo; novo codigo na uniao quebra o build se
+ *  faltar a entrada correspondente). */
+export const MENSAGENS_ERRO_PADRAO: Record<CodigoErro, string> = {
   QR_INVALIDO:
     "QR Code nao reconhecido. Verifique se esta escaneando uma etiqueta de prova.",
   PROVA_NAO_ENCONTRADA: "Prova nao encontrada.",
@@ -72,9 +78,16 @@ const MENSAGENS_ERRO: Record<CodigoErro, string> = {
   SESSAO_EXPIRADA: "Sua sessao expirou. Faca login novamente.",
 };
 
+/** Helper para consumidores externos (Componente 19) que querem
+ *  reutilizar a mensagem padrao de um codigo de erro sem importar o
+ *  record inteiro. Util para condicionar exibicao por `result.codigo`. */
+export function mensagemPara(codigo: CodigoErro): string {
+  return MENSAGENS_ERRO_PADRAO[codigo];
+}
+
 /** Cria um erro tipado com mensagem padrao. Usar no lugar de literais. */
 export function criarErro(codigo: CodigoErro): ResultadoIdentificacao {
-  return { tipo: "erro", codigo, mensagem: MENSAGENS_ERRO[codigo] };
+  return { tipo: "erro", codigo, mensagem: MENSAGENS_ERRO_PADRAO[codigo] };
 }
 
 interface IdentificarParams {

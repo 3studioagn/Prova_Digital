@@ -4,6 +4,9 @@ import {
   criarErro,
   identificarProvaPorCodigo,
   identificarProvaPorPayload,
+  mensagemPara,
+  MENSAGENS_ERRO_PADRAO,
+  type CodigoErro,
   type ResultadoIdentificacao,
 } from "@/lib/services/identificacao-prova";
 
@@ -242,6 +245,40 @@ describe("criarErro helper", () => {
     if (r3.tipo === "erro") expect(r3.mensagem).toContain("conexao");
     const r4 = criarErro("SESSAO_EXPIRADA");
     if (r4.tipo === "erro") expect(r4.mensagem).toContain("sessao");
+  });
+});
+
+describe("API publica para C19 (AUD-W3C10-020)", () => {
+  it("exporta MENSAGENS_ERRO_PADRAO com uma entrada para cada CodigoErro", () => {
+    // Listagem explicita garante que se alguem ampliar CodigoErro sem
+    // adicionar mensagem padrao, este teste quebra (alem do TypeScript).
+    const codigosEsperados: CodigoErro[] = [
+      "QR_INVALIDO",
+      "PROVA_NAO_ENCONTRADA",
+      "DISPOSITIVO_SEM_CAMERA",
+      "ERRO_REDE",
+      "SESSAO_EXPIRADA",
+    ];
+    for (const codigo of codigosEsperados) {
+      expect(MENSAGENS_ERRO_PADRAO[codigo]).toBeTypeOf("string");
+      expect(MENSAGENS_ERRO_PADRAO[codigo].length).toBeGreaterThan(0);
+    }
+    // Numero de chaves bate com a uniao — sem entradas orfas.
+    expect(Object.keys(MENSAGENS_ERRO_PADRAO).sort()).toEqual(
+      [...codigosEsperados].sort(),
+    );
+  });
+
+  it("mensagemPara retorna a mensagem do record para cada codigo", () => {
+    expect(mensagemPara("PROVA_NAO_ENCONTRADA")).toBe(
+      "Prova nao encontrada.",
+    );
+    expect(mensagemPara("SESSAO_EXPIRADA")).toContain("sessao");
+    expect(mensagemPara("DISPOSITIVO_SEM_CAMERA")).toContain("digitacao manual");
+    // Coerencia: mesma referencia do record exportado.
+    for (const codigo of Object.keys(MENSAGENS_ERRO_PADRAO) as CodigoErro[]) {
+      expect(mensagemPara(codigo)).toBe(MENSAGENS_ERRO_PADRAO[codigo]);
+    }
   });
 });
 
