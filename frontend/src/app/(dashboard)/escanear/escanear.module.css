@@ -107,10 +107,10 @@
 }
 
 .tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
   flex: 1; /* cada tab divide a largura igualmente */
   height: 48px;
   border: none;
@@ -121,20 +121,32 @@
   font-weight: 400;
   font-size: 1.125rem; /* 18px */
   cursor: pointer;
-  transition: background-color 180ms ease, color 180ms ease;
+  transition: color 180ms ease;
 }
 
-.tab:hover {
-  background-color: rgba(0, 0, 0, 0.04);
+/* Pill preto animado — framer-motion `layoutId="scanner-tab-pill"`
+ * desliza entre as 2 tabs quando o usuario troca. Espelho do
+ * `.segmentPill` da /nova-prova (Wave 2 v4.0 C06 Visual Refresh v2). */
+.tabPill {
+  position: absolute;
+  inset: 0;
+  background: #000000;
+  border-radius: 39px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  z-index: 0;
+}
+
+/* Label fica POR CIMA do pill animado. */
+.tabLabel {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .tabActive {
-  background-color: #000000;
   color: #ffffff;
-}
-
-.tabActive:hover {
-  background-color: #000000;
 }
 
 .tab:focus-visible {
@@ -147,21 +159,25 @@
 .innerCard {
   background: #ffffff;
   border-radius: 37px;
-  padding: 2.5rem clamp(2rem, 3.5vw, 3rem) 1.75rem;
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 480px;
+  padding: 2rem;
 }
 
 /* ─── Camera panel (lado a lado) ──────────────────────────────────── */
 
+/* Iteracao 5 (pos-feedback Mario): align-items: stretch para que a
+ * coluna direita (.cameraSidebar) ocupe a altura toda do panel —
+ * permitindo justify-content space-between separar topo (texto+CTA
+ * centralizado verticalmente) e fundo (footer com divisor). */
 .cameraPanel {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
-  gap: clamp(2rem, 4vw, 5rem);
+  gap: 2rem;
   flex: 1;
-  align-items: center;
+  align-items: stretch;
 }
 
 /* Preview slot: gradient sutil, border, brackets externos amarelos. */
@@ -337,10 +353,14 @@
   justify-content: space-between;
   align-items: stretch;
   max-width: 554px;
-  height: 100%;
   align-self: stretch;
+  /* Sem height fixo — align-self stretch + grid stretch cuidam disso. */
 }
 
+/* Iteracao 5: bloco superior centralizado verticalmente.
+ * flex: 1 ocupa o espaco entre o topo do sidebar e o footer;
+ * justify-content: center alinha conteudo no CENTRO vertical
+ * (era no topo na iteracao 4). */
 .cameraSidebarTop {
   display: flex;
   flex-direction: column;
@@ -444,12 +464,11 @@
 
 /* ─── Manual panel ────────────────────────────────────────────────── */
 
-/* Manual panel aninha 2 blocos:
- *   .manualPanelTop  (titulo + descricao + input + CTA — centro vertical)
- *   <InnerFooter />  (divisor + Ultima leitura | Ver historico — BOTTOM)
- * No Figma node 240:6611 a linha divisoria tem w[554] e fica em
- * left[956] — alinhada com o conteudo manual, NAO com a largura
- * total do innerCard. */
+/* Iteracao 5 (pos-feedback Mario):
+ *   - justify-content: space-between separa bloco superior (texto +
+ *     input + CTA — centralizado vertical) do footer.
+ *   - .manualPanelTop ocupa flex: 1 entre topo e footer com
+ *     justify-content: center para centralizar verticalmente. */
 .manualPanel {
   display: flex;
   flex-direction: column;
@@ -595,19 +614,10 @@
   outline-offset: 2px;
 }
 
-/* ─── Footer dentro da COLUNA DIREITA do innerCard ────────────────── */
+/* ─── Footer dentro do innerCard branco ───────────────────────────── */
 
-/* Wave 3 v4.0 (C10) iteracao 4 — pos-Mario apontar que o footer
- * fica APENAS na coluna direita do innerCard (specs Figma node
- * 240:6339 divisor w[554] em left[1258] — alinhado a sidebar), NAO
- * atravessa a largura total do card.
- *
- * Como o footer vive dentro de .cameraSidebar (e .manualPanel), ele
- * herda a max-width da coluna pai. width 100% + max-width 554px
- * garantem que se estenda na coluna sem ultrapassar. */
 .innerFooter {
-  width: 100%;
-  max-width: 554px;
+  margin-top: auto;
   padding-top: 1rem;
   display: flex;
   justify-content: space-between;

@@ -8,6 +8,7 @@ import {
   type FormEvent,
 } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 
 import { createClient } from "@/lib/supabase/client";
 import { CameraIcon, KeyIcon, ArrowRightIcon } from "@/components/icons";
@@ -228,8 +229,21 @@ function ScannerTabs({
           className={`${styles.tab} ${tab === "camera" ? styles.tabActive : ""}`}
           onClick={onCamera}
         >
-          <CameraIcon width={20} height={20} aria-hidden="true" />
-          <span>Camera</span>
+          {/* Wave 3 v4.0 (C10) iteracao 5 — Mario pediu mesma animacao
+              do `.segmentBtn` da /nova-prova: pill preto desliza entre
+              os tabs via framer-motion `layoutId`. */}
+          {tab === "camera" && (
+            <motion.span
+              layoutId="scanner-tab-pill"
+              className={styles.tabPill}
+              transition={{ type: "spring", bounce: 0.2, duration: 0.35 }}
+              aria-hidden="true"
+            />
+          )}
+          <span className={styles.tabLabel}>
+            <CameraIcon width={20} height={20} aria-hidden="true" />
+            <span>Camera</span>
+          </span>
         </button>
         <button
           type="button"
@@ -238,8 +252,18 @@ function ScannerTabs({
           className={`${styles.tab} ${tab === "manual" ? styles.tabActive : ""}`}
           onClick={onManual}
         >
-          <KeyIcon width={20} height={20} aria-hidden="true" />
-          <span>Manual</span>
+          {tab === "manual" && (
+            <motion.span
+              layoutId="scanner-tab-pill"
+              className={styles.tabPill}
+              transition={{ type: "spring", bounce: 0.2, duration: 0.35 }}
+              aria-hidden="true"
+            />
+          )}
+          <span className={styles.tabLabel}>
+            <KeyIcon width={20} height={20} aria-hidden="true" />
+            <span>Manual</span>
+          </span>
         </button>
       </div>
     </div>
