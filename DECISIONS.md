@@ -5544,3 +5544,168 @@ explicita do Figma documentada em `figma-references.md`.
     "ultima leitura" existir (audit_log filtrado por user, ja disponivel
     via C18). A11y mantida.
   - Mario aprovou as 3 decisoes na resposta pre-Gate-2.
+---
+
+## ADR-135 — Pill preto animado nos tabs Camera/Manual via `framer-motion` `layoutId`
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10 — Iteracao 5)
+**Contexto:** Apos a entrega inicial do C10 v4.0 (iteracoes 1-3), Mario
+pediu que os tabs Camera/Manual usem a **mesma animacao do
+`.segmentBtn` da `/nova-prova`** (Wave 2 v4.0 C06 Visual Refresh v2 —
+ADR-118 SUPERSEDIDO + visual refresh): quando o usuario muda de tab,
+o "pill preto" desliza entre as 2 celulas em vez de aparecer/desaparecer.
+
+**Decisao:** Adotar o **mesmo padrao** do `.segmentPill` no
+`/nova-prova` para os tabs do scanner. Implementacao em 3 partes:
+
+1. **JSX (`escanear/page.tsx`):** novo componente `<motion.span>`
+   renderizado condicionalmente dentro do tab ativo, com:
+   ```tsx
+   <motion.span
+     layoutId="scanner-tab-pill"
+     className={styles.tabPill}
+     transition={{ type: "spring", bounce: 0.2, duration: 0.35 }}
+     aria-hidden="true"
+   />
+   ```
+   `<span className={styles.tabLabel}>` aninha o icone + label e
+   fica POR CIMA do pill via `z-index: 1`.
+
+2. **CSS (`escanear.module.css`):**
+   - `.tabPill`: `position: absolute; inset: 0; background: #000000;
+     border-radius: 39px; z-index: 0;`
+   - `.tabLabel`: `position: relative; z-index: 1; display: inline-flex;`
+   - `.tabActive`: agora SO muda a cor do texto para `#ffffff`
+     (background passa a ser responsabilidade do pill animado).
+   - `.tab`: removida `transition: background-color`; permanece
+     `transition: color` (para o fade do texto quando muda).
+
+3. **Layout:** `position: relative` no `.tab` para que o pill
+   absoluto se posicione corretamente.
+
+**Alternativas:**
+  - CSS transition `background-color` (rejeitado: nao consegue
+    animar entre 2 elementos diferentes — apenas dentro do mesmo
+    elemento).
+  - CSS `view-transition-name` (rejeitado: suporte parcial em
+    browsers, alem de exigir refatoracao significativa).
+  - JS imperativo com `getBoundingClientRect` (rejeitado: framer-motion
+    `layoutId` ja faz isso bem).
+
+**Consequencias:**
+  - Tab switch tem a **mesma animacao spring** do segment de rota da
+    `/nova-prova` — consistencia visual em todo o produto.
+  - `prefers-reduced-motion` respeitado nativamente pelo framer-motion
+    (via `useReducedMotion` interno).
+  - Bundle `/escanear`: 168 kB → 208 kB First Load (+40 kB do
+    framer-motion no chunk compartilhado). Como outras paginas ja
+    importam framer-motion, o overhead real ja estava no shared chunk —
+    apenas a contagem por pagina muda.
+
+---
+
+## ADR-136 — Footer dentro da coluna direita do innerCard (alinhamento Figma)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10 — Iteracao 4)
+**Contexto:** Mario apontou (com screenshot) que o footer (divisor +
+"Ultima leitura ha 2 min" + "Ver historico") atravessava a largura
+total do `.innerCard`, mas o Figma mostra o footer **apenas dentro da
+coluna direita** (alinhado com o conteudo da sidebar/painel manual).
+
+Specs Figma confirmando:
+  - Camera (node 240:6339): divisor `left[1258] w[554]` — comeca no
+    mesmo X que o titulo "Pronto para escanear" (1258px), tem so 554px
+    de largura (nao os 1342px do innerCard inteiro).
+  - Manual (node 240:6611): divisor `left[956] w[554]` — alinhado com
+    o conteudo manual em left 956.
+
+**Decisao:** Mover `<InnerFooter />` de filho direto do `.innerCard`
+para dentro dos painels (camera/manual), aninhado no `flex column
+space-between` da sidebar/panel-pai. Estrutura final:
+
+```
+.innerCard (white, rounded 37px)
+  .cameraPanel (grid 2 col, align-items: stretch)
+    .previewSlot (col 1 — altura toda)
+    .cameraSidebar (col 2, flex column space-between)
+      .cameraSidebarTop (titulo + descricao + CTA)
+      <InnerFooter />   (← AQUI, nao mais filho do innerCard)
+
+ou
+
+  .manualPanel (flex column space-between)
+    .manualPanelTop (titulo + descricao + input + CTA)
+    <InnerFooter />
+```
+
+Com `width: 100%; max-width: 554px;` no `.innerFooter`, ele herda a
+largura da coluna pai naturalmente.
+
+**Alternativas:**
+  - Manter no innerCard com `width: 554px` fixo posicionado a direita
+    (rejeitado: nao se adapta a redimensionamento; quebra em telas
+    pequenas).
+  - Footer separado para cada modo (rejeitado: duplicacao
+    desnecessaria — componente eh o mesmo).
+
+**Consequencias:**
+  - Footer respeita o layout do Figma em ambos os modos.
+  - `.cameraSidebar` e `.manualPanel` agora dao `justify-content:
+    space-between` para separar topo (texto+CTA) do rodape (footer).
+  - `.cameraPanel` mudou de `align-items: center` para `align-items:
+    stretch` — coluna direita ocupa altura toda para que o footer
+    consiga encostar no fundo via `margin-top: auto` implicito do
+    `space-between`.
+
+---
+
+## ADR-137 — Scanner beam animation (feixe amarelo infinito)
+**Data:** 2026-05-06 (Wave 3 v4.0 — Componente 10 — Iteracao 7)
+**Contexto:** Mario pediu que o feixe amarelo no mini-card branco do
+QR mock **suba e desca infinitamente**, simulando um scanner real.
+
+Originalmente o feixe (`.qrMockYellowBar`) era estatico no topo do
+mini-card (top: 12px, height: 60px, gradient amarelo sutil 0→0.14→0).
+
+**Decisao:** Animacao CSS pura com `@keyframes` + `prefers-reduced-motion`:
+
+```css
+.qrMockYellowBar {
+  /* specs existentes preservados */
+  border-radius: 8px;  /* todos os cantos — antes era so superiores */
+  animation: qrScanBeam 2.2s ease-in-out infinite;
+  will-change: top;
+}
+
+@keyframes qrScanBeam {
+  0%, 100% { top: 12px; }                  /* topo */
+  50%      { top: calc(100% - 72px); }     /* rodape com gap simetrico */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qrMockYellowBar { animation: none; }    /* feixe estatico no topo */
+}
+```
+
+**Calculo do `top: calc(100% - 72px)`:** o `100%` em `top` de elemento
+absolute refere-se ao altura do parent (`.qrMockCard`, que tem
+aspect-ratio 1 e width clamp 220-300px). Subtrair 72px = beam height
+(60) + gap inferior espelhado (12) garante que o beam **NAO sai** do
+mini-card no extremo inferior.
+
+**Por que CSS animation em vez de framer-motion:**
+  - Animacao continua e simples — `@keyframes` e suficiente.
+  - Zero overhead JS por frame (CSS animations rodam no compositor GPU).
+  - `will-change: top` da hint para o navegador.
+  - `prefers-reduced-motion` desabilita trivialmente (regra CSS pura).
+
+**Alternativas:**
+  - Framer Motion `motion.div` com `animate={{ top: [...] }}`
+    (rejeitado: overhead JS desnecessario para animacao puramente
+    decorativa).
+  - SVG animation (rejeitado: o feixe e um gradient, nao um SVG).
+  - Lottie (rejeitado: dependencia nova para 1 animacao trivial).
+
+**Consequencias:**
+  - Mais imersao visual no estado idle do scanner.
+  - Acessibilidade preservada via `prefers-reduced-motion`.
+  - Sem impacto em performance (CSS animation GPU-accelerated).
+  - `/escanear` 5.71 → 5.73 kB (+0.02 kB do CSS novo).

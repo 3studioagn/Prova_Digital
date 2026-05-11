@@ -849,4 +849,164 @@ Ver `docs/wave3-v4-c10/contrato-c19.md`:
 - UI de transicao (assinatura + selecao) na pagina `/provas/[id]` (substitui o que estava no /escanear v3.0).
 - `ScanResponse.transicoes_permitidas` continua existindo no backend — sera consumido pelo detalhe.
 
-**Fim da secao Execucao.**
+**Fim da secao Execucao (entrega inicial).**
+
+---
+
+# 📌 Secao Refinamento Visual (Iteracoes 4-7)
+
+**Branch:** `wave3-v4/componente-10` (continuacao)
+**Data:** 2026-05-06 — mesma sessao do Gate 2.
+**Contexto:** Apos a entrega inicial (commits `e4d543b` + `c18d665`),
+Mario apontou 4 rounds de discrepancias visuais. Esta secao registra
+cada round + commit + ADR correspondente.
+
+## R1. Iteracao 2 (commit `0a41a4a`) — chute pre-MCP **SUPERSEDED**
+
+Tentativa inicial de reproduzir o visual baseada na descricao textual.
+Mario apontou que ficou "totalmente diferente". Resultou na iteracao
+seguinte (3) que usou specs extraidos via MCP.
+
+## R2. Iteracao 3 (commit `088fe78`) — refit com specs **EXATOS** do Figma via MCP
+
+Mario forneceu link do Figma:
+- Frame Camera node `206:87` em file `kqOrPgP07y6y1SV7BUlEBs`
+- Frame Manual node `240:6448`
+
+Extraido via `mcp__9b97d32e-...__get_design_context`. **Specs reais**
+substituiram **palpites**. Tokens corrigidos:
+
+| Token | Iteracao 2 (chute) | Iteracao 3 (Figma real) |
+|---|---|---|
+| Wrapper bg | `#ededeb` | `#eaeaea` |
+| Wrapper radius | `32px` | `43px` |
+| innerCard radius | `24px` | `37px` |
+| Tabs | pill, `0.95rem` text | `39px` rounded, `58px` h, `513px` w, `18px` text |
+| Titulo h1 | clamp ~52px | **`64px`** Inter Regular |
+| Brackets | preto | **AMARELO `#f5c518`** ⚠️ |
+| Brackets dimensoes | `36x36` | `20x20` + inset `-10px` |
+| Sidebar h2 | clamp ~36px | **`40px`** Inter Medium `#0e0e0e` |
+| Sidebar desc | `0.95rem` | **`18px`** line-height **`20.8px`** `#5a5a5a` |
+| Btn Abrir camera | pill fit | rounded `17px` w `494px` h `50px` text `16px` |
+| Manual input | inline | bg `#fafafa` border `#e3e3e3` rounded `12px` w `520px` |
+| Input prefix | inline | **JetBrains Mono `13px` `#9a9a9a`** letter-spacing `0.65px` |
+| Btn Buscar prova | pill primary | rounded `12px` desabilitado bg `#dcdcdc` |
+| Footer texto | `0.85rem` | **`11px`** `#7a7a7a` |
+
+Mudancas estruturais:
+- `layout.tsx`: adicionado `JetBrains_Mono` via `next/font/google` para
+  o input do tab Manual.
+- `icons.tsx`: 3 icones novos (`CameraIcon`, `KeyIcon`, `ArrowRightIcon`).
+- JSX simplificado: `<Brackets />` componente reutilizavel, `<QRMockCard>`
+  com SVG inline 120x120 fiel ao Figma.
+
+## R3. Iteracao 4 (commit `16be342`) — footer dentro da coluna direita
+
+Mario apontou (com screenshot) que o footer atravessava a largura total
+do card, mas deve ficar **apenas na coluna direita** (com o conteudo
+da sidebar/manual). Specs Figma confirmaram:
+- Camera (node 240:6339): divisor `w[554] left[1258]` — alinhado com a
+  sidebar, nao com o innerCard inteiro.
+- Manual (node 240:6611): `w[554] left[956]`.
+
+**Mudanca estrutural:** `<InnerFooter />` movido de filho direto do
+`.innerCard` para dentro dos panels (`.cameraSidebar` ou `.manualPanel`),
+com `justify-content: space-between` para separar topo do rodape.
+
+**ADR-136 registrado** documentando a decisao.
+
+## R4. Iteracao 5 (commit `a923c69`) — pill animado nos tabs
+
+Mario pediu a **mesma animacao** dos botoes da `/nova-prova` (rota:
+Matriz | Filial | Lam.Matriz | Lam.Filial). Esse padrao usa
+`framer-motion` `layoutId="rota-pill"` no `.segmentBtn` — o pill preto
+desliza entre as celulas quando o usuario clica.
+
+**Implementado nos tabs Camera/Manual:**
+```tsx
+{tab === "camera" && (
+  <motion.span
+    layoutId="scanner-tab-pill"
+    className={styles.tabPill}
+    transition={{ type: "spring", bounce: 0.2, duration: 0.35 }}
+  />
+)}
+```
+
+Mais: nessa iteracao tambem foram aplicados **ajustes de centralizacao**:
+- `.cameraPanel`: `align-items: stretch` (era `center`).
+- `.cameraSidebarTop`: `justify-content: center` + `flex: 1`.
+- `.manualPanelTop` adicionado: `justify-content: center` + `flex: 1`.
+
+Bundle `/escanear` subiu de 168 → 208 kB First Load (+40 kB do
+framer-motion — outras paginas ja importavam, agora aparece no chunk
+dessa pagina tambem).
+
+**ADR-135 registrado.**
+
+## R5. Iteracao 6 (commit `17fa8ae`) — Camera = topo, Manual = centro
+
+Mario apontou que **na iteracao 5 deixei ambos os modos centralizados**,
+mas o desejado e:
+- Modo **Camera**: bloco texto+CTA alinhado ao **TOPO** da coluna.
+- Modo **Manual**: bloco texto+input+CTA **centralizado verticalmente**.
+
+Specs Figma confirmaram para o modo Camera:
+- innerCard top: 448, height 581 (vai de 448 a 1029).
+- Titulo "Pronto para escanear" centro vertical em 562 (translate-y-1/2
+  → topo do texto ~542).
+- Gap topo innerCard → titulo: ~94px. **Nao centralizado.**
+
+**Mudanca cirurgica de 1 linha:** `.cameraSidebarTop`
+`justify-content: center` → `flex-start`. `.manualPanelTop` mantem
+`center`.
+
+## R6. Iteracao 7 (commit `e34cee0`) — scanner beam animation
+
+Mario pediu que o feixe amarelo no mini-card branco **suba e desca
+infinitamente**, simulando um scanner.
+
+**Implementacao CSS pura** (sem framer-motion):
+```css
+.qrMockYellowBar {
+  /* specs existentes preservados */
+  border-radius: 8px;  /* era 8px 8px 0 0 — agora todos os cantos */
+  animation: qrScanBeam 2.2s ease-in-out infinite;
+  will-change: top;
+}
+@keyframes qrScanBeam {
+  0%, 100% { top: 12px; }
+  50%      { top: calc(100% - 72px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .qrMockYellowBar { animation: none; }
+}
+```
+
+`top: calc(100% - 72px)` = altura do parent (`.qrMockCard`) menos
+beam height (60) menos gap inferior espelhado (12). Garante que o
+beam NAO sai do mini-card no extremo inferior.
+
+**ADR-137 registrado.**
+
+## R7. Resumo final pos-iteracoes
+
+**Total commits da entrega:** 10 (Gate 1 + execucao + 4 rounds de
+refinamento). Todos pushados em `wave3-v4/componente-10`.
+
+**Bundle final:** `/escanear` 5.73 kB / 208 kB First Load JS.
+
+**Validacao:**
+- `pytest backend/tests/`: 825 passed + 9 skipped — backend nao
+  tocado nas iteracoes 4-7.
+- `npx tsc --noEmit`: exit 0.
+- `npx vitest run`: 44 passed.
+- `npx next build`: 13/13 paginas.
+- Acessibilidade preservada em todas as iteracoes (role=tab,
+  aria-selected, role=alert, focus-visible, prefers-reduced-motion).
+- Backend, RLS, migrations, schema, contratos publicos: **intocados**.
+
+**Pendencias:** as mesmas da entrega inicial — smoke E2E manual via
+`smoke-validation.md` e adicao manual dos PNGs do Figma.
+
+**Fim da secao Refinamento Visual.**

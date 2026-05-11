@@ -399,7 +399,7 @@
   justify-content: flex-start;
   gap: 1rem;
   flex: 1;
-  padding-bottom: 1.5rem;
+  padding: 3rem 0;
 }
 
 .panelTitle {
@@ -412,9 +412,10 @@
 }
 
 .panelDescription {
-  font-size: 1.125rem; /* 18px */
+  font-size: 1rem; /* 18px */
   color: #5a5a5a;
   line-height: 20.8px; /* spec Figma */
+  max-width: 500px;
   margin: 0;
 }
 
@@ -535,7 +536,7 @@
 }
 
 .panelDescriptionManual {
-  font-size: 1.125rem; /* 18px */
+  font-size: 1rem; /* 18px */
   color: #5a5a5a;
   line-height: 20.8px;
   margin: 0;

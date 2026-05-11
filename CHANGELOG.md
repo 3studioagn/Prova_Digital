@@ -99,6 +99,105 @@
 - Adicao manual dos PNGs do Figma ao repo (instrucoes em
   `docs/wave3-v4-c10/figma-references.md`).
 
+### Refinamento visual pos-feedback Mario (iteracoes 4-7)
+
+Apos a entrega inicial, Mario apontou 4 rounds de discrepancias visuais.
+Cada round virou commit cirurgico dedicado:
+
+**Iteracao 4 (commit `16be342`):**
+- Footer (divisor + "Ultima leitura ha 2 min" + "Ver historico") movido
+  de filho do `.innerCard` para dentro da coluna direita
+  (`.cameraSidebar` / `.manualPanel`).
+- Specs Figma confirmaram: divisor `w[554]` em `left[1258]` (Camera)
+  ou `left[956]` (Manual) — alinhado com o conteudo da coluna, NAO
+  atravessando a largura total do card.
+- ADR-136 registrado.
+
+**Iteracao 5 (commit `a923c69`):**
+- Tabs Camera/Manual ganharam pill preto animado via `framer-motion`
+  `layoutId="scanner-tab-pill"` — espelho do `.segmentBtn` da
+  `/nova-prova`. Transition `{ type: "spring", bounce: 0.2,
+  duration: 0.35 }`.
+- `import { motion } from "framer-motion"` adicionado em `page.tsx`.
+- `align-items: stretch` no `.cameraPanel` + `space-between` na sidebar.
+- Bundle `/escanear` subiu de 168 → 208 kB First Load (+40 kB do
+  framer-motion no chunk — outras paginas ja importavam).
+- ADR-135 registrado.
+
+**Iteracao 6 (commit `17fa8ae`):**
+- `.cameraSidebarTop` mudou de `justify-content: center` para
+  `flex-start` — Mario apontou (com print) que o bloco texto+CTA
+  no modo Camera deve ficar **alinhado ao TOPO** da coluna direita
+  (specs Figma: titulo em top 562 vs innerCard top 448, gap ~94px do
+  topo).
+- `.manualPanelTop` mantem `justify-content: center` — modo Manual
+  continua centralizado verticalmente.
+
+**Iteracao 7 (commit `e34cee0`):**
+- Feixe amarelo `.qrMockYellowBar` ganhou animacao infinita CSS:
+  `qrScanBeam 2.2s ease-in-out infinite` — sobe do topo (top: 12px)
+  ao rodape do mini-card (`top: calc(100% - 72px)`) e volta,
+  simulando scanner.
+- `border-radius` ajustado de `8px 8px 0 0` para `8px` em todos os
+  cantos (visivel agora no rodape).
+- `prefers-reduced-motion: reduce { animation: none }` para
+  acessibilidade WCAG 2.3.3 / RN-012.
+- ADR-137 registrado.
+
+### Adicionado (iteracoes 4-7)
+- `src/app/layout.tsx`: importacao de `JetBrains_Mono` via
+  `next/font/google` (iteracao 3 — usada no input do tab Manual).
+- 3 novos icones em `components/icons.tsx` (camera, key, arrow-right)
+  ja entregues na iteracao 1.
+- Estrutura aninhada do `.cameraSidebar` e `.manualPanel` com
+  `space-between` (iteracao 4).
+- Componente `<Brackets />` reutilizavel (iteracao 3).
+
+### Modificado (iteracoes 4-7)
+- `.qrMockYellowBar`: border-radius 8px (todos cantos) +
+  `animation: qrScanBeam` (iteracao 7).
+- Estrutura JSX dos tabs em `ScannerTabs`: pill com `motion.span` +
+  `tabLabel` com z-index (iteracao 5).
+- `.cameraSidebarTop`: `justify-content: flex-start` (iteracao 6).
+- `.manualPanelTop` adicionado: centraliza verticalmente
+  (iteracao 5).
+- `.cameraPanel`: `align-items: stretch` (iteracao 5).
+
+### ADRs novos (iteracoes 4-7)
+- **ADR-135** — Pill preto animado nos tabs Camera/Manual via
+  `framer-motion` `layoutId`.
+- **ADR-136** — Footer dentro da coluna direita do innerCard (Figma
+  alignment).
+- **ADR-137** — Scanner beam animation (feixe amarelo infinito) com
+  `prefers-reduced-motion`.
+
+### Total de commits da entrega C10 v4.0
+1. `b86e7fd` — docs: analise read-only pre-execucao (Gate 1)
+2. `08cc174` — feat: backend ScanRequest XOR + lookup polimorfico
+3. `e4d543b` — feat: frontend scanner reformulado + camada de servico
+4. `c18d665` — docs: ADRs 132-134 + CHANGELOG + CLAUDE + contrato-c19
+5. `0a41a4a` — style: estrutura tripla aninhada + tabs centralizados
+   (iteracao 2 — superseded)
+6. `088fe78` — style: refit visual com specs EXATOS do Figma via MCP
+   (iteracao 3)
+7. `16be342` — style: footer no rodape da coluna direita
+   (iteracao 4 — ADR-136)
+8. `a923c69` — style: tabs com pill animado (framer-motion) +
+   centralizacao vertical (iteracao 5 — ADR-135)
+9. `17fa8ae` — style: camera mode com bloco texto+CTA alinhado ao TOPO
+   (iteracao 6)
+10. `e34cee0` — style: animacao do feixe amarelo (scanner beam)
+    (iteracao 7 — ADR-137)
+
+### Validacao final (apos iteracao 7)
+- `pytest backend/tests/`: 825 passed + 9 skipped (sem alteracao).
+- `npx tsc --noEmit`: exit 0.
+- `npx vitest run`: 44 passed.
+- `npx next build`: 13/13 paginas. `/escanear` 5.73 kB / 208 kB
+  First Load.
+- Acessibilidade preservada em todas as iteracoes.
+- Backend, RLS, migrations, schema: intocados.
+
 ---
 
 ## [2026-05-05 — Wave 2 v4.0 — Correcoes Pos-Auditoria Senior]
