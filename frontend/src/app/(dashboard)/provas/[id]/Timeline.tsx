@@ -168,7 +168,7 @@ function TimelineHeader({
 }: TimelineHeaderProps) {
   return (
     <header className={styles.header}>
-      <span className={styles.rotaBadge} aria-label={`Rota: ${rotaLabel}`}>
+      <span className={styles.rotaBadge}>
         {`Rota: ${rotaLabel}`}
       </span>
       {isTerminalOk && (
