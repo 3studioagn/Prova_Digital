@@ -102,13 +102,23 @@ from app.services.codigo_publico_service import (
 from app.services.etiqueta_service import TEMPLATE_PADRAO, gerar_pdf
 from app.services.state_machine import (
     TRANSICOES,
+    validar_transicao,
+)
+# Wave 3 v4.0 / C11: facade publica do state_machine roteia v3.0/v4.0
+# automaticamente conforme prova.rota. Excecoes e helpers principais
+# vem desta camada — o `app.services.state_machine` continua sendo
+# importado apenas para a parte v3.0 do `_computar_transicoes_permitidas`.
+from app.state_machine import (
     AtorNaoAutorizadoError,
     RotaIndeterminavelError,
     TransicaoInvalidaError,
-    determinar_rota,
     executar_transicao,
+    is_rota_v4,
     pode_cancelar,
-    validar_transicao,
+)
+from app.state_machine.v4.machine import (
+    motivo_obrigatorio_em_v4,
+    transicoes_validas_v4,
 )
 
 logger = logging.getLogger(__name__)
@@ -1684,25 +1694,45 @@ def _computar_transicoes_permitidas(
 ) -> tuple[list[StatusProvaEnum], list[StatusProvaEnum]]:
     """Determina quais transicoes o `usuario` pode executar na `prova`.
 
-    Retorna `(transicoes_permitidas, motivo_obrigatorio_em)`. Itera os
-    destinos candidatos de `TRANSICOES[prova.status]`, testa cada um com
-    `validar_transicao` (captura exceptions) e aplica as mesmas regras
-    extras que `executar_transicao` do sub-bloco A.1:
+    Retorna `(transicoes_permitidas, motivo_obrigatorio_em)`.
 
-      - Filtra `CANCELADA` (gancho C13, sera endpoint admin dedicado).
+    Wave 3 v4.0 / C11: roteia por `prova.rota`:
+      - rota IN {MATRIZ, LAM_MATRIZ, FILIAL, LAM_FILIAL} -> maquina v4.0
+        Consulta TRANSITION_RULES[(rota, status)] direto via
+        `transicoes_validas_v4`. Sem filtros adicionais por localizacao
+        (RF-010 v4.0 substitui RF-009 v3.0: rota eh imutavel da criacao).
+      - rota IS NULL ou rota IN {PADRAO, DIRETA} -> maquina v3.0 (legacy)
+        Logica original do Lote A v3.0 preservada abaixo.
+
+    Legacy v3.0 (logica preservada):
+      - Filtra `CANCELADA` (gancho C13, endpoint admin dedicado).
       - Filtra `CRIADA` quando origem e REPROVADA_PELO_VENDEDOR (gancho
         C14 — reinicio de ciclo via endpoint admin).
       - Em `APROVADA_PELO_VENDEDOR`, filtra destinos conforme localizacao
-        do vendedor (RF-009):
+        do vendedor (RF-009 v3.0):
           - MATRIZ → so `DE_VOLTA_3STUDIO`
           - FILIAL → so `ENCAMINHADA_A_CLICHERIA`
-        Admin bypassa essa regra (consistente com `executar_transicao`).
+        Admin bypassa essa regra.
 
     `motivo_obrigatorio_em` contem a subset de `transicoes_permitidas`
-    onde o usuario vai precisar informar motivo no submit — Wave 3 Lote
-    A: apenas `REPROVADA_PELO_VENDEDOR` (RF-007). Cancelamento tambem
-    exige motivo mas esta filtrado.
+    onde o usuario vai precisar informar motivo no submit — apenas
+    `REPROVADA_PELO_VENDEDOR` (RF-007). Cancelamento tambem exige motivo
+    mas esta filtrado (endpoint dedicado).
     """
+    # ── Wave 3 v4.0: roteia para a maquina v4.0 quando aplicavel ─────────
+    if is_rota_v4(prova.rota):
+        assert prova.rota is not None  # narrowing — is_rota_v4 verifica
+        permitidas_v4 = sorted(
+            transicoes_validas_v4(prova.rota, prova.status, usuario),
+            key=lambda s: s.value,
+        )
+        motivo_obrigatorio_v4 = sorted(
+            motivo_obrigatorio_em_v4(prova.rota, prova.status, usuario),
+            key=lambda s: s.value,
+        )
+        return list(permitidas_v4), list(motivo_obrigatorio_v4)
+
+    # ── Legacy v3.0 — logica original preservada ──────────────────────────
     permitidas: list[StatusProvaEnum] = []
     destinos_candidatos = TRANSICOES.get(prova.status, set())
 

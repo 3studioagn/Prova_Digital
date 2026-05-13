@@ -985,7 +985,26 @@ def test_toda_transicao_tem_atores_definidos():
             )
 
 
-def test_todos_estados_aparecem_em_transicoes():
-    """Todo StatusProvaEnum deve ter entrada em TRANSICOES (mesmo que vazio)."""
-    for st in StatusProvaEnum:
-        assert st in TRANSICOES, f"Estado {st.value} faltando em TRANSICOES"
+def test_todos_estados_v3_aparecem_em_transicoes():
+    """Todo StatusProvaEnum v3.0 deve ter entrada em TRANSICOES.
+
+    Wave 3 v4.0 (C11) introduziu 7 valores adicionais no enum (migration
+    013). Esses 7 valores NAO sao processados pela maquina v3.0 — provas
+    v4.0 (rota IN MATRIZ/LAM_MATRIZ/FILIAL/LAM_FILIAL) sao roteadas para
+    `app.state_machine.v4.machine` pelo facade. A invariante v3.0 vale
+    apenas para os 10 valores legacy.
+    """
+    ESTADOS_V3 = {
+        StatusProvaEnum.CRIADA,
+        StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
+        StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+        StatusProvaEnum.DE_VOLTA_3STUDIO,
+        StatusProvaEnum.COM_MOTORISTA,
+        StatusProvaEnum.ENVIADA_PARA_CLICHERIA,
+        StatusProvaEnum.ENCAMINHADA_A_CLICHERIA,
+        StatusProvaEnum.RECEBIDA_PELA_CLICHERIA,
+        StatusProvaEnum.REPROVADA_PELO_VENDEDOR,
+        StatusProvaEnum.CANCELADA,
+    }
+    for st in ESTADOS_V3:
+        assert st in TRANSICOES, f"Estado v3.0 {st.value} faltando em TRANSICOES"
