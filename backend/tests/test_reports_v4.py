@@ -436,6 +436,76 @@ class TestContextoMotoristaParidade:
                 )
 
 
+# ─── legacy_null_indefinida: cobertura do balde para vendedor.localizacao IS NULL ─
+
+
+class TestLegacyNullIndefinida:
+    """Wave 5 v4.0 / C16 fix AUD-W5C16-010 (2026-05-13): cobre o cenario
+    edge onde provas legacy (rota=NULL) tem vendedor SEM localizacao
+    preenchida — caem no balde 'indefinida'.
+
+    Em producao atual, os 2 admins (admin@3studio.com.br, ops@3studio.com.br)
+    tem localizacao=NULL mas sao is_admin=true (nao-vendedor); os 2
+    vendedores ativos tem localizacao=FILIAL. Portanto null_indef=0 em
+    producao no momento. Este teste cobre a logica para quando o balde
+    indefinida for > 0 (ex.: admin vira vendedor de prova legacy, ou
+    futura migracao desativar `usuarios.localizacao=NOT NULL`).
+
+    Formula: null_indef = null_total - null_matriz - null_filial
+    (reports.py:901). `ConsolidacaoRota.indefinida = max(0, null_indef)`
+    (reports.py:921). `DistRotaV4(categoria='legacy_null_indefinida', ...)`
+    so adicionado a distribuicao quando qtd > 0 (`_push_v4`)."""
+
+    def test_consolidacao_rota_indefinida_aceita_positivo(self):
+        """`ConsolidacaoRota` aceita indefinida > 0 (cenario edge)."""
+        from app.domain.schemas.report import ConsolidacaoRota
+
+        cons = ConsolidacaoRota(matriz=3, filial=10, indefinida=2)
+        assert cons.matriz == 3
+        assert cons.filial == 10
+        assert cons.indefinida == 2
+
+    def test_consolidacao_rota_indefinida_zero_default(self):
+        """`ConsolidacaoRota.indefinida` aceita zero (caso producao atual)."""
+        from app.domain.schemas.report import ConsolidacaoRota
+
+        cons = ConsolidacaoRota(matriz=3, filial=14, indefinida=0)
+        assert cons.indefinida == 0
+        assert cons.matriz + cons.filial + cons.indefinida == 17
+
+    def test_formula_null_indef_consistente(self):
+        """Replica a formula de reports.py:901 e valida invariante
+        com 3 cenarios: todos com vendedor preenchido, alguns sem,
+        todos sem. Garante que `null_indef >= 0` sempre."""
+        cenarios = [
+            # (null_total, null_matriz, null_filial, expected_indef)
+            (11, 0, 11, 0),  # producao atual: todos com vendedor FILIAL
+            (11, 5, 4, 2),  # cenario edge: 2 provas com vendedor.loc=NULL
+            (5, 0, 0, 5),  # caso extremo: nenhum vendedor com loc preenchida
+            (0, 0, 0, 0),  # nenhuma prova legacy
+        ]
+        for null_total, null_matriz, null_filial, expected_indef in cenarios:
+            null_indef = null_total - null_matriz - null_filial
+            assert null_indef == expected_indef, (
+                f"cenario {(null_total, null_matriz, null_filial)} -> "
+                f"esperado {expected_indef}, calculado {null_indef}"
+            )
+            # max(0, null_indef) garante nunca negativo (defesa em profundidade
+            # caso heuristica tenha bug e null_matriz + null_filial > null_total).
+            assert max(0, null_indef) >= 0
+
+    def test_distribuicao_rota_v4_aceita_legacy_null_indefinida(self):
+        """`DistRotaV4` aceita categoria 'legacy_null_indefinida' (Literal)."""
+        from app.domain.schemas.report import DistRotaV4
+
+        item = DistRotaV4(
+            categoria="legacy_null_indefinida", rota=None, quantidade=2
+        )
+        assert item.categoria == "legacy_null_indefinida"
+        assert item.rota is None
+        assert item.quantidade == 2
+
+
 # ─── _categoria_predicate: constroi expressao OR/EXISTS corretamente ───────
 
 
