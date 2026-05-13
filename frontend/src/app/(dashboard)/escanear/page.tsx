@@ -701,6 +701,14 @@ function ManualPanel({
             // ha erro; para o hint estatico caso contrario. Garante que
             // leitores de tela tem orientacao em ambos os modos.
             aria-describedby={isError ? "manual-error" : "manual-hint"}
+            // AUD-W3C19-004 — aria-invalid no <input> (alem do wrapper).
+            // Leitores de tela esperam o atributo no campo de entrada
+            // para anunciar "invalido" quando focado. O wrapper mantem
+            // o aria-invalid tambem porque a regra CSS
+            // `.manualInputWrapper[aria-invalid="true"]` (escanear.module.css:581)
+            // depende do seletor de atributo no contexto pai — mover
+            // exigiria tocar o CSS, vetado pelo escopo da sessao.
+            aria-invalid={isError ? "true" : "false"}
             disabled={isLoading}
             // Limite hard que espelha backend ScanRequest.codigo max_length=32
             // (AUD-W3C10-012). O codigo final tem 18 chars; aqui usamos
