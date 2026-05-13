@@ -6565,3 +6565,209 @@ hoje. A defesa atual depende de:
   `main` cobrindo todos os endpoints sensiveis.
 
 
+---
+
+
+## ADR-154 — Mensagens de erro v4.0 em pt-BR concisas, voz ativa (M-7 post-hoc)
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-7;
+ADR formal registrado pos-correcao em 2026-05-13 — AUD-W3C11-009/014).
+**Contexto:** A v4.0 introduziu transicoes novas e cada caso de erro
+(`TransicaoInvalidaError`, `AtorNaoAutorizadoError`, estado terminal)
+precisa de mensagem em pt-BR consistente. A `analysis.md §A.1` listou
+3 propostas (A: longa+tecnica; B: voz ativa concisa; C: enumerar
+permitidos). Decisao Gate 1 ficou registrada apenas em
+`analysis.md` — auditor classificou como falta de ADR formal
+(AUD-W3C11-009 MEDIO + AUD-W3C11-014 BAIXO).
+
+**Decisao:** **Opcao B** — voz ativa concisa.
+
+Templates verificados em `backend/app/state_machine/v4/machine.py`:
+- TransicaoInvalidaError (rota nao permite):
+  `f"Esta prova segue a rota {rota.value}, que nao permite a transicao
+   {status_atual.value} -> {status_destino.value}."`
+- AtorNaoAutorizadoError:
+  `f"Voce nao tem permissao para esta transicao (setor {usuario.setor.value})."`
+- Estado terminal em cancelamento:
+  `f"Prova em {status_atual.value} eh estado final."`
+
+**Justificativa:**
+1. **Melhor UX** — frases curtas, acionaveis. "voce nao tem permissao"
+   eh mais direto que "Apenas {atores_permitidos} podem executar".
+2. **Menor risco anti-enumeracao (DAT §8.2)** — Opcao A enumeraria os
+   atores permitidos no erro, vazando estrutura interna; Opcao B nao
+   expoe (motorista nao descobre "X permitido" ao receber erro).
+3. **Consistencia** com outros erros do sistema (login, cancelamento,
+   reinicio) que ja seguem voz ativa concisa.
+
+**Alternativas:**
+- **Opcao A** (longa+tecnica): rejeitada por verbosidade + risco de
+  vazamento de info.
+- **Opcao C** (enumerar permitidos): rejeitada por mesmo risco de
+  enumeracao + UX inferior em comparacao com B.
+
+**Consequencias:**
+- Implementacao em `backend/app/state_machine/v4/machine.py:186-207`
+  (executar_transicao_v4 + validar_transicao_v4).
+- Anti-enumeracao preservada — auditor verificou
+  (AUD-W3C11-020 INFO).
+- C12 (timeline visual) deve reusar mesmo tom se exibir mensagens
+  proprias — registrado em `contrato-c12.md §8`.
+
+
+---
+
+
+## ADR-155 — Critério 15 (botões inline transição) DEFERRED para pós-Wave 3
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 audit fixes — Decisao
+do Mario sobre AUD-W3C11-005, Opcao A aceita).
+
+**Contexto:** O prompt original do C11 (`§6.3 criterio 15`) pedia
+"botoes inline de transicao (Aprovar/Reprovar/Encaminhar) na pagina de
+detalhe `/provas/[id]`". Nao foi entregue. `analysis.md §A.4`
+registrou deferral. Auditor classificou como HIGH (AUD-W3C11-005)
+e pediu decisao explicita do Mario:
+(a) aceitar deferral + criar ADR; OR
+(b) abrir nova sessao dedicada.
+
+**Decisao:** **Opcao (a)** — aceitar deferral. Botoes inline ficam como
+follow-up tecnico opcional pos-Wave 3.
+
+**Justificativa:**
+1. **Scanner ja cumpre RNF-002** (≤ 2s captura → assinatura). UX
+   canonica em `/escanear` com signature canvas integrado.
+2. **Consistencia com C10 + C19** — caminho canonico unico de transicao
+   evita duplicidade de superficie (botao inline exigiria signature
+   canvas modal adicional ~150-200 LOC + hook
+   `useTransitionFromDetail` + lista dinamica de transicoes; reduplica
+   logica ja em `escanear/page.tsx`).
+3. **AdminActions ja oferece Cancelar + Reiniciar** na detail page
+   (Wave 3 C13/C14). Tipos de transicao restantes
+   (Aprovar/Reprovar/Encaminhar) usam scanner.
+4. **Sem bloqueio funcional** — admin/vendedor/motorista/clicheria
+   conseguem operar 100% das transicoes da Matriz canonica via
+   scanner `/escanear`.
+
+**Alternativas:**
+- **Opcao B** (nova sessao dedicada). Rejeitada por:
+  - Custo de desenvolvimento (~150-200 LOC novos) sem ganho
+    funcional — apenas conveniencia UX.
+  - Bloqueio do PR para `main` da Wave 3 inteira por feature opcional.
+  - Risco de divergencia visual entre signature canvas inline e
+    signature canvas do scanner.
+
+**Consequencias:**
+- C11 fecha sem o criterio 15. Apendice de status no `audit-report.md`
+  marca AUD-W3C11-005 como **RESOLVIDO via documentacao** (deferral
+  registrado).
+- Follow-up tecnico OPCIONAL pos-Wave 3 — sessao separada que
+  decida se vale entregar (depende de feedback de operadores reais
+  apos C12 + smoke E2E em producao).
+- C12 (timeline) nao afetado.
+- `CHANGELOG.md` registra esta decisao na secao de Correcoes
+  Pos-Auditoria.
+
+
+---
+
+
+## ADR-156 — Drift Python<->Postgres em CI sem INTEGRATION_DATABASE_URL
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 audit fixes —
+decisao tecnica sobre AUD-W3C11-007).
+
+**Contexto:** O teste `test_status_prova_enum_drift_python_postgres`
+em `backend/tests/test_status_prova_enum_drift.py` valida que o enum
+no Postgres bate com `StatusProvaEnum` no Python. Tem `@pytest.mark.
+skipif(_INTEGRATION_DB_URL is None, ...)` — em CI normal (sem env
+var configurada) eh skipped. Auditor (AUD-W3C11-007 MEDIO) sinalizou
+que drift Python<->Postgres NAO eh detectado automaticamente em PR.
+
+**Opcoes consideradas:**
+- **A** Setup de Postgres container no CI (`services: postgres` em
+  workflows GitHub Actions) + rodar a suite integrada por padrao.
+- **B** Manter skipif + adicionar pre-commit hook que valida via MCP
+  apply_migration em branch temporario antes do merge.
+- **C** Aceitar como gap conhecido — drift detectado por validacao
+  MCP manual + outras camadas (Python<->TS regex ja roda em CI;
+  Python<->JSON SSoT ja roda).
+
+**Decisao:** **Opcao C** — aceitar como gap conhecido, com
+mitigacoes existentes documentadas.
+
+**Justificativa:**
+1. **Drift Python<->TS ja eh detectado em CI** via regex
+   `test_status_prova_drift_typescript_python` (pure Python — sem
+   env var).
+2. **Drift Python<->JSON SSoT** ja eh detectado via
+   `test_matrix_structure.py` (acesso, nao enum, mas mesmo padrao).
+3. **Validacao MCP manual** em cada migration eh procedimento atual
+   da Wave 3 v4.0 (`SELECT enumlabel FROM pg_enum` apos cada
+   ALTER TYPE). Documentado em `CLAUDE.md` "Como adicionar valor".
+4. **Custo da Opcao A** (~30 min setup CI + diagnostico de falsos
+   negativos por timing) eh desproporcional ao risco — adicionar
+   valor ao enum em apenas uma camada ja eh capturado por code
+   review e pelos drift tests pure-Python (Python<->TS) que mostrariam
+   inconsistencia indireta.
+5. **Opcao B** (pre-commit MCP) introduz dependencia em MCP local
+   em ambiente CI — fragil e fora do padrao do projeto.
+
+**Alternativas:**
+- A: ainda viavel se PR futuro adicionar valor inconsistente.
+  Recomendacao: revisitar Opcao A na sessao de CI/CD post-Wave 3
+  (junto com rate limit dedicado).
+
+**Consequencias:**
+- Teste integrado continua opt-in via `INTEGRATION_DATABASE_URL` —
+  rodado em produccao via MCP apos cada migration.
+- Drift entre Python e Postgres em PR seria capturado em retest
+  manual + validacao MCP — process check, nao automation check.
+- Risco residual aceito. Documentado em apendice deste ADR e em
+  `CLAUDE.md` "Como adicionar valor ao enum status_prova_enum".
+
+
+---
+
+
+## ADR-157 — Benchmark dedicado de /transicoes DEFERRED
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 audit fixes —
+AUD-W3C11-017).
+
+**Contexto:** `analysis.md §A.5` declarou "Lookup O(1) na tabela em
+memoria; benchmark indireto via 961 testes em 4s". Auditor
+(AUD-W3C11-017 BAIXO) notou que nao ha benchmark real medindo tempo
+end-to-end de `POST /{id}/transicoes`. RNF-001 (≤ 1s) eh requisito
+funcional mas nao tem evidencia numerica direta.
+
+**Decisao:** **DEFERRED** para sessao dedicada de rate limit +
+benchmarks (junto com ADR-145 e ADR-153) **antes do PR para `main`**.
+
+**Justificativa:**
+1. **Operacao matematicamente O(1)** — `dict.get((rota, status))`
+   sobre dict de 24 entradas + iteracao linear sobre `frozenset`
+   pequeno (max 2-3 elementos).
+2. **3 round-trips ao banco** (lock + INSERT + audit_log) — bem
+   abaixo do orcamento de 1s mesmo em sa-east-1 com latencia ~100ms.
+3. **Cobertura indireta** ja existe via 961 testes em 4s — media
+   ~4ms por teste, inclui mocks de IO.
+4. **Sessao dedicada de rate limit + benchmarks** ja agendada antes
+   do PR para `main` — concentra trabalho relacionado num unico
+   PR.
+5. **Risco residual baixo** — se algum cliente reportar transicao
+   > 1s, eh capturado pelo `audit_log.detalhes_json.duration` (gravado
+   por executar_transicao_v4 via log_audit) e aparece nas queries de
+   debug.
+
+**Alternativas:**
+- Benchmark dedicado agora: rejeitado por timing — encaixa melhor na
+  sessao consolidada de rate limit.
+
+**Consequencias:**
+- AUD-W3C11-017 marcado **DEFERRED — encaminhado para sessao de rate
+  limit pos-merge para `main`**.
+- Apendice de status no `audit-report.md` registra deferral.
+- Sem mudanca de codigo nesta sessao.
+
+
