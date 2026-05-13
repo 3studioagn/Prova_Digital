@@ -2,6 +2,132 @@
 
 ---
 
+## v4.0 — Wave 3 — Componente 11 — Correcoes Pos-Auditoria (2026-05-13)
+
+**Branch:** `wave3-v4-c11/fixes/execution` → PR contra
+`wave3-v4/componente-11` (que por sua vez vai PR para `development`).
+**Base:** `wave3-v4/componente-11` (commit `f57ba28`).
+**Tipo:** Correcoes acionaveis do `docs/wave3-v4-c11/audit-report.md`
+(2 CRITICOS · 3 ALTOS · 5 MEDIOS · 6 BAIXOS · 6 INFO = 22 entradas
+IDs · 19 unicos apos dedup).
+
+### Corrigidos (com codigo)
+
+- **AUD-W3C11-001** (CRITICO) — `backend/app/access/scopes.py`:
+  `_MOTORISTA_STATUSES` estendido para 4 estados (1 legacy + 3 v4.0).
+  Defesa primaria do scope motorista agora bate com Matriz Secao 5 +
+  RLS 014. Antes: motorista escaneando prova v4.0 recebia 404.
+- **AUD-W3C11-002** (CRITICO) + **AUD-W3C11-008/016** (MEDIO) —
+  `backend/app/access/scopes.py`: `_CLICHERIA_STATUSES` estendido para
+  7 estados (3 legacy + 4 v4.0 incluindo `COM_MOTORISTA_ENTREGA_FINAL`).
+  Migration RLS 015
+  (`015_clicheria_entrega_final_e_uniformizar_exists.sql`) DROP+CREATE
+  das 3 policies de SELECT, adiciona `COM_MOTORISTA_ENTREGA_FINAL` em
+  todas (paridade primaria<->secundaria) e uniformiza
+  `pol_movimentacoes_select` para EXISTS (estilo consistente com
+  `pol_etiquetas_select`). Aplicada via MCP. Antes: clicheria nao
+  conseguia concluir ultimas transicoes das rotas Matriz e Lam.Matriz.
+- **AUD-W3C11-003** (HIGH) — `shared/access-matrix.json scope_kinds`:
+  strings de motorista e clicheria expandidas com enumeracao literal
+  dos 4 e 7 estados respectivamente. SSoT alinhada com Python (scopes.py)
+  + RLS (015) + Matriz canonica Secao 6.
+- **AUD-W3C11-004 + AUD-W3C11-006** (HIGH dup) —
+  `backend/tests/access/test_scope_filter_for.py` (4 novos) +
+  `backend/tests/test_provas_api.py` (2 novos) = 6 testes novos
+  asserindo cada literal v4.0 explicitamente no SQL renderizado (em
+  vez de checar substring "COM_MOTORISTA" que era satisfeito pela
+  substring prefix). Total: scope filter 11 testes (era 7) +
+  provas API tests cobertos.
+- **AUD-W3C11-005** (HIGH) — Opcao (a) aceita pelo Mario em 2026-05-13:
+  criterio 15 (botoes inline na detail page) DEFERRED para follow-up
+  tecnico opcional pos-Wave 3. ADR-155 registrado.
+- **AUD-W3C11-009 + AUD-W3C11-014** (MED+LOW dup) — ADR-154
+  documentando decisao M-7 (mensagens em pt-BR voz ativa concisa) com
+  formato consistente dos ADRs 146-153. Implementacao verificada em
+  `machine.py:186-207` ja era a Opcao B; ADR formaliza.
+- **AUD-W3C11-010** (MED) — `backend/app/state_machine/v4/machine.py`:
+  docstring de `pode_cancelar` corrigida — decomposicao "10 v3.0 +
+  5 v4.0 ativos" -> "8 v3.0 ativos + 7 v4.0 ativos = 15 cancelaveis".
+- **AUD-W3C11-011** (LOW) — `frontend/src/lib/types/prova.ts`: JSDoc
+  do `STATUS_LABELS_SHORT` reflete 17 estados (era "10 estados").
+
+### Registrado formalmente sem mudanca de codigo
+
+- **AUD-W3C11-007** (MED) — ADR-156 documenta decisao tecnica de
+  manter drift Python<->Postgres como **gap conhecido** com
+  mitigacoes existentes (Python<->TS regex em CI + validacao MCP
+  manual em cada migration). Revisitar Opcao A (Postgres container)
+  na sessao de CI/CD pos-Wave 3.
+- **AUD-W3C11-012** (LOW) — narrativa "9 estados v3.0 para 14 estados
+  v4.0" da secao C11 original do CHANGELOG **NAO REESCRITA** —
+  preservada por valor historico. Esta secao de correcoes deixa
+  registrado: implementacao real eh 10 valores v3.0 + 7 valores v4.0
+  = 17 valores no enum (canonicamente 14 estados unicos via unificacao
+  semantica entre COM_MOTORISTA legacy v3.0 e COM_MOTORISTA_ENTREGA_FINAL
+  v4.0 — ADR-148).
+- **AUD-W3C11-013** (LOW) — contagem de testes esclarecida: o `139`
+  declarado no CHANGELOG/analysis inclui as expansoes de
+  `@pytest.mark.parametrize` (uma funcao com N parametrize values
+  conta como N test instances no `pytest -q`). Funcoes base
+  = 87 (`grep -c "^def test_"`); diferenca dos 52 sao parametrize
+  expansions. Sem reescrita do numero — declaracao correta com
+  esta interpretacao.
+- **AUD-W3C11-017** (LOW) — ADR-157 documenta benchmark dedicado
+  como **DEFERRED** para sessao de rate limit + benchmarks junto
+  com ADRs 145/153 antes do PR para `main`.
+
+### Aceitos sem mudanca de codigo (auditor declarou aceitavel)
+
+- **AUD-W3C11-024** (LOW) — `motivo_cancelamento_norm` aceitavel;
+  comportamento identico ao v3.0. Registrado no apendice do
+  audit-report.md como "ACEITO".
+- **AUD-W3C11-015/018/019/020/021/022** (INFO) — sem acao. Auditor
+  declarou explicitamente "Sem acao" em cada. Registrados no apendice
+  do audit-report.md como "ACEITO".
+
+### Migrations aplicadas
+
+- **RLS 015** (`015_clicheria_entrega_final_e_uniformizar_exists.sql`)
+  — DROP+CREATE das 3 policies de SELECT. Aplicada via MCP
+  `apply_migration`. Validacao pos-aplicacao via MCP `pg_policies`
+  confirma `COM_MOTORISTA_ENTREGA_FINAL` em todas as 3 clausulas de
+  clicheria. `get_advisors`: zero novos alertas.
+
+### Validado
+
+- Tests backend: TODO os 961 da base C11 + 6 novos AUD-004
+  (em-progresso confirmar contagem final no smoke check).
+- `backend/tests/access/`: 11/11 pass (scope) + 19/19 pass (structure)
+  + 40/40 total.
+- `backend/tests/state_machine/v4/`: 55/55 pass em machine_v4
+  (sem regressao).
+- MCP `apply_migration` RLS 015: success.
+- MCP `get_advisors security`: apenas 2 pre-existentes (ADR-025 +
+  ADR-027); zero novos.
+- `git diff` em arquivos da maquina v3.0, CSS, C10/C06/C19: VAZIO.
+
+### Decisoes registradas
+
+- ADRs novos: 154 (M-7 post-hoc) + 155 (AUD-005 (a) DEFERRED) + 156
+  (drift CI/CD) + 157 (benchmark DEFERRED).
+- Total ADRs Wave 3 v4.0 C11: 146-157 (12 ADRs).
+- 8/8 decisoes M-1..M-8 documentadas (M-7 originalmente em
+  `analysis.md §A.1`, agora formalizada em ADR-154).
+
+### Pendencias para PR em `main`
+
+- AUD-W3C11-005 Opcao (a) deferral fica documentado; nao bloqueia
+  Wave 3.
+- AUD-W3C11-007 + AUD-W3C11-017: DEFERREDs encaminhados para sessao
+  de rate limit + benchmarks (junto com ADR-145 + ADR-153) antes do
+  PR para `main`. Sessao **OBRIGATORIA** antes do PR para `main`.
+- Wave 7 (Componente 21) fara backfill `rota NULL -> valor` deduzido
+  da localizacao do vendedor; depois disso, provas legacy passam a
+  usar maquina v4.0 (`rota` permanecera NULLABLE ate Wave 7).
+
+---
+
+
 ## v4.0 — Wave 3 — Componente 11 — Maquina de Estados Expandida (2026-05-13)
 
 **Branch:** `wave3-v4/componente-11` → PR contra `development`.
