@@ -432,3 +432,68 @@ Critérios objetivos para cada achado, executados antes do PR.
 **Fim do Gate 1.** Aguardando:
 1. Resposta humana sobre AUD-W3C11-005 (Opção a/b/c).
 2. String `AUTORIZADO GATE 2 — CORREÇÃO C11 v4.0` para iniciar execução.
+
+---
+
+## 11. Resultado da Execução (Gate 2)
+
+**Branch:** `wave3-v4-c11/fixes/execution` (criada a partir de `wave3-v4/componente-11` HEAD `f57ba28`).
+**Decisão humana sobre AUD-W3C11-005:** Opção (a) aceita pelo Mario em 2026-05-13. Criterio 15 (botões inline) DEFERRED para follow-up técnico opcional pós-Wave 3 (ADR-155).
+
+### 11.1 Divergência entre plano e execução
+
+**Plano original previa:** base `development` HEAD `4aaf806`.
+**Execução real:** base `wave3-v4/componente-11` HEAD `f57ba28`.
+
+**Motivo:** `development` ainda não contém o trabalho do C11 — está em `4aaf806` (pré-C11). Os achados do `audit-report.md` referem-se ao código vivo no branch `wave3-v4/componente-11`, então a sessão de correção precisa sair desse branch (não de `development`). Plano original tinha equívoco sobre estado de `development`; corrigido no início do Gate 2 (PR aponta para `wave3-v4/componente-11`, que depois mergeará tudo em `development` quando o Mario fechar a Wave 3).
+
+### 11.2 Commits executados (ordem topológica)
+
+| # | Commit | ID(s) | Tipo |
+|---|---|---|---|
+| 1 | `aca49e9` | (plan) | `docs(...fixes)` cherry-pick do plano |
+| 2 | `70b3683` | AUD-001 | `fix(...AUD-001)` |
+| 3 | `32ac786` | AUD-002 + AUD-008 + AUD-016 | `fix(...AUD-002)` (Python + Migration RLS 015) |
+| 4 | `6368d27` | AUD-003 | `docs(...AUD-003)` |
+| 5 | `3ae5154` | AUD-004 + AUD-006 | `test(...AUD-004)` |
+| 6 | `07fa44b` | AUD-005 + AUD-007 + AUD-009 + AUD-014 + AUD-017 | `docs(...)` 4 ADRs (154-157) |
+| 7 | `7270550` | AUD-010 | `docs(...AUD-010)` |
+| 8 | `15ed09e` | AUD-011 | `docs(...AUD-011)` |
+| 9 | `dc6f15a` | AUD-012 + AUD-013 | `docs(...AUD-012,013)` |
+| 10 | `d67dae0` | AUD-024 + INFOs (015/018/019/020/021/022) | `docs(...AUD-024,INFOs)` |
+
+**Total de IDs cobertos:** 22 (RESOLVIDOS 17 + DEFERRED 2 + ACEITOS 7 — overlap por dedup de duplicações `004≡006`, `008≡016`, `009≡014`).
+**Total de commits:** 10 (1 plano + 9 correções).
+
+### 11.3 Diffs entre plano e execução
+
+| Item planejado | Como foi executado | Diferença |
+|---|---|---|
+| AUD-002: criar RLS 015 + (separadamente) refactor EXISTS | Migration RLS 015 já inclui uniformização EXISTS — único commit cobre AUD-002, AUD-008 e AUD-016 | Consolidação: 1 commit em vez de 2 (mais coerente operacionalmente — migration única) |
+| AUD-005: criar ADR-155 sob decisão (a) | Combinado no commit `07fa44b` junto com ADR-154, 156, 157 (todos são ADRs em `DECISIONS.md`) | Consolidação: 1 commit `docs(...)` com 4 ADRs (M-7, AUD-005, AUD-007, AUD-017) — corpo do commit lista cada ID coberto |
+| AUD-009/014: ADR-154 post-hoc | Idem AUD-005 | Idem |
+| AUD-007: ADR-156 | Idem AUD-005 | Idem |
+| AUD-017: ADR-157 | Idem AUD-005 | Idem |
+| AUD-024 + 6 INFOs: registrar em apêndice | Combinado no commit `d67dae0` no apêndice "Status pós-correção" do audit-report.md | Conforme planejado |
+
+### 11.4 Achados não-resolvidos
+
+**Zero.** Todos os 22 IDs do `audit-report.md` têm status final no apêndice — verificável em `docs/wave3-v4-c11/audit-report.md` linhas 963+.
+
+### 11.5 Validação interna
+
+Detalhada em [`fix-validation.md`](fix-validation.md). Sumário:
+- 23/23 itens do checklist verdes.
+- 967 passed + 10 skipped no backend (+6 testes novos AUD-004 vs baseline 961).
+- 98/98 Vitest pass.
+- tsc exit 0.
+- MCP `get_advisors security`: 0 novos alertas.
+- `git diff` em arquivos protegidos: vazio.
+
+### 11.6 Recomendação final
+
+PR pronto para merge condicional em `wave3-v4/componente-11`. Após merge nessa branch, ela mergeia para `development` quando Wave 3 (C10 + C19 + C11 + C12) estiver fechada. Merge para `main` exige sessão dedicada de rate limit + benchmarks (ADR-145 + ADR-153 + ADR-157).
+
+**Recomenda-se nova rodada de auditoria independente em sessão separada** para confirmar que (a) achados originais foram resolvidos, (b) correções não introduziram novos problemas, (c) Matriz canônica e implementação continuam par a par, (d) enum sincronizado, (e) trigger funcional, (f) coexistência preservada, (g) `contrato-c12.md` viável.
+
+Foco extra para nova auditoria: RLS 015 (aplicada em produção via MCP), 6 testes novos AUD-004, 4 ADRs novos (154-157).
