@@ -961,3 +961,49 @@ Nenhum trigger semântico de transição (consistente com Decisão M-4 / ADR-150
 ---
 
 **Fim do relatório. Aguardando decisão humana sobre próximos passos.**
+
+---
+
+## Apêndice: Status pós-correção (2026-05-13)
+
+Sessão de correção em branch `wave3-v4-c11/fixes/execution` (sai de
+`wave3-v4/componente-11`). Plano em `docs/wave3-v4-c11/fix-plan.md`.
+O corpo original do relatório acima **não foi editado** — esta seção
+acrescenta status pós-correção por ID.
+
+| ID | Severidade | Status pós-correção | Commit SHA-friendly | Notas |
+|---|---|---|---|---|
+| **AUD-W3C11-001** | CRÍTICO | **RESOLVIDO** | `fix(...AUD-001)` | `_MOTORISTA_STATUSES` estendido com 3 contextos v4.0 (`backend/app/access/scopes.py`). Validado por testes novos (AUD-004). |
+| **AUD-W3C11-002** | CRÍTICO | **RESOLVIDO** | `fix(...AUD-002)` | `_CLICHERIA_STATUSES` estendido com 4 estados v4.0 + RLS 015 aplicada via MCP (paridade primária↔secundária com `COM_MOTORISTA_ENTREGA_FINAL` em todas as 3 policies). Combinada com uniformização EXISTS (AUD-008/016). |
+| **AUD-W3C11-003** | HIGH | **RESOLVIDO** | `docs(...AUD-003)` | `shared/access-matrix.json scope_kinds` enumera todos os estados (4 motorista + 7 clicheria) literalmente. |
+| **AUD-W3C11-004** | HIGH | **RESOLVIDO** | `test(...AUD-004)` | 6 testes novos (4 unit em `test_scope_filter_for.py` + 2 API em `test_provas_api.py`) asserindo cada literal v4.0 explicitamente. |
+| **AUD-W3C11-005** | HIGH | **RESOLVIDO via documentação (Opção (a))** | `docs(...AUD-005)` | Decisão do Mario em 2026-05-13: aceita deferral do critério 15. Botões inline ficam como follow-up técnico opcional pós-Wave 3. ADR-155. |
+| **AUD-W3C11-006** | HIGH | **RESOLVIDO (duplicação de AUD-004)** | `test(...AUD-004)` | Coberto pelo mesmo commit. |
+| **AUD-W3C11-007** | MED | **DEFERRED — encaminhado para sessão de CI/CD pós-Wave 3** | `docs(...AUD-007)` | ADR-156 documenta decisão técnica (Opção C — aceitar gap conhecido, mitigado por Python↔TS regex em CI + validação MCP manual). |
+| **AUD-W3C11-008** | MED | **RESOLVIDO (combinado com AUD-002)** | `fix(...AUD-002)` | RLS 015 reescreve `pol_movimentacoes_select` em EXISTS; `pol_etiquetas_select` já era EXISTS; `pol_provas_select` é filtro direto (não cabe EXISTS). |
+| **AUD-W3C11-009** | MED | **RESOLVIDO** | `docs(...AUD-005,007,009,014,017)` | ADR-154 documenta decisão M-7 (mensagens em pt-BR voz ativa concisa) post-hoc. |
+| **AUD-W3C11-010** | MED | **RESOLVIDO** | `docs(...AUD-010)` | Docstring de `pode_cancelar` corrigida — decomposição "8 v3.0 ativos + 7 v4.0 ativos = 15". |
+| **AUD-W3C11-011** | LOW | **RESOLVIDO** | `docs(...AUD-011)` | JSDoc do `STATUS_LABELS_SHORT` reflete 17 estados. |
+| **AUD-W3C11-012** | LOW | **RESOLVIDO via apêndice** | `docs(...AUD-012,013)` | Narrativa "9 v3.0 → 14 v4.0" da seção original do CHANGELOG preservada por valor histórico; esclarecida no apêndice de Correções Pós-Auditoria. |
+| **AUD-W3C11-013** | LOW | **RESOLVIDO via apêndice** | `docs(...AUD-012,013)` | Discrepância 87 vs 139 esclarecida — 87 funções base + 52 expansões `@pytest.mark.parametrize`. |
+| **AUD-W3C11-014** | LOW | **RESOLVIDO (duplicação de AUD-009)** | `docs(...AUD-005,007,009,014,017)` | Coberto pelo mesmo ADR-154. |
+| **AUD-W3C11-015** | INFO | **ACEITO sem ação** | — | `contrato-c12.md` adequado conforme auditor. Sem mudança. |
+| **AUD-W3C11-016** | MED | **RESOLVIDO (combinado com AUD-002/008)** | `fix(...AUD-002)` | Uniformização EXISTS na migration RLS 015. |
+| **AUD-W3C11-017** | LOW | **DEFERRED — encaminhado para sessão de rate limit pós-merge `main`** | `docs(...AUD-005,007,009,014,017)` | ADR-157 documenta deferral junto com ADR-145/153. |
+| **AUD-W3C11-018** | INFO | **ACEITO sem ação** | — | Sem trigger semântico — Decisão M-4 (ADR-150). |
+| **AUD-W3C11-019** | INFO | **ACEITO sem ação** | — | Concorrência tratada via FOR UPDATE + 409 (ADR-084). |
+| **AUD-W3C11-020** | INFO | **ACEITO sem ação** | — | Anti-enumeração preservada nas mensagens. |
+| **AUD-W3C11-021** | INFO | **ACEITO sem ação** | — | Camadas anteriores intocadas (positivo). |
+| **AUD-W3C11-022** | INFO | **ACEITO sem ação** | — | Cobertura 100% no módulo v4 (acima de 95% alvo). |
+| **AUD-W3C11-024** | LOW | **ACEITO sem ação** | — | `motivo_cancelamento_norm` em `executar_transicao_v4` aceitável; comportamento idêntico ao v3.0. Auditor declarou "Aceitável, sem ação". |
+
+**Sumário:**
+- **RESOLVIDOS com código:** 11 IDs (AUD-001, 002, 003, 004, 006, 008, 010, 011, 016 + parciais de 005, 009, 012, 013, 014).
+- **RESOLVIDOS via documentação:** 6 IDs (AUD-005, 009, 012, 013, 014 + ADR-154/155/156/157).
+- **DEFERRED com encaminhamento:** 2 IDs (AUD-007 → CI/CD pós-Wave 3; AUD-017 → sessão de rate limit pós-merge `main`).
+- **ACEITOS sem ação:** 7 IDs (AUD-015, 018, 019, 020, 021, 022, 024) — auditor declarou aceitável.
+- **Total:** 22 entradas (19 únicos após dedup) — **0 não resolvidos**.
+
+**Critério de aceitação:** Achados CRÍTICOS, ALTOS e MÉDIOS corrigíveis com código têm commit dedicado. INFOs e AUD-024 ficam registrados aqui sem código. AUD-005 obteve decisão humana explícita (Opção (a)) registrada em ADR-155. AUD-007 e AUD-017 estão encaminhados para sessões específicas com timing fixado (CI/CD pós-Wave 3 e rate-limit antes do PR para `main`).
+
+**Detalhes da execução:** ver `docs/wave3-v4-c11/fix-validation.md` (smoke check + auto-crítica) e `docs/wave3-v4-c11/fix-plan.md` Seção "Resultado da Execução".
