@@ -92,10 +92,27 @@ export function isCharValidoEmPosicaoSemHifen(c: string, pos: number): boolean {
  *   - Insere hifens automaticamente apos pos 4 (ano) e pos 7 (ano+mes).
  *   - Trunca em DISPLAY_TOTAL_LEN (14 chars com 2 hifens).
  *
+ * @param raw Entrada crua do usuario. Em uso normal, sempre vem de
+ *   `e.target.value` de um `<input>` — portanto string. A salvaguarda
+ *   `typeof raw !== "string"` cobre apenas chamadas indevidas (testes,
+ *   refatoracoes, integracoes externas que possam passar `null`,
+ *   `undefined`, `number`, etc.) — nestes casos retorna `""`
+ *   **silenciosamente** (AUD-W3C19-006). NAO lanca excecao para evitar
+ *   crashar a UI; o input simplesmente fica vazio, o que e detectavel
+ *   pelo chamador via `isDisplayCompleto`/`validarFormatoCodigoPublico`.
+ *
+ * @returns Display formatado `YYYY-MM-NNNNNN` (sem prefixo "PRV-"), ou
+ *   `""` quando o input nao produz nenhum char significativo (vazio,
+ *   apenas separadores ou apenas chars invalidos) — ou quando `raw`
+ *   nao e string.
+ *
  * Determinismo: pura, idempotente
  * (`aplicarMascara(aplicarMascara(x)) === aplicarMascara(x)`).
  */
 export function aplicarMascara(raw: string): string {
+  // AUD-W3C19-006: entrada nao-string retorna "" silenciosamente.
+  // Documentado no JSDoc acima — risco real em uso normal e zero
+  // (e.target.value e sempre string).
   if (typeof raw !== "string") return "";
   // 1) Strip prefixo PRV-/PRV ao normalizar para upper.
   const upper = raw.toUpperCase();
