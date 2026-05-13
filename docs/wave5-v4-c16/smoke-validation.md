@@ -1,8 +1,8 @@
 # Smoke validation — Wave 5 v4.0 / C16
 
-**Branch:** `wave5-v4/componente-16`.
+**Branch:** `wave5-v4/componente-16` (+ correções pós-auditoria em `wave5-v4-c16/fixes/execution`).
 **Pré-requisito:** logar como admin (`admin@3studio.com.br` ou `ops@3studio.com.br`) no preview/staging — preview programático não chega à página (RBAC frontend redireciona). Mario executa manualmente.
-**Total:** 20 cenários (5 de RotaFilter + 4 do card ROTA + 3 de CSV + 4 de filtros + 2 de a11y + 2 de anti-regressão).
+**Total:** 23 cenários (5 de RotaFilter + 4 do card ROTA + 3 de CSV + 4 de filtros + 2 de a11y + 2 de anti-regressão + **3 estados de borda — Wave 5 v4.0 C16 Audit Fixes AUD-W5C16-002**).
 
 ---
 
@@ -127,13 +127,46 @@
 
 ---
 
+## Estados de borda (Wave 5 v4.0 / C16 Audit Fixes — AUD-W5C16-002)
+
+Cenários 8/9/10 do prompt da auditoria — não cobertos no smoke original. Validam que estados não-felizes não quebram o componente.
+
+### 21. [ESTADO VAZIO] Sem provas para o filtro aplicado
+- Em `/relatorios?scope=geral`, aplicar filtro com `vendedor_id` que não existe: `/relatorios?scope=geral&vendedor_id=00000000-0000-0000-0000-000000000000`.
+- ✅ Aceitar: página renderiza com `EmptyState` em cada card que aceita dados (donut "Provas Ativas", barras "Por Status", ranking de vendedor).
+- ✅ Contadores no card ROTA mostram `Matriz 0 · Filial 0`.
+- ✅ Sem erros no console; sem crash visual.
+- ✅ Card TOTAL GERAL mostra `0` (ou state apropriado).
+- ❌ Recusar se houver `Error boundary` exibida, número `NaN`, ou crash do componente.
+- **Como reproduzir:** copiar UUID literal acima; backend retorna payload válido com listas vazias e contadores zerados.
+
+### 22. [ESTADO DE ERRO] Backend indisponível
+- DevTools → Network → habilitar `Offline` (ou throttle "No throttling" → "Custom" com latência impossível).
+- Em `/relatorios?scope=geral`, recarregar (F5).
+- ✅ Aceitar: banner/erro visível pedindo retry; ou estado de loading que NÃO trava indefinidamente; sem `Error boundary` raiz da app.
+- ✅ Após desativar `Offline`, clicar em retry (se houver) ou recarregar → página retorna ao estado normal.
+- ❌ Recusar se o componente travar em loading eterno sem mensagem ao usuário, ou se algum estado `undefined` causar crash.
+- **Como reproduzir:** DevTools → Network tab → conditional `Offline` + reload.
+
+### 23. [ACESSO NEGADO] Vendedor tenta acessar relatórios
+- Logout do admin (sair do `admin@3studio.com.br`).
+- Login como vendedor: `mariosouza@teste.com.br` ou `andrebento@3studio.com.br`.
+- Navegar para `/relatorios`.
+- ✅ Aceitar: middleware Wave 1 v4.0 redireciona ANTES de chegar ao backend → URL volta para `/dashboard` ou exibe componente `Restricted`.
+- ✅ Backend (se chamado diretamente via curl com token de vendedor) retorna 403 (Decisão D11→i, ADR-162).
+- ✅ Atalho `g r` não responde no painel `?` para vendedor (filtrado pela Matriz Wave 1).
+- ❌ Recusar se vendedor consegue ver dados de relatórios, ou se a página `/relatorios` renderiza qualquer dado real (não-`Restricted`).
+- **Como reproduzir:** usar credenciais reais do vendedor existente; verificar URL final + se há solicitação de rede para `/api/v1/reports*` (deve haver 0 quando middleware bloqueia client-side).
+
+---
+
 ## Critério de aprovação
 
-- ✅ **TODOS os 20 cenários verdes** → PR autorizado para auditoria sênior.
+- ✅ **TODOS os 23 cenários verdes** → PR autorizado para auditoria sênior.
 - ⚠️ 1-3 cenários amarelos (esperado, mas validável em retest) → discutir com Mario.
 - ❌ Qualquer cenário vermelho → corrigir antes do PR.
 
-**Items 4, 5, 14, 15, 16, 17, 18, 20 podem ser SKIP em produção:** dependem de Mario logar e clicar; preview programático não cobre.
+**Items 4, 5, 14, 15, 16, 17, 18, 20, 21, 22, 23 podem ser SKIP em produção:** dependem de Mario logar e clicar; preview programático não cobre.
 
 ---
 
