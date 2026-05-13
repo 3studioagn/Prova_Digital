@@ -57,11 +57,24 @@ _MOTORISTA_STATUSES: tuple[StatusProvaEnum, ...] = (
     StatusProvaEnum.COM_MOTORISTA_ENTREGA_FINAL,    # v4.0 — Matriz / Lam.Matriz
 )
 
-# Status que clicheria visualiza.
+# Status que clicheria visualiza. Wave 3 v4.0 / C11 (AUD-W3C11-002
+# pos-auditoria): estendido para os 4 estados v4.0 onde clicheria atua
+# (US-007 v4.0 — laminacao + transicao final Matriz/Lam.Matriz).
+# Defesa primaria (Python) + secundaria (RLS 015) batem com a Matriz
+# canonica Secao 5 das 4 rotas. COM_MOTORISTA_ENTREGA_FINAL incluido
+# para que clicheria possa concluir a ultima transicao de Matriz e
+# Lam.Matriz (RECEBIDA_PELA_CLICHERIA).
 _CLICHERIA_STATUSES: tuple[StatusProvaEnum, ...] = (
+    # Legacy v3.0
     StatusProvaEnum.ENVIADA_PARA_CLICHERIA,
     StatusProvaEnum.ENCAMINHADA_A_CLICHERIA,
     StatusProvaEnum.RECEBIDA_PELA_CLICHERIA,
+    # v4.0 — etapas de laminacao (US-007)
+    StatusProvaEnum.ENCAMINHADA_PARA_LAMINACAO,    # clicheria recebe para laminar
+    StatusProvaEnum.COM_MOTORISTA_IDA_LAMINACAO,   # clicheria ve a caminho — confirma chegada
+    StatusProvaEnum.LAMINACAO_CONCLUIDA,           # clicheria preparou — visivel ate retirar
+    # v4.0 — entrega final (Matriz, Lam.Matriz — ultima transicao da rota)
+    StatusProvaEnum.COM_MOTORISTA_ENTREGA_FINAL,   # clicheria escaneia para confirmar recebimento
 )
 
 
