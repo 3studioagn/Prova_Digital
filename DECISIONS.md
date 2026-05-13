@@ -6202,3 +6202,48 @@ de 17 provas hoje, projetado para ~200/mes em prod) e
 **descobrivel em ~horas** sem rate-limit. **Por isso o follow-up
 e OBRIGATORIO, nao opcional.**
 
+### Apendice (2026-05-11, pos-auditoria) — confirmacao do deferral
+
+**Resolve:** AUD-W3C19-001 (ALTO, "Rate-limit backend ausente").
+
+A auditoria senior do C19 (`docs/wave3-v4-c19/audit-report.md` commit
+`999e5b0`) confirmou o achado como **ALTO bloqueante para PR em
+`main`**. A sessao de correcao pos-auditoria (2026-05-11) tambem
+classificou como **DEFERRED com encaminhamento** — implementar
+exige modificar `backend/app/api/v1/provas.py` (endpoint `/scan`) +
+schemas Pydantic + middleware `slowapi`, o que viola o escopo da
+sessao de correcao do C19 (frontend-only conforme prompt original
++ "Nao modifica camada de servico/endpoint do C10" conforme prompt
+da sessao de correcao).
+
+**Encaminhamento explicito:** sessao dedicada (sugestao de slug:
+`wave3-v4-rate-limit-scan` ou `C20`) com o seguinte escopo:
+
+1. **Backend:** `slowapi` decorator `@limiter.limit("30/minute")`
+   no `POST /api/v1/provas/scan`, filtrado por `current_user.id`.
+   Aplicar APENAS ao caminho `body.codigo` (manual). Mapear 429
+   com `Retry-After` header.
+2. **Camada de servico (frontend/src/lib/services/identificacao-prova.ts):**
+   estender `CodigoErro` com `RATE_LIMITED`. Adicionar entrada em
+   `MENSAGENS_ERRO_PADRAO`. Mapear status 429 em `_mapearErro`.
+   Build TS quebra se faltar entrada.
+3. **C19 (page.tsx):** condicionar banner para `RATE_LIMITED` com
+   countdown opcional usando `Retry-After`.
+4. **Testes backend:** suite cobrindo 429 + headers + reset por
+   user.
+5. **Testes Vitest:** novo codigo na uniao + mensagem + paridade.
+6. **Docs:** ADR-146 fechando o follow-up. Atualizar
+   `contrato-c19.md` §3.3. Atualizar CHANGELOG.
+
+**Status atual:** DEFERRED — bloqueante para merge para `main`,
+nao para merge para `development` (Wave 3 ainda incompleta — C11
+e C12 pendentes; rate-limit pode ser feito antes ou em paralelo a
+esses componentes).
+
+**Validacao pos-correcao C19 (2026-05-11):**
+- `git diff <hash inicial>..HEAD -- backend/` retorna **vazio** ✅
+  (zero modificacao backend nesta sessao de correcao — conformidade
+   com escopo).
+- Achado AUD-W3C19-001 marcado RESOLVIDO=DEFERRED no apendice de
+  `audit-report.md`.
+

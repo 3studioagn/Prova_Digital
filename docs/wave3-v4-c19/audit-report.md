@@ -802,3 +802,82 @@ Strings **byte-a-byte idênticas**. Anti-enumeração na UI **preservada**.
 **Fim do Relatório de Auditoria.**
 
 **Recomendação final:** **APROVADO COM CORREÇÕES** — entrega tecnicamente sólida, sem CRÍTICOS, sem regressão funcional, sem violação grave de escopo. 1 ALTO já registrado pelo autor como follow-up obrigatório. 3 MÉDIOS recomendados antes do PR `main`. Smoke E2E manual DEFERRED para Mario executar em produção. Re-auditoria opcional após correções.
+
+---
+
+## Apêndice de Status Pós-Correção (2026-05-11)
+
+Adicionado pela sessão de correção pós-auditoria (`wave3-v4-c19/fixes/execution`) em 2026-05-11. **Não edita o corpo original do relatório acima.** Cada achado é marcado com status final + commit SHA (quando aplicável) + critério objetivo de prova.
+
+### AUD-W3C19-001 (ALTO) — DEFERRED com encaminhamento
+
+**Status final:** **DEFERRED — encaminhado para sessão dedicada** (slug sugerido: `wave3-v4-rate-limit-scan` ou C20).
+**Justificativa:** implementar rate-limit no `/scan` exige modificar `backend/app/api/v1/provas.py` + schemas Pydantic + middleware `slowapi`, vetado pelo escopo da sessão de correção (frontend-only conforme prompt original + "Não modifica camada de serviço/endpoint do C10" conforme prompt da correção).
+**Apêndice ao ADR-145** (DECISIONS.md) registra escopo do follow-up:
+1. Backend `slowapi @limiter.limit("30/minute")` filtrado por `current_user.id` no caminho `body.codigo`.
+2. `CodigoErro` estendido com `RATE_LIMITED` em `identificacao-prova.ts`.
+3. C19 condiciona banner para `RATE_LIMITED` (countdown opcional via `Retry-After`).
+4. Testes backend + Vitest.
+5. ADR-146 fechando.
+**Prova:** `git diff <hash-pos-C10>..HEAD -- backend/` retorna **vazio** ✅.
+**Bloqueante para PR em `main`** (não bloqueante para `development`).
+
+Aguarda commit SHA do docs deste deferral (commit #5 da sessão de correção).
+
+### Status por achado (corrigíveis)
+
+| ID | Severidade | Status final | Critério de prova |
+|---|---|---|---|
+| AUD-W3C19-002 | MÉDIO | **REGISTRADO (Plano B)** — `<strong>` mantido. Apêndice 1 ao ADR-144 documenta uniformização com CameraPanel pré-existente do C10. Commit `73a167e`. | `git diff -- '**/*.css'` retorna vazio (regra `.errorBanner strong { font-weight: 600 }` já existia em `development` desde C10). |
+| AUD-W3C19-003 | MÉDIO | **RESOLVIDO** — `MENSAGENS_C19` + `mensagemFinal` extraídos para `frontend/src/lib/c19-mensagens.ts`. Commit `597978d`. | 9 testes Vitest novos em `c19-mensagens.test.ts` cobrindo invariante anti-enumeração byte-a-byte (`mensagemFinal("QR_INVALIDO") === MENSAGENS_ERRO_PADRAO.PROVA_NAO_ENCONTRADA`) + fallback exhaustivo + escopo controlado. Vitest 98/98 verde (era 89). |
+| AUD-W3C19-004 | MÉDIO | **RESOLVIDO** — `aria-invalid` adicionado ao `<input id="codigo-manual">`. Commit `01db791`. | Atributo mantido também no wrapper para preservar regra CSS `.manualInputWrapper[aria-invalid="true"]` linha 581-583 (vetado tocar CSS). Apêndice 2 ao ADR-144 documenta. |
+| AUD-W3C19-005 / 031 | BAIXO | **ACEITO — D9 ratificada.** | Hook `useCodigoPrvInput` é binding trivial sobre lib pura já testada (43 testes). Vitest config em `environment: node` (D-13 Wave 1 v4.0). Sem instalação de JSDOM. |
+| AUD-W3C19-006 | BAIXO | **RESOLVIDO** — JSDoc estendido em `aplicarMascara`. Commit `43a94a8`. | `@param raw` + `@returns` + comentário inline documentando entrada não-string. Zero mudança de comportamento. |
+| AUD-W3C19-007 | BAIXO | **ACEITO — D6 ratificada.** | Auto-submit não implementado. Decisão de produto alinhada com smoke do C10. Sem mudança de código. |
+| AUD-W3C19-008 | BAIXO | **RESOLVIDO via AUD-003**. Commit `597978d`. | Cobertura de `mensagemFinal` agora em `c19-mensagens.test.ts`. 9 testes Vitest cobrem. |
+| AUD-W3C19-028 | BAIXO | **ACEITO — sem drift.** | `CODIGO_PUBLICO_REGEX` exportado + uso interno em `validarFormatoCodigoPublico`. Teste de paridade existente garante igualdade. Decisão deliberada do autor. |
+
+### INFOs registrados sem mudança de código (~20 achados)
+
+Recomendação textual do auditor: "Sem ação." Esta sessão de correção **confirma o status** sem mudança de código.
+
+| Grupo | IDs | Status final |
+|---|---|---|
+| Smoke DEFERRED | 009 / 033 | **REGISTRADO INFO** — Mario executa antes do PR para `main`. |
+| Timing client-side | 013 | **ACEITO** — ADR-143 já registra. Observável só via DevTools. |
+| Auto-complete off | 014 | **REGISTRADO INFO** — boa prática preservada. |
+| XSS descartado | 015 | **REGISTRADO INFO** — zero risco. |
+| Submit Enter incompleto | 016 | **REGISTRADO INFO** — decisão D7 anti-enumeração. |
+| `aplicarMascara` silencia | 017 | **COBERTO POR AUD-006** — JSDoc explícito. |
+| Reset banner D8 | 018 | **REGISTRADO INFO** — coerente. |
+| Zero regressão (C10/C08/W1/C06/legacy) | 019 / 020 / 021 / 022 / 023 / 024 | **REGISTRADO INFO** — preservação validada. |
+| Bundle delta | 025 | **REGISTRADO INFO** — +0.63 kB Size / 0 kB First Load. |
+| Validação regex sem debounce | 026 | **REGISTRADO INFO** — custo < 1μs. |
+| Memory leak | 027 | **REGISTRADO INFO** — cleanup preservado. |
+| TypeScript estrito | 029 | **REGISTRADO INFO** — zero `any`. |
+| Comentários | 030 | **REGISTRADO INFO** — boa prática. |
+| Cobertura | 032 | **REGISTRADO INFO** — atualizado para 98 testes (+9 do `c19-mensagens.test.ts`). |
+| Documentação | 034 / 035 / 036 | **REGISTRADO INFO** — completa. |
+| Aderência | 037 / 038 | **REGISTRADO INFO** — coerente. |
+| Preparação C11 / C12 | 039 / 040 | **REGISTRADO INFO** — não bloqueia próximos componentes. |
+
+### Resumo numérico final pós-correção
+
+| Métrica | Pré-correção | Pós-correção |
+|---|---|---|
+| Vitest tests | 89 | **98** (+9 novos do `c19-mensagens.test.ts`) |
+| Vitest test files | 5 | **6** |
+| tsc --noEmit | exit 0 | exit 0 |
+| Arquivos CSS modificados | 0 | **0** ✅ |
+| Arquivos backend modificados | 0 | **0** ✅ |
+| Arquivos `identificacao-prova.ts` modificados | 0 | **0** ✅ |
+| Advisors MCP | 2 security + 13 performance | **idênticos** ✅ |
+| Commits acionáveis | — | **7 atômicos** |
+
+**Recomendação pós-correção:** **PR pronto para merge condicional em `development`** com DEFERRED de AUD-W3C19-001 explicitamente registrado. Re-auditoria independente em sessão separada recomendada antes do PR para `main` para validar:
+- Resolução dos 4 MÉDIOS corrigidos (AUD-002, 003, 004, e 008 via 003).
+- Ausência de regressão (compare advisors + diff visual/backend/service).
+- Anti-enumeração byte-a-byte preservada (teste novo de `c19-mensagens.test.ts`).
+- Provas legacy continuam funcionando (smoke cenário 9 com `PRV-2026-04-RVZF73`).
+- A11y validada via axe-core + leitor de tela em staging (smoke cenários 16-17-20).
+- Viabilidade Wave 3 completa (C11 + C12 pendentes; deferral do rate-limit não impede esses componentes).
