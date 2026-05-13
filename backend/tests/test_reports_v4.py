@@ -410,6 +410,31 @@ class TestContextoMotoristaParidade:
         assert _contexto_motorista_csv(StatusProvaEnum.APROVADA_PELO_VENDEDOR) == ""
         assert _contexto_motorista_csv(StatusProvaEnum.CRIADA) == ""
 
+    def test_cross_validation_with_canonical_contexto_motorista(self):
+        """Wave 5 v4.0 / C16 fix AUD-W5C16-004: garante que
+        `_CONTEXTO_MOTORISTA_STATUSES` (derivado por comprehension da
+        funcao canonica) contem exatamente as chaves que a funcao
+        canonica mapeia, com os mesmos valores. Anti-drift.
+
+        Itera sobre TODOS os 17 valores de StatusProvaEnum e confronta:
+          - Se contexto_motorista(s) is None: s NAO deve estar no dict.
+          - Caso contrario: dict[s] deve ser == contexto_motorista(s).
+        """
+        from app.api.v1.reports import _CONTEXTO_MOTORISTA_STATUSES
+        from app.state_machine.v4.contextos import contexto_motorista
+
+        for s in StatusProvaEnum:
+            expected = contexto_motorista(s)
+            if expected is None:
+                assert (
+                    s not in _CONTEXTO_MOTORISTA_STATUSES
+                ), f"{s} foi mapeado mas canonical retorna None"
+            else:
+                assert _CONTEXTO_MOTORISTA_STATUSES[s] == expected, (
+                    f"Drift em {s}: dict={_CONTEXTO_MOTORISTA_STATUSES[s]}, "
+                    f"canonical={expected}"
+                )
+
 
 # ─── _categoria_predicate: constroi expressao OR/EXISTS corretamente ───────
 

@@ -67,6 +67,9 @@ from app.db.models import (
     StatusProvaEnum,
     Usuario,
 )
+from app.state_machine.v4.contextos import (
+    contexto_motorista as _contexto_motorista_canonical,
+)
 from app.db.session import get_db
 from app.domain.schemas.report import (
     CancelamentoTop,
@@ -200,18 +203,27 @@ gravou `RECEBIDA_PELA_CLICHERIA`."""
 
 
 _CONTEXTO_MOTORISTA_STATUSES: dict[StatusProvaEnum, DistContextoMotoristaKey] = {
-    StatusProvaEnum.COM_MOTORISTA_IDA_LAMINACAO: "ida_laminacao",
-    StatusProvaEnum.COM_MOTORISTA_VOLTA_LAMINACAO: "volta_laminacao",
-    StatusProvaEnum.COM_MOTORISTA_ENTREGA_FINAL: "entrega_final",
-    # Legacy v3.0 → entrega_final por paridade com contexto_motorista()
-    # do backend Python (Wave 3 v4.0 / C11 ADR-148).
-    StatusProvaEnum.COM_MOTORISTA: "entrega_final",
+    s: _contexto_motorista_canonical(s)  # type: ignore[misc]
+    for s in StatusProvaEnum
+    if _contexto_motorista_canonical(s) is not None
 }
 """Mapeamento de status → contexto canonico do motorista (Wave 5 v4.0).
 
+Wave 5 v4.0 / C16 fix AUD-W5C16-004 (2026-05-13): derivado por
+comprehension da fonte canonica `contexto_motorista()` em
+`app.state_machine.v4.contextos`, eliminando duplicacao e risco de drift.
+Anteriormente o dict era literal com 4 chaves hardcoded — qualquer
+mudanca na funcao canonica (e.g. legacy `COM_MOTORISTA` deixar de mapear
+para `entrega_final`) exigia atualizacao manual aqui, sem CI a barrar.
+
+A funcao canonica retorna `entrega_final` para `COM_MOTORISTA` legacy
+(ADR-148 da Wave 3 v4.0 C11). Resultado esperado da comprehension:
+exatamente 4 chaves (3 v4.0 + 1 legacy). Validado em
+`tests/test_reports_v4.py::TestContextoMotoristaParidade`.
+
 Paridade byte-a-byte com:
 - Frontend TS: `contextoMotorista()` em `lib/types/prova.ts:354`.
-- Backend Python: `app.state_machine.v4.contextos.contexto_motorista()`.
+- Backend Python: `app.state_machine.v4.contextos.contexto_motorista()` (fonte canonica desta comprehension).
 """
 
 ExportDataset = Literal["summary", "by-seller", "overdue", "proofs"]
