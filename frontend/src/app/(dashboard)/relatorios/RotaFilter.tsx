@@ -1,33 +1,45 @@
 "use client";
 
 /**
- * Filtro de rota (Wave 5, Componente 16 — auditoria H-01 / RF-013).
+ * Filtro de rota — segmented pill (Wave 5, Componente 16).
  *
- * Segmented pill: Padrao | Direta | Todas. Visual identico ao grupo de
- * presets do DateRangeFilter (`presetButton` / `presetButtonActive`),
- * para preservar consistencia da `filtersBar`.
+ * Wave 5 v4.0 (Componente 16): semantica do filtro foi expandida para
+ * cobrir as 6 rotas (`MATRIZ`, `LAM_MATRIZ`, `FILIAL`, `LAM_FILIAL`,
+ * `PADRAO`, `DIRETA`) + provas legacy `rota=NULL` (heuristica do C12
+ * Decisao 11.2). O visual permanece IDENTICO ao v3: 3 botoes (Todas /
+ * Matriz / Filial) — mesma `presetGroup`/`presetButton` da `filtersBar`.
  *
- * Backend aceita `?rota=PADRAO` ou `?rota=DIRETA`; ausencia significa
- * "todas". O componente refletira esse contrato.
+ * Internamente, o componente agora opera sobre `rota_categoria`
+ * (matriz/filial) em vez de `rota` (valor exato). Os 3 botoes mapeiam:
+ *   - "Todas"  -> rota_categoria=null
+ *   - "Matriz" -> rota_categoria="matriz" (cobre MATRIZ + LAM_MATRIZ +
+ *      PADRAO + NULL com vendedor MATRIZ)
+ *   - "Filial" -> rota_categoria="filial" (cobre FILIAL + LAM_FILIAL +
+ *      DIRETA + NULL com vendedor FILIAL)
+ *
+ * Backend aceita `?rota_categoria=matriz|filial`; ausencia significa
+ * "todas". Precedencia sobre `?rota=` exata se ambos fornecidos.
+ *
+ * Acessibilidade preservada: `role="group"` + `aria-pressed` por botao.
  */
-import { ROTA_LABELS, type Rota } from "@/lib/types/prova";
+import type { RotaCategoria } from "@/lib/types/report";
 
 import styles from "./relatorios.module.css";
 
 interface Props {
-  value: Rota | null;
-  onChange: (rota: Rota | null) => void;
+  value: RotaCategoria | null;
+  onChange: (categoria: RotaCategoria | null) => void;
 }
 
 interface Option {
   label: string;
-  value: Rota | null;
+  value: RotaCategoria | null;
 }
 
 const OPTIONS: Option[] = [
   { label: "Todas", value: null },
-  { label: ROTA_LABELS.PADRAO.replace("Rota ", ""), value: "PADRAO" },
-  { label: ROTA_LABELS.DIRETA.replace("Rota ", ""), value: "DIRETA" },
+  { label: "Matriz", value: "matriz" },
+  { label: "Filial", value: "filial" },
 ];
 
 export function RotaFilter({ value, onChange }: Props) {

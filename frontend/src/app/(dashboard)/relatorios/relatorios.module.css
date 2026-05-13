@@ -911,6 +911,37 @@
   white-space: nowrap;
 }
 
+/*
+ * srOnlyBlock — variante para elementos de bloco inteiros (ex: <table>
+ * dedicada ao leitor de tela). Wave 5 v4.0 (C16).
+ *
+ * Diferenca em relacao a `.srOnly`: usa `position: absolute` para tirar
+ * o elemento do flow do documento, garantindo que NAO empurra outros
+ * elementos para baixo. O `.srOnly` puro nao usa `position: absolute`
+ * por causa de bug historico (caption empurrava html.scrollHeight para
+ * 1236px alem da viewport — auditoria 2026-04-29).
+ *
+ * O `position: absolute` aqui exige que o ANCESTRAL POSICIONADO seja
+ * controlado. Uso atual: `<table>` dentro de `.donutContainer` que ja
+ * tem `position: relative` (linha 1312-1313) — absolute se ancora ali,
+ * fora do flow, sem estourar scroll.
+ *
+ * NAO usar em `<caption>` dentro de `<table>` static — para isso, usar
+ * `.srOnly` puro. Aplicacao errada pode estourar scrollHeight do html.
+ */
+.srOnlyBlock {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* ─── Layout match imagem do Mario (Wave 5 ajustes) ───────────────────── */
 
 /* Linha 1 do Geral: 4 KPIs com proporcoes desiguais (design Mario).
@@ -1085,11 +1116,21 @@
   flex-shrink: 0;
 }
 
-.rotaDotPadrao {
+/* Wave 5 v4.0 / C16 fix AUD-W5C16-007+008 (2026-05-13) — paleta da
+ * legenda do card ROTA. Anteriormente as classes eram `.rotaDotPadrao`
+ * (preto) e `.rotaDotDireta` (amarelo), com labels v3 "Padrao"/"Direta".
+ * A Wave 5 v4.0 / C16 trocou os labels exibidos para v4 "Matriz"/"Filial"
+ * mantendo as cores (ADR-158 do C12: `ROTA_LABELS.PADRAO="Matriz"`,
+ * `ROTA_LABELS.DIRETA="Filial"`). Esta renomeacao das classes
+ * (Padrao->Matriz, Direta->Filial) elimina o mismatch v3-CSS / v4-UI
+ * que confundia leitores futuros. Funcionalmente identico: 1 unico
+ * consumidor `ReportGeral.tsx` atualizado conjuntamente; CSS Module em
+ * escopo local. */
+.rotaDotMatriz {
   background: #000000;
 }
 
-.rotaDotDireta {
+.rotaDotFilial {
   background: var(--color-accent, #ffcb5c);
 }
 
@@ -2287,5 +2328,35 @@
 
   .presetButton {
     flex: 1;
+  }
+}
+
+/* ─── Wave 5 v4.0 / C16 fix AUD-W5C16-005 (2026-05-13) ─────────────────
+ *
+ * RNF-008 + RN-012 v4.0: respeita preferencia do usuario com
+ * motion-sickness. Bloco condicional ao media query
+ * `prefers-reduced-motion: reduce` — sem efeito em usuarios comuns.
+ *
+ * Zera duracoes de animacao/transicao em elementos animados da pasta
+ * `relatorios/` (cards de KPI, barras, segmentos do donut, sparkline,
+ * scroll). Framer Motion ja respeita `prefers-reduced-motion` por
+ * default ao animar `transform`, mas esta regra CSS reforca e cobre
+ * eventuais transicoes CSS puras (hover, badges, presets).
+ *
+ * Padrao consistente com `timeline.module.css` (Wave 3 C12) que ja
+ * implementa o mesmo bloco. */
+@media (prefers-reduced-motion: reduce) {
+  .metricCard,
+  .chartsRowGeral > *,
+  .barRow,
+  .donutSegment,
+  .donutContainer *,
+  .sparklineSvg,
+  .presetButton,
+  .scopeButton {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

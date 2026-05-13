@@ -14,53 +14,20 @@
 import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import type {
-  ReportFilters,
-  ReportScope,
-} from "@/lib/types/report";
-import { REPORT_SCOPES } from "@/lib/types/report";
-import type { Rota, StatusProva } from "@/lib/types/prova";
+import type { ReportFilters } from "@/lib/types/report";
 
-const SCOPE_SET = new Set(REPORT_SCOPES);
-
-function parseScope(value: string | null): ReportScope {
-  if (value && (SCOPE_SET as Set<string>).has(value)) {
-    return value as ReportScope;
-  }
-  return "geral";
-}
-
-function parseRota(value: string | null): Rota | null {
-  if (value === "PADRAO" || value === "DIRETA") return value;
-  return null;
-}
-
-const STATUS_VALORES: ReadonlyArray<StatusProva> = [
-  "CRIADA",
-  "RETIRADA_PELO_VENDEDOR",
-  "APROVADA_PELO_VENDEDOR",
-  "DE_VOLTA_3STUDIO",
-  "COM_MOTORISTA",
-  "ENVIADA_PARA_CLICHERIA",
-  "ENCAMINHADA_A_CLICHERIA",
-  "RECEBIDA_PELA_CLICHERIA",
-  "REPROVADA_PELO_VENDEDOR",
-  "CANCELADA",
-];
-
-function parseStatus(value: string | null): StatusProva | null {
-  if (value && (STATUS_VALORES as ReadonlyArray<string>).includes(value)) {
-    return value as StatusProva;
-  }
-  return null;
-}
-
-/** Retorna `null` para vazio/null/undefined; trim em strings. */
-function nullableString(value: string | null): string | null {
-  if (value === null) return null;
-  const t = value.trim();
-  return t === "" ? null : t;
-}
+/**
+ * Parsers puros (Wave 5 v4.0 / C16 fix AUD-W5C16-006): extraidos para
+ * modulo dedicado `_useReportFilters.parsers` para permitir reuso direto
+ * pelos testes Vitest sem mockar `next/navigation`.
+ */
+import {
+  nullableString,
+  parseRota,
+  parseRotaCategoria,
+  parseScope,
+  parseStatus,
+} from "./_useReportFilters.parsers";
 
 /**
  * Le os filtros atuais da URL e expoe setters que atualizam a URL.
@@ -81,6 +48,7 @@ export function useReportFilters() {
       q: nullableString(searchParams.get("q")),
       vendedor_id: nullableString(searchParams.get("vendedor_id")),
       rota: parseRota(searchParams.get("rota")),
+      rota_categoria: parseRotaCategoria(searchParams.get("rota_categoria")),
       status: parseStatus(searchParams.get("status")),
     }),
     [searchParams],
@@ -160,6 +128,9 @@ export function useReportFilters() {
   /**
    * Stringifica os filtros como query params para chamada da API.
    * Omite campos null/undefined.
+   *
+   * Wave 5 v4.0: emite `rota_categoria` quando setado (precedencia sobre
+   * `rota` exata no backend — ver `_aplicar_filtros_provas`).
    */
   const toQueryString = useCallback((): string => {
     const params = new URLSearchParams();
@@ -169,6 +140,9 @@ export function useReportFilters() {
     if (filters.q) params.set("q", filters.q);
     if (filters.vendedor_id) params.set("vendedor_id", filters.vendedor_id);
     if (filters.rota) params.set("rota", filters.rota);
+    if (filters.rota_categoria) {
+      params.set("rota_categoria", filters.rota_categoria);
+    }
     if (filters.status) params.set("status", filters.status);
     return params.toString();
   }, [filters]);

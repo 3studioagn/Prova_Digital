@@ -327,11 +327,56 @@ export function DonutChart({
         </div>
       )}
 
-      {/* Tabela acessivel */}
+      {/* Tabela acessivel — permanente sr-only (Wave 5 v4.0 / D7→Opcao (ii)).
+       *
+       * Usa `srOnlyBlock` (NAO `srOnly` puro) porque a <table> e um elemento
+       * de bloco que, mesmo com `width: 1px; height: 1px`, continuaria no
+       * flow e empurraria os cards de KPI/Donut para baixo (bug observado
+       * pelo Mario antes da correcao). `srOnlyBlock` adiciona
+       * `position: absolute` ancorando no `.donutContainer` pai que ja eh
+       * `position: relative` — fora do flow, sem afetar layout, mantendo
+       * 100% da acessibilidade.
+       *
+       * Leitor de tela acessa imediatamente sem precisar interagir com o
+       * <details>. Layout v3 visualmente preservado (zero pixels novos).
+       *
+       * O <details> abaixo permanece como toggle visivel ao usuario vidente
+       * (estado v3); seu conteudo interno e marcado `aria-hidden="true"`
+       * para evitar duplicacao na leitura por AT (NVDA/JAWS/VoiceOver). */}
+      <table className={styles.srOnlyBlock} aria-label={ariaLabel}>
+        <caption>{ariaLabel}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Categoria</th>
+            <th scope="col">Quantidade</th>
+            <th scope="col">Percentual</th>
+          </tr>
+        </thead>
+        <tbody>
+          {segments.map((seg) => (
+            <tr key={`sr-${seg.item.key}`}>
+              <td>{seg.item.label}</td>
+              <td>{formatValue(seg.item.value)}</td>
+              <td>{(seg.pct * 100).toFixed(1)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Tabela visivel sob <details> — preservada da v3 para usuario
+       * vidente que queira inspecionar valores exatos sem hover.
+       *
+       * Wave 5 v4.0 / C16 fix AUD-W5C16-003: `aria-hidden="true"` foi
+       * movido do <details> para a <table> interna. WAI-ARIA 1.1 §4.3.2
+       * proibe `aria-hidden` em containers com elementos focaveis — o
+       * <summary> e sempre focavel por padrao, entao colocar aria-hidden
+       * no <details> levantava violacao `aria-hidden-focus` no axe-core.
+       * A tabela interna fica aria-hidden para evitar duplicacao com a
+       * tabela sr-only acima; o <summary> permanece focavel para
+       * usuarios teclado/AT que queiram abrir o details manualmente. */}
       <details className={styles.chartDetails}>
         <summary>Ver dados em formato tabular</summary>
-        <table className={styles.chartTable}>
-          <caption className={styles.srOnly}>{ariaLabel}</caption>
+        <table className={styles.chartTable} aria-hidden="true">
           <thead>
             <tr>
               <th scope="col">Categoria</th>

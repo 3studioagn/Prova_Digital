@@ -7024,3 +7024,130 @@ atual sem o tachado. AUD-W3C12-006 fica rebaixado para INFO.
 
 
 
+
+---
+
+## ADR-162 — Wave 5 v4.0 / C16: preservar layout v3 exatamente; adaptacoes das 11 decisoes de design
+**Data:** 2026-05-13
+**Componente:** Wave 5 v4.0 / Componente 16 — Relatorios Gerenciais com Distribuicao por Rota
+**Contexto:** Apos analise read-only (Gate 1) propondo as 11 decisoes de design e ASCII wireframes
+para a v4.0, o Mario autorizou: "Vamos seguir sua recomendacao, desde que nao altere nada no layout
+que temos hoje em dia." Esta restricao define a forma de execucao: zero mudancas visuais perceptiveis
+ao usuario; semantica interna expandida; dados aditivos no backend.
+
+**Decisao:** Preservar o layout v3 *exatamente* (mesmas posicoes, mesmos tamanhos, mesmos elementos
+visiveis); estender backend aditivamente; adaptar frontend internamente sem novos elementos visiveis.
+
+**Mapeamento das 11 decisoes:**
+
+| # | Aprovada (Gate 1) | Adaptacao Gate 2 |
+|---|---|---|
+| D1 | (i) tabs preservadas | Sem Linha 3 nova (Tempo Medio por Etapa NAO entregue como UI) |
+| D2 | (ii) Donut compacto | Donut completo NAO renderizado; backend expoe `distribuicao_rota_v4` via API/CSV |
+| D3 | (i) Categoria Legacy | Backend popula `consolidacao_rota` agregando v4.0 + legacy + NULL (heuristica C12 D11.2); UI continua 2 dots |
+| D4 | Todos os 6 filtros | Apenas `rota_categoria` exposto na UI (substitui `rota` no RotaFilter); Contexto Motorista NAO exposto |
+| D5 | (iii) Atalhos + customizado | Sem mudanca |
+| D6 | UTF-8 BOM + virgula | Preservado; colunas aditivas em proofs/overdue/summary |
+| D7 | (iii) Ambos | Ajustado para (ii) puro: tabela sr-only permanente; sem toggle visivel |
+| D8 | (ii) Proxy via metades | Preservado |
+| D9 | (ii) Cache TTL 60s | Preservado |
+| D10 | (i) Endpoint unico | Preservado; novos campos aditivos no schema |
+| D11 | (i) Manter 403 | Preservado |
+
+**Alternativas rejeitadas:**
+- Renderizar Linha 3 com Tempo Medio por Etapa: violaria a restricao do Mario. Adiada para Wave 6
+  quando o operacional pedir o indicador explicitamente.
+- Renderizar Donut completo com 5 segmentos no card ROTA: substituiria o visual v3 (2 dots) por
+  uma nova visualizacao. Violacao direta da restricao. Backend expoe os 9 segmentos via
+  `distribuicao_rota_v4` para consumo programatico (CSV, futuros relatorios).
+- Adicionar filtro Contexto Motorista na FiltersBar: novo elemento visivel. Backend aceita o
+  filtro via query param para consumo programatico mas frontend nao expoe ate decisao explicita.
+- Implementar toggle Grafico/Tabela visivel (D7-i): adicionaria botoes no canto de cada card de
+  grafico. Substituido pela tabela sr-only permanente (D7-ii) que preserva o layout exato.
+
+**Consequencias:**
+- A v4.0 dos relatorios cobre as 4 rotas v4.0 + legacy v3.0 + provas legacy NULL de forma
+  **semanticamente correta** sem alterar o que o usuario ve.
+- Backend devolve campos aditivos suficientes para que futuras iteracoes (Wave 6+) construam
+  os elementos visuais que ficaram fora desta wave (Donut, Tempo por Etapa, Contexto Motorista).
+- A11y melhora (tabela sr-only permanente) sem custo visual.
+- Bundle `/relatorios` aumenta de 11.4 kB para 17.9 kB (+6.5 kB) — overhead aceitavel.
+- `useReportFilters` agora aceita os 17 valores de `StatusProva` (era 10), corrigindo bug
+  silencioso onde `?status=COM_MOTORISTA_IDA_LAMINACAO` na URL era zerado.
+- Trade-off explicito: a wave **nao entrega** todo o escopo proposto no Gate 1 (Linha 3,
+  Donut, Filtro Contexto, Toggle). A entrega cobre o que o backend precisa para a v4.0 e o
+  que o frontend pode fazer SEM alterar layout. Futuras waves podem expor visualmente quando
+  o operacional confirmar a necessidade.
+
+**Como aplicar (referencia para auditoria):**
+- Card ROTA em `ReportGeral.tsx` consome `data.consolidacao_rota?.matriz/filial` com fallback
+  para `distribuicao_rota` legacy — preserva render para clientes com cache antigo.
+- `RotaFilter.tsx` opera sobre `RotaCategoria` (matriz/filial); URL emite `rota_categoria=`
+  em vez de `rota=`.
+- Backend `_aggregate_clicheria` consolida v4.0 nos campos legacy `via_padrao`/`via_direta`
+  sem novos campos no schema — frontend ReportClicheria nao precisa mudar.
+- Tabela `<table class="srOnly">` permanente no DonutChart; `<details>` interno preservado
+  com `aria-hidden="true"`.
+
+**Documento:** `docs/wave5-v4-c16/analysis.md` (Gate 1 + Apendice A).
+
+---
+
+### Apendice 1 ao ADR-162 — Sessao de correcoes pos-auditoria (2026-05-13)
+
+Auditoria senior independente (`docs/wave5-v4-c16/audit-report.md`,
+commit `57a76d2`) classificou a entrega como **APROVADO COM CORRECOES**
+(0 CRITICO · 3 ALTO · 5 MEDIO · 5 BAIXO · 4 INFO = 17 achados).
+
+Sessao de correcao (`wave5-v4-c16/fixes/execution`, base `57a76d2`)
+executou TODOS os 17 achados em 11 commits atomicos:
+
+- **12 RESOLVIDOS** (codigo tocado):
+  - AUD-001 (visual-guide.md criado), AUD-002 (smoke +3 cenarios
+    estados de borda), AUD-003 (`aria-hidden-focus` no DonutChart),
+    AUD-004 (`_CONTEXTO_MOTORISTA_STATUSES` via comprehension da fonte
+    canonica), AUD-005 (`prefers-reduced-motion` no CSS),
+    AUD-006 (extracao parsers para modulo `_useReportFilters.parsers`),
+    AUD-007+008 (rename `.rotaDotPadrao/Direta` -> `.rotaDotMatriz/Filial`
+    + comentario), AUD-010 (teste `TestLegacyNullIndefinida`),
+    AUD-011 (CSV `consolidacao_rota_indefinida` sempre emitido).
+- **5 ACEITOS sem codigo**:
+  - AUD-009 (docstring `_CLICHERIA_EM_TRANSITO` ja cobre — auditor
+    confirmou), AUD-012/013 (INFO de revisao), AUD-014/015/016 (INFO
+    de cobertura), AUD-017 (anti-enumeracao 403 — ver Apendice 2 abaixo).
+
+### Apendice 2 ao ADR-162 — Confirmacao pos-auditoria da Decisao D11→i (anti-enumeracao 403)
+
+Auditor classificou AUD-W5C16-017 como **INFO**: "RBAC retorna 403
+(nao 404 byte-a-byte como prompt da auditoria pediu)". Esta decisao
+D11→i foi originalmente registrada neste ADR-162 com 5 justificativas;
+sessao de correcao 2026-05-13 reafirma a posicao com expansao das
+razoes:
+
+1. **Coerencia com Matriz Wave 1 v4.0**: as 11 chaves de `access_required`
+   retornam 403, nao 404. Mudar apenas `relatorios` para 404 byte-a-byte
+   quebraria homogeneidade arquitetural.
+2. **Defesa em profundidade preservada**: middleware Next.js redireciona
+   antes da chamada chegar ao backend; RLS Postgres `pol_provas_select`
+   retorna 0 rows se chegar; backend retorna 403 como ultima camada.
+3. **Anti-enumeracao em outros pontos**: `/scan` retorna 404 unificado
+   (Decisao do C10) — protege contra enumeracao de codigos publicos
+   alfanumericos. Relatorios nao tem mesmo vetor (recurso unico
+   admin-only, sem path-parameter enumeravel).
+4. **Vendedor nao consegue chegar ao backend**: middleware redireciona
+   antes; ataque a `/api/v1/reports` so e possivel com token de vendedor
+   manualmente forjado — RBAC do backend reforca defense in depth.
+5. **Mudanca seria global**: migrar 403 -> 404 byte-a-byte deveria
+   afetar as 11 chaves de RBAC coerentemente, com revisao de cada
+   celula da Matriz Wave 1 v4.0 — sessao dedicada com escopo maior
+   que o C16.
+
+Mario aprovou explicitamente em Gate 1 do C16 e em revisao pos-auditoria
+(Gate 2 da sessao de correcao 2026-05-13). Sem modificacao de codigo
+nesta sessao.
+
+**Follow-up registrado para Wave 6+:** se Mario quiser migrar Matriz
+inteira para 404 byte-a-byte, abrir sessao dedicada cobrindo as 11
+chaves (relatorios + auditoria + usuarios + configuracoes + scan +
+provas detail + provas list + provas create + provas cancel + provas
+restart + outras a inventariar). NAO escopo desta sessao.
