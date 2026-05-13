@@ -385,7 +385,7 @@ function RenderNodes({ nodes, shouldPulse }: RenderNodesProps) {
         <li key={`lam-${start}`} role="group" aria-label="Etapa de laminação">
           <div className={styles.laminationBlock}>
             <p className={styles.laminationBlockTitle}>Etapa de laminação</p>
-            <ul className={styles.nodeList} role="list">
+            <ul className={styles.nodeList}>
               {slice.map((n, sIdx) => (
                 <TimelineStep
                   key={n.id}
@@ -468,7 +468,7 @@ function TimelineCycleItem({
           {cycle.motivoReprovacao}
         </p>
       )}
-      <ul className={styles.nodeList} role="list">
+      <ul className={styles.nodeList}>
         <RenderNodes nodes={cycle.nodes} shouldPulse={shouldPulse} />
       </ul>
       {cycle.phase === "atual" && cancellationInfo && (
@@ -536,7 +536,7 @@ export function Timeline({ movimentacoes, prova }: TimelineProps) {
         isTerminalOk={built.isTerminalOk}
         isCancelled={built.isCancelled}
       />
-      <ol className={styles.cycles} role="list">
+      <ol className={styles.cycles}>
         {built.cycles.map((cycle, idx) => (
           <Fragment key={cycle.ciclo}>
             {idx > 0 && (
