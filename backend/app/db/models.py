@@ -30,21 +30,54 @@ class LocalizacaoEnum(str, enum.Enum):
 
 
 class StatusProvaEnum(str, enum.Enum):
-    """Estados possiveis de uma prova digital (Secao 5 dos Requisitos).
+    """Estados possiveis de uma prova digital.
 
-    Transicoes validas vivem em app/services/state_machine.py (ADR-040).
+    Wave 3 v4.0 (Componente 11): 17 valores totais (10 v3.0 + 7 v4.0).
+
+    Transicoes validas:
+      - Wave 3 v3.0 (legacy): `app/services/state_machine.py` (ADR-040, 081).
+        Cobre provas com `rota IS NULL` ou `rota IN {PADRAO, DIRETA}`.
+      - Wave 3 v4.0 (atual): `app/state_machine/v4/rules.py`.
+        Cobre provas com `rota IN {MATRIZ, LAM_MATRIZ, FILIAL, LAM_FILIAL}`.
+
+    Coexistencia (Decisao M-2b(a) do Gate 1 do C11):
+      - `COM_MOTORISTA` (v3.0) e `COM_MOTORISTA_ENTREGA_FINAL` (v4.0) sao
+        operacionalmente equivalentes mas mantidos como valores DISTINTOS
+        — o valor antigo so eh usado por provas legacy. Provas v4.0 NUNCA
+        usam o valor antigo.
+      - `ENVIADA_PARA_CLICHERIA` e `ENCAMINHADA_A_CLICHERIA` sao
+        legacy-only — as 4 rotas v4.0 nao passam por esses estados.
+        Permanecem no enum apenas para preservar provas legacy.
+
+    Sincronizacao Python <-> Postgres <-> TypeScript: ver
+    `backend/tests/test_status_prova_enum_drift.py` e
+    `frontend/src/lib/types/prova.ts`.
     """
 
+    # ─── Legacy v3.0 (Wave 0 + Wave 3) ─────────────────────────────────────
     CRIADA = "CRIADA"
     RETIRADA_PELO_VENDEDOR = "RETIRADA_PELO_VENDEDOR"
     APROVADA_PELO_VENDEDOR = "APROVADA_PELO_VENDEDOR"
     DE_VOLTA_3STUDIO = "DE_VOLTA_3STUDIO"
-    COM_MOTORISTA = "COM_MOTORISTA"
-    ENVIADA_PARA_CLICHERIA = "ENVIADA_PARA_CLICHERIA"
-    ENCAMINHADA_A_CLICHERIA = "ENCAMINHADA_A_CLICHERIA"
-    RECEBIDA_PELA_CLICHERIA = "RECEBIDA_PELA_CLICHERIA"
+    COM_MOTORISTA = "COM_MOTORISTA"  # legacy v3.0 - 1 unico contexto
+    ENVIADA_PARA_CLICHERIA = "ENVIADA_PARA_CLICHERIA"  # legacy-only (v3.0 rota PADRAO)
+    ENCAMINHADA_A_CLICHERIA = "ENCAMINHADA_A_CLICHERIA"  # legacy-only (v3.0 rota DIRETA)
+    RECEBIDA_PELA_CLICHERIA = "RECEBIDA_PELA_CLICHERIA"  # terminal sucesso (v3.0 + v4.0)
     REPROVADA_PELO_VENDEDOR = "REPROVADA_PELO_VENDEDOR"
-    CANCELADA = "CANCELADA"
+    CANCELADA = "CANCELADA"  # terminal transversal (v3.0 + v4.0)
+
+    # ─── v4.0 (Wave 3 - Componente 11 - migration 013) ─────────────────────
+    # 3 contextos distintos do Motorista (US-006 v4.0)
+    COM_MOTORISTA_IDA_LAMINACAO = "COM_MOTORISTA_IDA_LAMINACAO"
+    COM_MOTORISTA_VOLTA_LAMINACAO = "COM_MOTORISTA_VOLTA_LAMINACAO"
+    COM_MOTORISTA_ENTREGA_FINAL = "COM_MOTORISTA_ENTREGA_FINAL"
+    # Etapas de laminacao (Lam. Matriz, Lam. Filial - US-005, US-007)
+    ENCAMINHADA_PARA_LAMINACAO = "ENCAMINHADA_PARA_LAMINACAO"
+    LAMINACAO_CONCLUIDA = "LAMINACAO_CONCLUIDA"
+    # Estado de retorno apos volta de laminacao (Lam. Matriz apenas)
+    DE_VOLTA_3STUDIO_POS_LAMINACAO = "DE_VOLTA_3STUDIO_POS_LAMINACAO"
+    # Vendedor Filial recebe direto (sem retirada) - rotas Filial, Lam. Filial
+    ENCAMINHADA_PARA_O_VENDEDOR = "ENCAMINHADA_PARA_O_VENDEDOR"
 
 
 class RotaEnum(str, enum.Enum):
