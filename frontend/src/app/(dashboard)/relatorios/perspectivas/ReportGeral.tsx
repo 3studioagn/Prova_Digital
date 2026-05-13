@@ -340,7 +340,7 @@ export function ReportGeral({ data, statusFilter, onStatusClick }: Props) {
           <ul className={styles.rotaLegend}>
             <li className={styles.rotaLegendItem}>
               <span
-                className={`${styles.rotaDot} ${styles.rotaDotPadrao}`}
+                className={`${styles.rotaDot} ${styles.rotaDotMatriz}`}
                 aria-hidden="true"
               />
               <span className={styles.rotaLegendLabel}>Matriz</span>
@@ -348,7 +348,7 @@ export function ReportGeral({ data, statusFilter, onStatusClick }: Props) {
             </li>
             <li className={styles.rotaLegendItem}>
               <span
-                className={`${styles.rotaDot} ${styles.rotaDotDireta}`}
+                className={`${styles.rotaDot} ${styles.rotaDotFilial}`}
                 aria-hidden="true"
               />
               <span className={styles.rotaLegendLabel}>Filial</span>

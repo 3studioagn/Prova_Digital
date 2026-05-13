@@ -1116,11 +1116,21 @@
   flex-shrink: 0;
 }
 
-.rotaDotPadrao {
+/* Wave 5 v4.0 / C16 fix AUD-W5C16-007+008 (2026-05-13) — paleta da
+ * legenda do card ROTA. Anteriormente as classes eram `.rotaDotPadrao`
+ * (preto) e `.rotaDotDireta` (amarelo), com labels v3 "Padrao"/"Direta".
+ * A Wave 5 v4.0 / C16 trocou os labels exibidos para v4 "Matriz"/"Filial"
+ * mantendo as cores (ADR-158 do C12: `ROTA_LABELS.PADRAO="Matriz"`,
+ * `ROTA_LABELS.DIRETA="Filial"`). Esta renomeacao das classes
+ * (Padrao->Matriz, Direta->Filial) elimina o mismatch v3-CSS / v4-UI
+ * que confundia leitores futuros. Funcionalmente identico: 1 unico
+ * consumidor `ReportGeral.tsx` atualizado conjuntamente; CSS Module em
+ * escopo local. */
+.rotaDotMatriz {
   background: #000000;
 }
 
-.rotaDotDireta {
+.rotaDotFilial {
   background: var(--color-accent, #ffcb5c);
 }
 
