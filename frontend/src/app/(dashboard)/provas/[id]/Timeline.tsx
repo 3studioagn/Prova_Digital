@@ -21,7 +21,7 @@
  * v4.0). RNF-010 respeitado via `useReducedMotion`.
  */
 import { Fragment, type ReactNode } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 
 import {
   buildTimeline,
@@ -537,26 +537,24 @@ export function Timeline({ movimentacoes, prova }: TimelineProps) {
         isCancelled={built.isCancelled}
       />
       <ol className={styles.cycles} role="list">
-        <AnimatePresence initial={false}>
-          {built.cycles.map((cycle, idx) => (
-            <Fragment key={cycle.ciclo}>
-              {idx > 0 && (
-                <li
-                  className={styles.cycleSeparator}
-                  aria-hidden="true"
-                >
-                  {"↻ reinício de ciclo"}
-                </li>
-              )}
-              <TimelineCycleItem
-                cycle={cycle}
-                showHeader={built.hasMultipleCycles}
-                cancellationInfo={built.cancellation}
-                shouldPulse={shouldPulse}
-              />
-            </Fragment>
-          ))}
-        </AnimatePresence>
+        {built.cycles.map((cycle, idx) => (
+          <Fragment key={cycle.ciclo}>
+            {idx > 0 && (
+              <li
+                className={styles.cycleSeparator}
+                aria-hidden="true"
+              >
+                {"↻ reinício de ciclo"}
+              </li>
+            )}
+            <TimelineCycleItem
+              cycle={cycle}
+              showHeader={built.hasMultipleCycles}
+              cancellationInfo={built.cancellation}
+              shouldPulse={shouldPulse}
+            />
+          </Fragment>
+        ))}
       </ol>
     </div>
   );
