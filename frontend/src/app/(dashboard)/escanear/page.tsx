@@ -22,33 +22,17 @@ import { useAuthorization } from "@/lib/hooks/use-authorization";
 import { Restricted } from "@/components/Restricted";
 import {
   identificarProvaPorCodigo,
-  mensagemPara,
   type CodigoErro,
   type ResultadoIdentificacao,
   identificarProvaPorPayload,
 } from "@/lib/services/identificacao-prova";
+// Wave 3 v4.0 / C19 — mensagens customizadas (override do C10 com
+// anti-enumeracao em camada UI). Extraidas para modulo standalone em
+// 2026-05-11 pos-auditoria (AUD-W3C19-003) para permitir teste de
+// integracao da uniformizacao byte-a-byte. Ver `lib/c19-mensagens.ts`
+// para a invariante critica e seu teste Vitest (8 cenarios).
+import { mensagemFinal } from "@/lib/c19-mensagens";
 import styles from "./escanear.module.css";
-
-/* ──────────────────────────────────────────────────────────────────────
- * Mensagens customizadas do C19 (Wave 3 v4.0).
- *
- * **Anti-enumeracao em camada UI (D7 / R-3):** o `QR_INVALIDO` retornado
- * tanto pela validacao client-side (regex local) quanto pelo backend
- * (422 Pydantic para codigo > 32 chars) e uniformizado com a mensagem
- * de `PROVA_NAO_ENCONTRADA` (404 generico do backend). Sacrificio
- * deliberado de "feedback de formato" para preservar a anti-enumeracao
- * DAT v3.0 §8.2 — o atacante nao deve distinguir "formato errado"
- * de "fora do escopo".
- *
- * Demais codigos herdam `mensagemPara(codigo)` da camada de servico do C10.
- * ──────────────────────────────────────────────────────────────────── */
-const MENSAGENS_C19: Partial<Record<CodigoErro, string>> = {
-  QR_INVALIDO: "Prova nao encontrada.",
-};
-
-function mensagemFinal(codigo: CodigoErro): string {
-  return MENSAGENS_C19[codigo] ?? mensagemPara(codigo);
-}
 
 /* ──────────────────────────────────────────────────────────────────────
  * Pagina /escanear — Wave 3 v4.0, Componente 10 (atualizacao v4.0).
