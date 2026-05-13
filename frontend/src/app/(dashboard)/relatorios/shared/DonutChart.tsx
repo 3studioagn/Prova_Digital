@@ -364,11 +364,19 @@ export function DonutChart({
       </table>
 
       {/* Tabela visivel sob <details> — preservada da v3 para usuario
-       * vidente que queira inspecionar valores exatos sem hover. Marcada
-       * aria-hidden="true" para nao duplicar com a tabela sr-only acima. */}
-      <details className={styles.chartDetails} aria-hidden="true">
+       * vidente que queira inspecionar valores exatos sem hover.
+       *
+       * Wave 5 v4.0 / C16 fix AUD-W5C16-003: `aria-hidden="true"` foi
+       * movido do <details> para a <table> interna. WAI-ARIA 1.1 §4.3.2
+       * proibe `aria-hidden` em containers com elementos focaveis — o
+       * <summary> e sempre focavel por padrao, entao colocar aria-hidden
+       * no <details> levantava violacao `aria-hidden-focus` no axe-core.
+       * A tabela interna fica aria-hidden para evitar duplicacao com a
+       * tabela sr-only acima; o <summary> permanece focavel para
+       * usuarios teclado/AT que queiram abrir o details manualmente. */}
+      <details className={styles.chartDetails}>
         <summary>Ver dados em formato tabular</summary>
-        <table className={styles.chartTable}>
+        <table className={styles.chartTable} aria-hidden="true">
           <thead>
             <tr>
               <th scope="col">Categoria</th>
