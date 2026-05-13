@@ -1015,14 +1015,104 @@ Checklist final (espelho da Seção 8 do prompt):
 
 ---
 
-## 10. Resultado da Execução (placeholder — Gate 2)
+## 10. Resultado da Execução (Gate 2 — preenchido em 2026-05-13)
 
-> Esta seção será preenchida ao final do Gate 2 com diffs entre planejado
-> e realizado.
+### 10.1 Aderência ao plano
+
+| Item planejado em §4.1 (ordem topológica) | Status | Commit | Notas |
+|---|---|---|---|
+| [1] AUD-W3C12-004 — coverage snapshot | ✅ EXECUTADO | `7c61350` | Coverage global 97.15% (acima de 80%). `@vitest/coverage-v8` não persistiu no `package.json`. |
+| [2] AUD-W3C12-001 — remove `<AnimatePresence>` | ✅ EXECUTADO | `d5dc3b7` | Bonus: `/provas/[id]` bundle baixou 16.1→14.4 kB (-1.7 kB First Load). |
+| [3] AUD-W3C12-005 — `<aside>` → `<div>` | ✅ EXECUTADO | `07222ba` | Atomic, 2 LOCs em CancellationCard. |
+| [4] AUD-W3C12-007 — remove `role="list"` | ✅ EXECUTADO | `c55285a` | 3 ocorrências (2 `<ul>` + 1 `<ol>`). |
+| [5] AUD-W3C12-010 — remove `aria-label` rotaBadge | ✅ EXECUTADO | `f973a0b` | 1 LOC. |
+| [6] AUD-W3C12-006 — Decisão 7 condicional | ✅ EXECUTADO — **Opção A** | `27e0b8e` | Mario aprovou Opção A (aceitar atual). Apêndice à Decisão 7 em DECISIONS.md. AUD-006 rebaixado para INFO. **Custo: 0 LOC de código + 1 apêndice em DECISIONS.md.** |
+| [7] AUD-W3C12-003 — cria `visual-guide.md` | ✅ EXECUTADO (stub) | `f40f7b6` | 319 LOC com 8 seções + provas representativas + roteiro para Mario. |
+| [8] AUD-W3C12-002 — atualiza LOCs em 4 docs | ✅ EXECUTADO | `7667355` | CLAUDE.md + CHANGELOG.md + pr-description.md + analysis.md §17.6 nova (Apêndice). Antiga §17.6 renumerada para §17.7. |
+
+**Aderência: 8/8 acionáveis executados na ordem topológica planejada.**
+
+### 10.2 Divergências entre planejado e realizado
+
+| Aspecto | Plano (Gate 1) | Realidade (Gate 2) | Razão |
+|---|---|---|---|
+| AUD-W3C12-006 estratégia | Condicional A ou B (escalação humana) | Opção A executada | Mario decidiu Opção A em 2026-05-13, após recomendação técnica explícita. |
+| AUD-W3C12-006 LOC | 0 (Opção A) ou ~10 (Opção B) | 0 LOC de produção + 58 LOC de apêndice em DECISIONS.md | Conforme planejado para Opção A. |
+| AUD-W3C12-002 escopo | Atualizar 4 docs com valor único 563 | Atualizar 4 docs com valor 561 + criar §17.6 reconciliada no analysis.md | Após AUD-001 remover 2 LOCs do Timeline.tsx, o valor real virou 561. §17.6 adicional preserva histórico da §17.5 + reconcilia LOCs de OUTROS arquivos também divergentes (prova.ts, testes). |
+| Suite Vitest pós-correções | 163 ou 164 (se Opção B) | 163 (Opção A) | Conforme planejado para Opção A. |
+| Bundle `/provas/[id]` | Esperado neutro | -1.7 kB / -2 kB First Load (16.1→14.4 / 214→212) | Bonus: AUD-001 removeu wrapper com overhead framer-motion. |
+
+### 10.3 Validações finais (linha de comando)
+
+```bash
+# Suite Vitest
+cd frontend && npx vitest run
+# → 163 passed (7 test files); 614ms
+
+# TypeScript
+cd frontend && npx tsc --noEmit
+# → exit 0
+
+# Build Next.js
+cd frontend && npx next build
+# → 13/13 páginas (12 rotas + _not-found); /provas/[id] 14.4 kB / 212 kB
+
+# Paths protegidos
+git diff --name-only origin/development..HEAD -- backend/ \
+    docs/wave3-v4-c11/contrato-c12.md \
+    "frontend/src/app/(dashboard)/escanear/" \
+    "frontend/src/app/(dashboard)/provas/[id]/AdminActions.tsx" \
+    "frontend/src/app/(dashboard)/provas/[id]/page.tsx" \
+    "frontend/src/app/(dashboard)/provas/[id]/detalhe.module.css" \
+    frontend/src/lib/services/ \
+    frontend/src/lib/codigo-publico.ts \
+    frontend/src/lib/c19-mensagens.ts \
+    frontend/src/middleware.ts \
+    shared/ \
+    frontend/src/hooks/useProvaDetail.ts \
+    backend/app/state_machine/
+# → vazio (nenhum arquivo modificado em paths protegidos)
+
+# Coverage rápido (sem persistir dep)
+cd frontend && npm install --no-save "@vitest/coverage-v8@~2.1.0"
+npx vitest run --coverage --coverage.provider=v8
+npm uninstall @vitest/coverage-v8
+# → 97.15% stmts global, 99.46% no timeline-builder, 100% funcs do C12
+```
+
+### 10.4 Encaminhamentos pós-sessão
+
+- **Smoke E2E manual do Mario** (smoke-validation.md 18 cenários): obrigatório
+  antes do PR para `main`. Cenários 2/3/4 SKIP em produção (R-4) — Mario seed
+  em staging se quiser cobertura completa.
+- **Screenshots para `visual-guide.md`** preenchendo os placeholders pós-smoke.
+- **Pendências herdadas** (rate limit ADR-145, benchmarks ADR-153/157, CI/CD
+  ADR-156): mantidas válidas; sessões dedicadas.
+- **Nova rodada de auditoria independente recomendada** (sessão separada com
+  `PROMPT_Auditoria_PosWave3_C12_v4.md`) para validar resolução dos achados
+  + ausência de regressão + paridade visual.
+- **Sessão de revisão de Wave 3 inteira pré-merge `main`** — esta é a
+  ÚLTIMA sessão de correção de componente da Wave 3 v4.0.
+
+### 10.5 Lista de Commits (Gate 2)
 
 ```
-(vazio — a preencher no Gate 2)
+7667355 docs(wave3-v4/c12/AUD-002): reconcilia LOCs reais em 4 docs
+f40f7b6 docs(wave3-v4/c12/AUD-003): cria visual-guide.md stub estruturado
+27e0b8e docs(wave3-v4/c12/AUD-006): registra apendice a Decisao 7 (Opcao A)
+f973a0b a11y(wave3-v4/c12/AUD-010): remove aria-label redundante do rotaBadge
+c55285a a11y(wave3-v4/c12/AUD-007): remove role=list redundante em <ol>/<ul>
+07222ba a11y(wave3-v4/c12/AUD-005): <aside role=alert> -> <div role=alert>
+d5dc3b7 refactor(wave3-v4/c12/AUD-001): remove AnimatePresence sem motion children
+7c61350 test(wave3-v4/c12/AUD-004): coverage snapshot dos componentes novos
+aa0199d docs(wave3-v4/c12/fixes): plano de correcao pos-auditoria
 ```
+
+**Total:** 9 commits do Gate 2 (1 plano + 8 correções). PR adicionará 1
+commit final de documentação consolidada (CHANGELOG + audit-report apêndice
++ fix-plan §10 + fix-validation.md).
+
+**Relatório de validação detalhado:** [docs/wave3-v4-c12/fix-validation.md](fix-validation.md).
 
 ---
 

@@ -968,3 +968,44 @@ $ npx tsc --noEmit
 ---
 
 **FIM DO RELATÓRIO DE AUDITORIA · Wave 3 v4.0 · Componente 12.**
+
+---
+
+## Apêndice — Status Pós-Correção (2026-05-13)
+
+Adicionado pela sessão de correção pos-auditoria (`wave3-v4-c12/fixes/execution`).
+**Não edita o corpo original do relatório.** Documenta o destino final de cada achado.
+
+**Veredito da sessão de correção:** PR pronto para merge condicional em
+`development`. 8 RESOLVIDOS · 3 DEFERRED · 2 ACEITOS · Zero não-tratados.
+
+| ID | Severidade original | Status final | Commit | Critério de prova |
+|---|---|---|---|---|
+| AUD-W3C12-001 | MÉDIO | RESOLVIDO | `d5dc3b7` | `<AnimatePresence>` sem motion children removido em Timeline.tsx; import limpo; suite Vitest 163/163 + tsc 0 |
+| AUD-W3C12-002 | MÉDIO | RESOLVIDO | `7667355` | 4 documentos atualizados com LOCs reais (Timeline.tsx 561, css 471, builder 354); `grep "410 LOC"` retorna apenas referências históricas em meta-documentos (audit-report + fix-plan) |
+| AUD-W3C12-003 | MÉDIO | RESOLVIDO (stub) | `f40f7b6` | `docs/wave3-v4-c12/visual-guide.md` criado com 8 seções estruturadas + provas representativas + placeholders para screenshots do Mario pós-smoke |
+| AUD-W3C12-004 | MÉDIO | RESOLVIDO | `7c61350` | `docs/wave3-v4-c12/coverage-snapshot.md` com 97.15% global (acima do limiar 80%); `@vitest/coverage-v8` não persiste no `package.json` |
+| AUD-W3C12-005 | BAIXO | RESOLVIDO | `07222ba` | `<aside>` substituído por `<div>` no CancellationCard; `role="alert"` preservado |
+| AUD-W3C12-006 | BAIXO | **REBAIXADO PARA INFO** + RESOLVIDO via Opção A | `27e0b8e` | Apêndice à Decisão 7 em DECISIONS.md (após ADR-161) registrando consciente não-implementação do tachado. Mario aprovou Opção A em 2026-05-13. Os 3 mecanismos atuais (card vermelho `role="alert"` + nó cinza CANCELADA + motivo destacado) preservam a essência da Decisão 7. Justificativa principal: tachado significa "deletado/anulado" e a movimentação anterior aconteceu de fato (gravada com trigger de imutabilidade) — tachar seria factualmente impreciso. |
+| AUD-W3C12-007 | BAIXO | RESOLVIDO | `c55285a` | 3 ocorrências de `role="list"` removidas em Timeline.tsx (linhas 388, 471, 539); `<ol>`/`<ul>` mantêm role implícito por HTML5 |
+| AUD-W3C12-008 | BAIXO | **DEFERRED** — smoke 15 manual Mario | N/A | Estimativa do auditor < 50ms (folga 10× do RNF-001). Mario mede no `smoke-validation.md` cenário 15 antes do PR para `main`. |
+| AUD-W3C12-009 | BAIXO | **ACEITO** — tradeoff D-13 documentado | N/A | Substituição por smoke manual + 20 testes unitários do builder justificada em `analysis.md §17.3.1`. Wave 4 avalia `@testing-library/react` + `jsdom` se necessário. |
+| AUD-W3C12-010 | INFO | RESOLVIDO | `f973a0b` | `aria-label` redundante removido do rotaBadge em Timeline.tsx:171; leitor de tela continua anunciando via texto interno |
+| AUD-W3C12-011 | INFO | **DEFERRED** — decisão pós-merge | N/A | R-12: filtros C07 com duplicação visual ("Matriz × 2" / "Filial × 2") após Decisão 11.1 (ADR-158). Mario decide pós-merge se vale colapsar opções. Documentado em `analysis.md §16.3 + §17.3.3`. |
+| AUD-W3C12-012 | INFO | **ACEITO** — consolidado com AUD-009 | N/A | Mesma decisão. |
+| AUD-W3C12-013 | INFO | **ACEITO** | N/A | Decisão consciente documentada em `analysis.md §17.3.2`. 5 subcomponentes inline em Timeline.tsx (< 50 LOC cada, sem reuso externo). Wave 4 extrai se reusado. |
+
+**Validações pós-correção:**
+- `npx vitest run`: 163/163 testes passados (sem regressão).
+- `npx tsc --noEmit`: exit 0.
+- `npx next build`: 13/13 páginas; `/provas/[id]` em **14.4 kB / 212 kB** (era 16.1/214 — -1.7 kB pela remoção do `AnimatePresence` sem motion children).
+- `git diff origin/development..HEAD --` em paths protegidos (backend, contrato-c12.md, outras entregas): vazio.
+- MCP advisors security + performance: idênticos ao baseline pós-C11 (1 INFO + 1 WARN security pré-existentes + 13 INFO unused_index pré-existentes).
+
+**Recomendações da sessão de correção:**
+1. Nova rodada de auditoria independente em sessão separada (foco extra: rebaixamento de AUD-006 + paridade visual das 14 decisões + smoke E2E pelo Mario).
+2. Sessão de revisão de Wave 3 inteira pré-merge `main` (C10 + C19 + C11 + C12 + Audit Fixes) — esta é a última correção de componente.
+3. Pendências herdadas para o PR `main` (rate limit ADR-145, benchmarks ADR-153/157, CI/CD ADR-156) mantidas válidas.
+
+**Documento de validação detalhada:** [docs/wave3-v4-c12/fix-validation.md](fix-validation.md).
+
