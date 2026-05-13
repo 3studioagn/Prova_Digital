@@ -27,15 +27,18 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | **v4.0 W2 — C08 Visualizacao de Prova (atualizacao v4.0)** | ✅ **COMPLETO** (aguarda smoke visual humano + PR) | Componente 08 (atualizacao v4.0) — Visualizacao de Prova com Redesign + Suporte a Exibicao de Rota. Gate-based two-stage com 4 ambiguidades visuais resolvidas pelo Mario (A1: `STATUS_LABELS["CRIADA"]` -> "Aguardando vendedor" global; A2: `actionsRow` com 2/3/4 botoes side-by-side via `flex: 1 1 220px`; A3: rotas legacy `PADRAO`/`DIRETA` perdem sufixo "(legada v3.0)" e viram "Padrao"/"Direta"; A4: `isPathActive` por prefix-match destaca "Provas" em `/provas/[id]`). Frontend-only — zero touch em backend, RLS, migrations. Layout invertido (arte esquerda 480px · info direita 1fr) + header com "Requerimento: NNN" pequeno + nome grande + divisor + grid 3x2 de metadata (Cliente · Rota · Criada em / Vendedor · Ciclo Atual · Status) + Codigo em mono como item adicional + banner full-width de cancelamento + linha de acoes. Card preto do historico passa a ser secao separada (era aninhada no innerCard branco). Timeline.tsx **nao tocada** — ja era orientada a dados (preparada para Wave 3 v4.0). AdminActions.tsx **nao tocada** — `useAuthorization` integrado desde Wave 1 v4.0. **Validacao**: tsc --noEmit exit 0; next build 13/13 paginas; `/provas/[id]` em **11.4 kB / 209 kB** First Load (era ~10 kB — overhead pelo import de `STATUS_LABELS`/`StatusProva` e novos seletores CSS). Advisors MCP sem novos alertas. ADRs 125-128. Smoke visual humano obrigatorio antes do PR (preview programatico nao tem auth). | — |
 | **v4.0 W2 — C08 Audit Fixes** | ✅ **COMPLETO** (mergeado em `development`) | Auditoria sênior independente pos-C08 v4.0 (2026-05-06, commit `d90c672` em `wave2-v4-c08/audit`). Veredito: REPROVADO E REFAZER (CONDICIONAL). Findings: **1 CRITICAL · 3 ALTOS · 4 MÉDIOS · 5 BAIXOS · 3 INFOs = 16 totais**. Sessao de correcao 2026-05-06 (`wave2-v4-c08/fixes/execution`) corrigiu **16/16 acionaveis em 13 commits atomicos** + 3 ajustes visuais finais validados pelo Mario. **CRITICAL**: AUD-001 (figma-reference.png commitada). **ALTOS**: AUD-002 (analysis.md cherry-pick para branch da entrega — link CHANGELOG resolve); AUD-003 (refactor `formatRota` -> `lib/types/prova.ts` + `isPathActive` -> `lib/path-active.ts` + 13 testes Vitest novos cobrindo 4 v4.0 + 2 legacy + null + sanity exhaustividade + 5 cenarios isPathActive — total Vitest do projeto 15 -> 28); AUD-004 (token semantico `--color-card-art-bg=#d9d9d9` em globals.css desacoplado de `--color-card-surface` — ADR-129). **MÉDIOS**: AUD-005+006 (`codigo_publico` migrado do metaGrid para `requerimentoLabel` no header — restaura grid 3x2 estrito; apendice no ADR-127); AUD-007 (`.title` clamp 1.5rem/2.5vw/2.5rem — minimo 24px em viewport tablet); AUD-008 (nova secao "Pagina de detalhe da prova: estrutura e extensao para Wave 3" em CLAUDE.md cobrindo 4 camadas para adicionar valor a `StatusProvaEnum`). **BAIXOS**: AUD-009 (object-fit cover WONTFIX — ADR-130); AUD-010 (wrapper trivial `formatStatus` removido); AUD-011 (tooltip nativo HTML title no em-dash de prova legacy); AUD-012 (coberto por AUD-003); AUD-013 (template `smoke-validation.md` 19 itens — Mario percorre antes do PR final). **INFOs**: AUD-014/015/016 consolidados em ADR-131. **Ajustes visuais finais (3 commits pos-Mario)**: card branco com `flex: 1` para preencher altura disponivel; `timelineCard` REANINHADO dentro do `innerCard` branco (correcao de interpretacao errada do ADR-127 — apendice 2); `artSlot` reduzido de 380px para 320px (proporcao Figma). **Validacao final**: npx vitest run 28/28; npx tsc --noEmit exit 0; npx next build 13/13 paginas; `/provas/[id]` em 11.4 kB / 209 kB (sem regressao). Advisors MCP sem novos alertas. **B1 default aplicado**: stash@{0} preserva CSS uncommitted experimentais — Mario decide se reaplica. ADRs novos: 129, 130, 131 + 2 apendices ADR-127. **Pendencias**: smoke E2E manual (`smoke-validation.md` 19 itens — itens 4/5 podem ser SKIP por ausencia de motorista/clicheria em producao); nova auditoria independente em sessao separada para validar resolucao + ausencia de regressao + viabilidade Wave 3 + fidelidade visual contra figma-reference.png. | — |
 | **v4.0 W3 — C10 Scanner Reformulado** | ✅ **COMPLETO** (aguarda smoke E2E + PR) + 4 iteracoes de refinamento visual | Componente 10 (atualizacao v4.0) — Redesign do Scanner de QR Code com Identificacao por Codigo Alfanumerico. **1ª entrega da Wave 3 v4.0** (de 4 — C19, C11, C12 a seguir). Gate-based two-stage: 4 ambiguidades visuais resolvidas pelo Mario (Q1 estrategia hibrida do payload — camera valida `payload` completo + hash, manual valida `codigo_publico` isolado; Q2 tab Manual como shell funcional + chamada da camada de servico — sem mascara/realtime/rate-limit-client que ficam para C19; Q3 footer "Ultima leitura ha —" + "Ver historico" como placeholder visual OUT OF SCOPE; Q4 input usa formato real `PRV-AAAA-MM-NNNNNN` em vez do `3S- XXXX-XXXX` do Figma). **Bug corrigido R-1:** `scan_prova` fazia lookup por `nro_requerimento` mesmo quando QR carregava `codigo_publico` — provas v4.0 nao escaneavam. Agora detecta formato via `validar_formato_codigo_publico` e usa lookup correto. **Backend:** `ScanRequest` aceita `payload` XOR `codigo` via `model_validator`. Novo helper `_carregar_prova_por_codigo_publico_com_scoping` (canonico v4.0+). Audit log com novo campo `origem` ('camera' \| 'manual'). Mensagens 404 GENERICAS para inexistente / fora-do-scope / formato invalido (DAT §8.2 — protecao contra enumeracao). **Frontend:** camada de servico desacoplada `lib/services/identificacao-prova.ts` com `identificarProvaPorPayload` + `identificarProvaPorCodigo`. Tipos `CodigoErro` (5 codigos) + `ResultadoIdentificacao` (tagged union). Mensagens em pt-BR pre-resolvidas. **Constraint dura: zero acoplamento com DOM/camera** — testavel em `vitest --environment node`; teste anti-acoplamento (regex contra `navigator.`/`document.`/`window.`/`html5-qrcode`) garante. Page reescrita 740→414 LOC. CSS reescrito 589→433 LOC. UI fiel ao Figma: toggle pill Camera/Manual, painel da camera com QR mock idle / live preview scanning + brackets viewfinder, painel manual com input PRV + botao "Buscar prova →" + chamada da camada de servico, footer placeholder, banners de erro contextuais (DISPOSITIVO_SEM_CAMERA com link para Manual inline). Removidos `useScanProva`, `AssinaturaModal`, `ScanReadyView`, `DoneView`, `react-signature-canvas` import (transicao migra para `/provas/[id]` no C11 v4.0). **4 iteracoes de refinamento visual pos-feedback do Mario:** (4) footer movido para dentro da coluna direita do innerCard alinhado com a sidebar/panel (specs Figma divisor `w[554]`) — ADR-136; (5) tabs Camera/Manual ganharam pill preto animado via `framer-motion` `layoutId="scanner-tab-pill"` espelhando o `.segmentBtn` da `/nova-prova` + `JetBrains_Mono` adicionado via `next/font/google` para o input — ADR-135; (6) `.cameraSidebarTop` alinhado ao topo (`flex-start`) e `.manualPanelTop` centralizado verticalmente (`center`) — Camera ≠ Manual; (7) feixe amarelo no QR mock anima infinito subindo/descendo via CSS `@keyframes qrScanBeam 2.2s ease-in-out infinite` simulando scanner real + `prefers-reduced-motion` desabilita — ADR-137. **Specs visuais extraidos via MCP Figma** (`mcp__9b97d32e-...__get_design_context` em file `kqOrPgP07y6y1SV7BUlEBs` nodes `206:87` Camera + `240:6448` Manual) — tokens corretos: bg `#eaeaea`, radius wrapper 43/innerCard 37/tabs 39/preview 16/btnCamera 17/btnManual 12, titulo 64px, sidebar h2 40px, descs 18px line-height 20.8px, brackets AMARELOS `#f5c518` 20x20 inset -10px, footer 11px `#7a7a7a`, input prefix JetBrains Mono 13px `#9a9a9a`. **825 testes backend (era 805 + 20 novos)** + **44 Vitest (era 28 + 16 novos)**. tsc 0; next build 13/13; `/escanear` 5.73 kB / **208 kB** First Load (subiu de 168 kB pelo framer-motion da iteracao 5). Zero migration. RLS inalterada. ADRs 132 (lookup polimorfico) + 133 (camada de servico desacoplada) + 134 (tab Manual + Q3 + Q4 do Mario) + 135 (pill animado tabs) + 136 (footer coluna direita) + 137 (scanner beam animation). 10 commits totais. Documentos: `docs/wave3-v4-c10/analysis.md` (Gate 1 + Execucao + Refinamento Visual iteracoes 4-7), `contrato-c19.md` (contrato pronto para Componente 19 consumir), `smoke-validation.md` (20 cenarios), `figma-references.md` (guia para adicionar PNGs). | — |
+| **v4.0 W3 — C11 Maquina de Estados Expandida** | ✅ **COMPLETO** (aguarda smoke E2E + PR) | Componente 11 (atualizacao v4.0) — **maior risco da v4.0**. **3a entrega da Wave 3 v4.0** (de 4 — C12 a seguir). Expande maquina de estados de 10 valores (v3.0) para **17 valores** (10 v3.0 + 7 v4.0) distribuidos por 4 rotas, em **coexistencia** com a v3.0 (provas legacy continuam funcionando via roteador). Gate-based two-stage: 8 pontos de escalacao confirmados pelo Mario (M-1 a M-8 — ADRs 146-153). **Migration Alembic 013**: `ALTER TYPE status_prova_enum ADD VALUE IF NOT EXISTS` x 7 valores em ordem alfabetica (COM_MOTORISTA_ENTREGA_FINAL, COM_MOTORISTA_IDA_LAMINACAO, COM_MOTORISTA_VOLTA_LAMINACAO, DE_VOLTA_3STUDIO_POS_LAMINACAO, ENCAMINHADA_PARA_LAMINACAO, ENCAMINHADA_PARA_O_VENDEDOR, LAMINACAO_CONCLUIDA). Aplicada via MCP em transacao unica; alembic_version='013' setado manualmente. **Modulo `backend/app/state_machine/`** (DAT §4.1): facade `__init__.py` com roteador v3.0/v4.0 + `v4/rules.py` (24 entradas em `TRANSITION_RULES` distribuidas em 5+10+3+6) + `v4/contextos.py` (3 contextos do Motorista — derivado de status, gravado em audit_log) + `v4/machine.py` (validar+executar). Princípio de invariancia (DAT §4.2): tabela em Python versionado, NAO no banco. **Decisao M-1**: ator de `FILIAL.CRIADA → ENCAMINHADA_PARA_O_VENDEDOR` = VENDEDOR (texto literal §5.4 prevalece sobre UML 06.3 — ADR-146). **Decisao M-2b(a)**: `COM_MOTORISTA` legacy ≠ `COM_MOTORISTA_ENTREGA_FINAL` v4.0 (valores DISTINTOS no enum, semanticamente unificados via `contexto_motorista()` que mapeia ambos para "entrega_final"). **Migration RLS 014**: 3 policies (provas/movimentacoes/etiquetas) DROP+CREATE expandindo visibilidade — MOTORISTA ve 4 estados (3 v4.0 + 1 legacy), CLICHERIA ve 6 estados (3 v4.0 + 3 legacy). **Frontend**: `lib/types/prova.ts` com 17 valores em `StatusProva` + `STATUS_LABELS` + `STATUS_LABELS_SHORT` + `STATUS_OPTIONS` reorganizado. `AdminActions.tsx` CANCELAVEIS estendido para 15 ativos. `ReportGeral.tsx` paleta expandida. **Sem novo endpoint** (Decisao M-3): `POST /{id}/transicoes` continua generico; roteador interno dispatcha. **Sem trigger semantico no Postgres** (Decisao M-4): invariancia no Python. **Sem rate limit** (Decisao M-8): follow-up unificado com ADR-145 do C19 antes do PR para `main`. **Testes**: `backend/tests/state_machine/` com 139 testes (rules+contextos+machine+facade) cobrindo **100%** em `app/state_machine/v4/*` (187/187 stmts) + `test_status_prova_enum_drift.py` (3 pure-Python + 1 skipped integrado). Suite total: **961 passed + 10 skipped** (era 825+9 pos-C19; +136 testes da Wave 3 v4.0 C11). Frontend tsc 0; Vitest 98/98; advisor MCP sem novos alertas. ADRs 146-153 + `docs/wave3-v4-c11/` (analysis.md Gate 1 + _agent_extraction.md literal + contrato-c12.md). **Limitacao assumida**: criterio 15 do prompt (§6.3) — botoes inline de transicao na pagina de detalhe — NAO entregue. Scanner em `/escanear` permanece como caminho canonico de transicao (RNF-002: ≤2s captura → assinatura). Pagina de detalhe exibe os labels v4.0 corretos + admin actions cobrem cancelar/reiniciar; mas botoes "Aprovar/Reprovar/Encaminhar" inline no detalhe requereriam signature canvas modal (~200 LOC) e foram deferidos. **Follow-up registrado para decisao do Mario no merge**. | — |
 | **v4.0 W3 — C19 Fallback Digitacao Manual** | ✅ **COMPLETO** (aguarda smoke E2E + PR) | Componente 19 (NOVO na v4.0 — RF-005 / US-002 / Backlog item 19). **2ª entrega da Wave 3 v4.0** (de 4 — C11, C12 a seguir). Frontend-only, ativa logica em UI ja entregue pelo C10 (`<ManualPanel>` em `escanear/page.tsx`). Gate-based two-stage: 10 decisoes (D1-D10) propostas no Gate 1 e confirmadas pelo Mario com defaults. **Novos:** `lib/codigo-publico.ts` (139 LOC — `CODIGO_PUBLICO_REGEX` paridade com `validar_formato_codigo_publico` do backend; `ALFABETO_SUFIXO` (`ABCDEFGHJKMNPQRSTUVWXYZ23456789` — 31 chars sem 0/O/1/I/L); `aplicarMascara` com auto-uppercase + strip do prefixo PRV- + hifens automaticos + **bloqueio rigido por posicao** (ano/mes=digitos, sufixo=alfabeto) + truncamento 14 chars; `montarCodigoCompleto` prepende "PRV-"; `validarFormatoCodigoPublico` + `isDisplayCompleto` + `isCharValidoEmPosicaoSemHifen`. Modulo puro testavel em `environment: node` — 43 testes Vitest cobrindo paridade backend + mascara incremental + bloqueio por posicao + idempotencia + integracao mascara → validacao). `hooks/useCodigoPrvInput.ts` (68 LOC — binding trivial sobre as funcoes puras; sem testes Vitest dedicados conforme D-13 da Wave 1 v4.0; validado por E2E). **Modificado:** `(dashboard)/escanear/page.tsx` (+133/-21 LOC) — `<ManualPanel>` recebe `display`/`isFormatValid`/`onChange`/`onTentarNovamente` do container, valida formato client-side ANTES de chamar o servico (botao "Buscar prova" so habilita com formato completo), **uniformiza `QR_INVALIDO` (client OR 422 backend) com "Prova nao encontrada."** via `MENSAGENS_C19` + `mensagemFinal` helper (anti-enumeracao em camada UI — ADR-143), foco automatico no input ao mount via `useRef` + `useEffect([])` (R-8 / ADR-144), label sr-only estendida ("Codigo da prova no formato PRV-AAAA-MM-NNNNNN") + hint sr-only adicional `id="manual-hint"` + `aria-describedby` dinamico (alterna entre `#manual-error` e `#manual-hint`), botao "Tentar novamente" no estado `ERRO_REDE` reseta sem mexer no codigo digitado (R-10), reset de banner no `onChange` do input (D8), `maxLength={14}` no input (defesa em profundidade alinhada ao backend `max_length=32` — AUD-W3C10-012), `codigoInput` preservado ao alternar para tab Camera (R-9 — usuario nao perde digitacao parcial). **Zero touch backend** (camada de servico `identificacao-prova.ts` consumida sem modificacao; endpoint `/scan` ja aceita `body.codigo` desde o C10 v4.0). **Zero touch RLS, zero migration, zero advisor MCP novo.** **89 testes Vitest** (era 46 + 43 novos do `codigo-publico.test.ts`); tsc 0; next build 13/13; `/escanear` 7.68 kB → **8.31 kB** (+0.63 kB Size) / First Load 210 kB inalterado. **Decisoes (ADRs 141-145):** 141 mascara manual sem nova dep (`imask`/`react-input-mask` rejeitados — economiza ~8-15 kB); 142 bloqueio rigido por posicao; 143 uniformizacao `QR_INVALIDO` → "Prova nao encontrada." (anti-enumeracao em camada UI); 144 foco automatico + a11y aprofundada (label estendida + hint sr-only + aria-describedby dinamico); 145 **rate-limit backend permanece como FOLLOW-UP OBRIGATORIO antes do PR para `main`** (DAT v3.0 §8.2 + Backlog C19 Notas Tecnicas exigem 30/min/user → 429 → novo codigo `RATE_LIMITED`; sessao separada com `slowapi` no `/scan` filtrado por `current_user.id`). Defesa em profundidade corrente (validacao client + formato antes do SELECT backend + RLS antes da resposta + 404 unificado + alfabeto 31^6=887M combinacoes/mes + audit log com `codigo_recebido` truncado) cobre descoberta lenta mas nao substitui o rate-limit prescrito pelo DAT. 5 commits (analysis read-only `8dc6a92` + util `f5e3271` + hook `f8f7492` + integracao `6e42129` + docs `fcb3d48`). Documentos: `docs/wave3-v4-c19/analysis.md` (Gate 1 + Apendice A Execucao); `docs/wave3-v4-c19/smoke-validation.md` (20 cenarios para Mario rodar em producao antes do PR para `main` — cobre foco automatico, mascara incremental, auto-uppercase, bloqueio rigido, paste com prefixo, happy path, anti-enumeracao, falha de rede + Tentar novamente, RLS, sessao expirada, acessibilidade teclado + leitor de tela, performance, audit log `origem='manual'`, axe-core). | — |
 
 **Estado atual do banco de producao:**
-- `alembic_version = 012` (migration 012 aplicada na Wave 2 v4.0, 2026-05-04 — ADRs 115-119). Wave 6 nao criou Alembic. Wave 1 v4.0 nao criou Alembic.
+- `alembic_version = 013` (migration 013 aplicada na Wave 3 v4.0 / C11, 2026-05-13 — ADRs 146-153). Migration 012 aplicada na Wave 2 v4.0 (2026-05-04 — ADRs 115-119). Wave 6 nao criou Alembic. Wave 1 v4.0 nao criou Alembic.
+- **Migration 013 (Wave 3 v4.0 / C11, 2026-05-13)**: `ALTER TYPE status_prova_enum ADD VALUE IF NOT EXISTS` x 7 valores. Aplicada via MCP `apply_migration` em transacao unica (sem UPDATE que use valores recem-adicionados — seguro vs limitacao Postgres). alembic_version setado para '013' via UPDATE manual apos aplicacao. Total final no enum: 17 valores (10 v3.0 + 7 v4.0).
 - **Divergencia migration 012 (AUD-W2V4-M02)**: a migration Alembic do repo e atomica, mas em producao foi aplicada via MCP `apply_migration` em 3 chunks — `012a` (`ALTER TYPE rota_enum ADD VALUE`), `012b` (`ADD COLUMN codigo_publico` nullable), `012c` (`ALTER COLUMN SET NOT NULL` + indexes + trigger + UPDATE alembic_version). O split foi necessario por precaucao com `ALTER TYPE ADD VALUE` em transacao. `alembic_version='012'` foi setado manualmente apos o terceiro chunk. Estado funcional final equivalente ao da migration atomic do repo; idempotencia validada em `backend/tests/test_migration_012.py` (AUD-W2V4-T03). Em ambiente fresh (dev local, branch Supabase), `alembic upgrade head` produz o mesmo estado em uma so transacao.
 - **6 tabelas de dominio** + `alembic_version` (todas com RLS habilitada)
 - **`provas_digitais.codigo_publico VARCHAR(20) UNIQUE NOT NULL`** (Wave 2 v4.0, ADR-116): identificador alfanumerico humano-legivel `PRV-AAAA-MM-NNNNNN`. UNIQUE INDEX `idx_provas_codigo_publico`. Embutido no payload do QR Code (DAT §8.1 — idempotencia camera↔digitacao manual via Componente 19 da Wave 3 v4.0).
 - **`rota_enum` com 6 valores**: 4 v4.0 (`MATRIZ`/`LAM_MATRIZ`/`FILIAL`/`LAM_FILIAL`) + 2 legacy v3.0 (`PADRAO`/`DIRETA`). Os legacy permanecem ate a Wave 7 (Componente 21) fazer o backfill final — drop nao e suportado pelo Postgres em transacao.
 - **Trigger `trg_provas_rota_imutavel` (BEFORE UPDATE)** (Wave 2 v4.0, ADR-117): bloqueia mudanca de rota apos definicao com SQLSTATE 22023. Permite NULL→valor (Wave 7 backfill); bloqueia valor→outro_valor e valor→NULL.
+- **`status_prova_enum` com 17 valores**: 10 v3.0 (CRIADA, RETIRADA_PELO_VENDEDOR, APROVADA_PELO_VENDEDOR, DE_VOLTA_3STUDIO, COM_MOTORISTA, ENVIADA_PARA_CLICHERIA, ENCAMINHADA_A_CLICHERIA, RECEBIDA_PELA_CLICHERIA, REPROVADA_PELO_VENDEDOR, CANCELADA) + 7 v4.0 (COM_MOTORISTA_ENTREGA_FINAL, COM_MOTORISTA_IDA_LAMINACAO, COM_MOTORISTA_VOLTA_LAMINACAO, DE_VOLTA_3STUDIO_POS_LAMINACAO, ENCAMINHADA_PARA_LAMINACAO, ENCAMINHADA_PARA_O_VENDEDOR, LAMINACAO_CONCLUIDA — migration 013, Wave 3 v4.0 / C11). Sincronizado com Python `StatusProvaEnum` + TypeScript `StatusProva`; drift detectado por `backend/tests/test_status_prova_enum_drift.py`.
 - **Schema `app_private`** (Wave 1 v4.0, RLS 012): 3 funcoes helper SECURITY DEFINER `current_user_is_admin()` / `current_user_setor()` / `current_user_id()` referenciadas pelas 12 policies. Schema NAO listado em `db-schemas` do PostgREST (nao exposto via REST).
 - **12 policies RLS** reescritas na Wave 1 v4.0 usando os helpers. Cobertura semantica preservada vs RLS 005/006; `pol_etiquetas_select` estendida para incluir Motorista (status COM_MOTORISTA) e Clicheria (clicheria-states) — fecha lacuna L-RLS-1. **Wave 2 v4.0 nao criou nova policy** — `pol_provas_insert` ja exigia admin (cobre o cenario v4.0).
 - **`audit_logs` com 4 camadas de defesa** (RNF-005): (1) trigger `trg_audit_logs_imutavel` (Wave 0); (2) RLS deny-by-default `pol_audit_select` admin-only (Wave 0/1/2); (3) REVOKE GRANT-level INSERT/UPDATE/DELETE para `anon`/`authenticated` (Wave 6, RLS 008 — ADR-112); (4) REVOKE TRUNCATE para `anon`/`authenticated` (Wave 1 v4.0 Audit Round 2, RLS 013 — AUD-W1V4-101 — fecha lacuna onde TRUNCATE bypassa RLS e nao dispara trigger BEFORE UPDATE/DELETE). `service_role` mantem GRANT em todas as camadas (preserva flexibilidade operacional).
@@ -651,6 +654,115 @@ backend, etc.).
   ADR-145 antes do PR final para `main`. Defesa em profundidade
   corrente cobre descoberta lenta; nao substitui o rate-limit
   prescrito.
+
+---
+
+## Maquina de Estados: coexistencia v3.0 e v4.0 (Wave 3 v4.0 / Componente 11)
+
+A v4.0 expandiu a maquina de estados de 10 valores (v3.0) para 17 valores
+(10 v3.0 + 7 v4.0). Provas legacy e v4.0 **coexistem** — cada uma usa
+sua propria maquina, roteadas automaticamente pelo facade.
+
+### Roteamento
+
+```python
+from app.state_machine import executar_transicao, transicoes_validas, pode_cancelar
+
+# O facade dispatcha conforme prova.rota:
+#   rota IS NULL ou rota IN {PADRAO, DIRETA}        -> maquina v3.0 (legacy)
+#   rota IN {MATRIZ, LAM_MATRIZ, FILIAL, LAM_FILIAL} -> maquina v4.0
+```
+
+NUNCA importe direto de `app.services.state_machine` (v3.0) ou de
+`app.state_machine.v4.*`. Use sempre o facade `app.state_machine`.
+
+### Arquivos relevantes
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `backend/app/state_machine/__init__.py` | Facade publica + roteador v3/v4 |
+| `backend/app/state_machine/v4/rules.py` | Matriz canonica (24 entradas, 4 rotas) |
+| `backend/app/state_machine/v4/contextos.py` | 3 contextos do motorista |
+| `backend/app/state_machine/v4/machine.py` | `validar_transicao_v4`, `executar_transicao_v4` |
+| `backend/app/services/state_machine.py` | Maquina v3.0 LEGACY (intocada — Wave 7 removera) |
+
+### Quando uma nova prova nasce
+
+1. Admin escolhe rota na criacao (C06 v4.0) — uma das 4 v4.0
+   (MATRIZ/LAM_MATRIZ/FILIAL/LAM_FILIAL).
+2. Prova nasce com `rota=<escolhida>` e `status=CRIADA`.
+3. Primeira transicao usa a maquina v4.0 automaticamente.
+4. RN-002 v4.0: rota eh IMUTAVEL apos a criacao — trigger
+   `trg_provas_rota_imutavel` bloqueia UPDATE da rota.
+
+### Quando uma prova legacy v3.0 transita
+
+Provas existentes em producao tem `rota IS NULL` (11 em producao no
+momento da migration 013) ou `rota IN {PADRAO, DIRETA}` (5 em
+producao). Essas continuam usando exclusivamente a maquina v3.0 —
+o roteador detecta e despacha para `app.services.state_machine`.
+
+A Wave 7 (Componente 21) fara o backfill `rota=NULL → valor v4.0`
+deduzido da localizacao do vendedor; depois disso, provas hoje
+legacy passam a usar a maquina v4.0 (trigger permite `NULL → valor`).
+
+### Cancelamento e reinicio de ciclo sao TRANSVERSAIS
+
+Ambos usam endpoints admin dedicados (`POST /{id}/cancelar`,
+`POST /{id}/reiniciar-ciclo`) que vao por meio do facade. O reinicio
+preserva `rota_antes` (RN-002 v4.0 + ADR-123) em ambas as maquinas.
+
+### Como adicionar um novo valor a `status_prova_enum`
+
+Sincronizacao em 3 camadas (DAT §4.5):
+
+1. **Python `StatusProvaEnum`** em `backend/app/db/models.py`: adicionar
+   o membro com nome `UPPER_SNAKE_CASE`.
+2. **PostgreSQL via Alembic**: nova migration com
+   `ALTER TYPE status_prova_enum ADD VALUE IF NOT EXISTS '<NOVO>';`.
+3. **TypeScript** em `frontend/src/lib/types/prova.ts`: adicionar a
+   `StatusProva` + `STATUS_LABELS` + `STATUS_LABELS_SHORT` +
+   `STATUS_OPTIONS`.
+
+E depois (apenas se o valor pertencer ao fluxo v4.0):
+4. **Adicionar transicao em `state_machine/v4/rules.py`** (com teste
+   correspondente em `tests/state_machine/test_rules_v4.py`).
+5. **Atualizar RLS** se motorista/clicheria precisam ver o novo estado
+   (`backend/migrations/rls/`).
+6. **Atualizar `contexto_motorista`** se o novo estado eh de motorista
+   (`state_machine/v4/contextos.py`).
+
+Drift entre as camadas eh detectado por
+`backend/tests/test_status_prova_enum_drift.py`.
+
+### 3 contextos do motorista (US-006 v4.0)
+
+```python
+from app.state_machine.v4.contextos import contexto_motorista
+
+contexto_motorista(StatusProvaEnum.COM_MOTORISTA_IDA_LAMINACAO)
+# "ida_laminacao"
+
+contexto_motorista(StatusProvaEnum.COM_MOTORISTA)  # legacy v3.0
+# "entrega_final"  (compat — ADR-148)
+
+contexto_motorista(StatusProvaEnum.CRIADA)
+# None
+```
+
+O contexto eh gravado em `audit_log.detalhes_json.contexto_motorista`
+para investigacao (Decisao M-5 do Gate 1 — ADR-151). NAO eh coluna
+separada de `movimentacoes`.
+
+### Onde NAO duplicar regras
+
+- **NAO escrever um trigger no Postgres** que valide transicoes
+  semantica (Decisao M-4 do Gate 1 — ADR-150). Invariancia no Python
+  via DAT §4.2.
+- **NAO importar `TRANSICOES` de `app.services.state_machine`** se for
+  codigo novo — use o facade `app.state_machine.transicoes_validas`.
+- **NAO criar endpoints novos para transicoes v4.0** (Decisao M-3 do
+  Gate 1 — ADR-149). O `POST /{id}/transicoes` ja eh generico.
 
 ---
 

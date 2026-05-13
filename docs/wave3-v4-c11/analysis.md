@@ -1061,3 +1061,98 @@ Após receber resposta dos 8 pontos de escalação (§8) e a string `AUTORIZADO 
 ---
 
 **Fim do Gate 1. Aguardando decisões humanas sobre os 8 pontos de escalação listados em §8 + string `AUTORIZADO GATE 2 — WAVE 3 v4.0 / C11` antes de prosseguir.**
+
+---
+
+## Apêndice A — Execução (Gate 2)
+
+**Data:** 2026-05-13
+**Branch:** `wave3-v4/componente-11`
+**Autorização recebida:** "Vamos seguir suas recomendações" + `AUTORIZADO GATE 2 — WAVE 3 v4.0 / C11`.
+
+### A.1 Diffs entre proposto (§8) e executado
+
+Todas as 8 decisões de escalação (M-1 a M-8) foram executadas conforme a recomendação técnica do Gate 1:
+
+| ID | Proposto | Executado | Diff |
+|---|---|---|---|
+| M-1 | Opção A (ator = Vendedor) | Opção A | Nenhum — texto literal do §5.4 prevalece |
+| M-2 | Opção A (ALTER TYPE no enum) | Opção A | Migration 013 com 7 ADD VALUE IF NOT EXISTS |
+| M-2b | Opção (a) — manter COM_MOTORISTA legacy + adicionar COM_MOTORISTA_ENTREGA_FINAL | (a) | Valores distintos; `contexto_motorista()` unifica como "entrega_final" |
+| M-3 | Opção A (reusar `POST /{id}/transicoes`) | A | Zero novo endpoint; roteador no facade |
+| M-4 | Opção A (sem trigger semântico) | A | Apenas trigger de imutabilidade da rota (pré-existente, ADR-117) |
+| M-5 | Opções A + C combinadas (derivado + audit_log) | A + C | `audit_log.detalhes_json.contexto_motorista` |
+| M-6 | Opção A (payload inalterado) | A | `TransicaoRequest` zero touch |
+| M-7 | Opção B (conciso, voz ativa) | B | Mensagens em `state_machine/v4/machine.py` |
+| M-8 | Opção A (sem rate limit) | A | Follow-up unificado com ADR-145 |
+
+### A.2 Conformidade com a Ordem de Execução (§6.1 do prompt)
+
+| # | Ordem prescrita | Resultado |
+|---|---|---|
+| 1 | Migration Alembic principal (enum) | ✅ 013 aplicada via MCP |
+| 2 | Sincronização Pydantic/TS/PG | ✅ Drift test passa |
+| 3 | Módulo `state_machine/v4/` | ✅ rules.py + machine.py + contextos.py |
+| 4 | Testes unitários junto com a matriz | ✅ 139 testes / 100% cobertura |
+| 5 | Roteador v3.0 vs v4.0 nos endpoints | ✅ Facade em `provas.py` |
+| 6 | Endpoints novos da v4.0 | ✅ Nenhum (Decisão M-3) |
+| 7 | Migrations RLS | ✅ 014 aplicada via MCP |
+| 8 | Trigger no banco | ❌ Não criado (Decisão M-4) |
+| 9 | Testes integração coexistência | ✅ `test_facade.py` + 4 fluxos completos por rota |
+| 10 | Frontend: mapeamento dos novos estados | ✅ `lib/types/prova.ts` + `ReportGeral.tsx` |
+| 11 | Frontend: botões de transição na detail | ⚠️ NÃO ENTREGUE — ver A.4 |
+| 12 | E2E dos 4 fluxos | ✅ `test_machine_v4.py` cobre `test_fluxo_completo_rota_*` |
+| 13 | Validação de performance | ✅ Lookup O(1) na tabela em memória; benchmark indireto via 961 testes em 4s |
+| 14 | `contrato-c12.md` | ✅ Criado |
+| 15 | Documentação (§6.5) | ✅ CHANGELOG + DECISIONS + CLAUDE.md + analysis.md atualizados |
+
+### A.3 Conformidade com os 24 Critérios de Aceitação (§6.3)
+
+22 OK / 1 deferido por design (M-4 — sem trigger semântico) / 1 não entregue (#15 — botões inline no detalhe — ver A.4).
+
+Detalhamento completo das verificações está nos próprios testes:
+- `backend/tests/state_machine/test_rules_v4.py`
+- `backend/tests/state_machine/test_machine_v4.py`
+- `backend/tests/state_machine/test_facade.py`
+- `backend/tests/state_machine/test_contextos_v4.py`
+- `backend/tests/test_status_prova_enum_drift.py`
+
+### A.4 Item #15 — Botões de transição inline na página de detalhe (NÃO ENTREGUE)
+
+A UX canônica de transição é via scanner (`/escanear`) com signature canvas. Botões inline na página de detalhe requereriam:
+- Modal com signature canvas (~150 LOC novo)
+- Hook `useTransitionFromDetail` consumindo `POST /{id}/transicoes` direto
+- Lista dinâmica de transições disponíveis baseada em (rota, status, perfil)
+
+Registrado como **follow-up para decisão do Mario no merge**:
+- (a) Aceitar a limitação no merge; criar como tarefa separada se necessário.
+- (b) Pedir nova sessão para entregar antes do PR para `main`.
+
+Trabalho parcialmente entregue na detail page:
+- `AdminActions.tsx` CANCELAVEIS estendido com 7 novos estados v4.0.
+- Labels v4.0 corretos exibidos na header do detail via `STATUS_LABELS[prova.status]`.
+
+### A.5 Métricas finais
+
+- **Backend pytest:** 961 passed + 10 skipped (era 825 + 9 pos-C19 — +136 testes).
+- **Cobertura `app/state_machine/v4/*`:** 100% (187/187 stmts).
+- **Frontend tsc --noEmit:** exit 0.
+- **Frontend Vitest:** 98/98 passing.
+- **Rotas backend públicas:** 34 (inalterado — zero novo endpoint, Decisão M-3).
+- **MCP advisor security:** 1 INFO + 1 WARN pré-existentes; **zero novos**.
+- **Estado do enum em produção:** 17 valores confirmados via `SELECT enumlabel FROM pg_enum`.
+- **Migrations aplicadas em produção:** Alembic 013 + RLS 014.
+- **alembic_version em produção:** `'013'`.
+
+### A.6 Próximos passos
+
+1. **PR contra `development`** — aberto com a limitação A.4 documentada.
+2. **Smoke E2E manual** (Mario) — ciclo completo de uma prova v4.0 em cada rota.
+3. **Decisão A.4 do Mario** — aceitar limitação ou pedir nova sessão.
+4. **Auditoria independente** — sessão separada.
+5. **C12 (Timeline)** — pode iniciar consumindo o `contrato-c12.md`.
+6. **Follow-up rate limit** — sessão dedicada antes do PR para `main`.
+
+---
+
+**Fim do Gate 2 — Entrega concluída.**
