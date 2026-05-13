@@ -70,9 +70,14 @@ from app.db.models import (
 from app.db.session import get_db
 from app.domain.schemas.report import (
     CancelamentoTop,
+    ConsolidacaoRota,
+    DistContextoMotorista,
+    DistContextoMotoristaKey,
     DistLocalizacao,
     DistOrigemRota,
     DistRota,
+    DistRotaV4,
+    DistRotaV4Categoria,
     DistStatus,
     Indicadores3Studio,
     IndicadoresClicheria,
@@ -94,6 +99,7 @@ from app.services.report_filters import (
     MAX_Q_LENGTH,
     ReportFilters,
     ReportScope,
+    RotaCategoria,
     to_cache_key,
 )
 from app.services.report_metrics import (
@@ -119,15 +125,94 @@ _TERMINAL_STATUSES = (
 """Status terminais — provas atrasadas excluem essas (RN-008 ADR-099)."""
 
 _CLICHERIA_EM_TRANSITO = (
+    # Legacy v3.0 (rota PADRAO / DIRETA)
     StatusProvaEnum.COM_MOTORISTA,
     StatusProvaEnum.ENVIADA_PARA_CLICHERIA,
     StatusProvaEnum.ENCAMINHADA_A_CLICHERIA,
+    # v4.0 (rota MATRIZ / LAM_MATRIZ) — entrega final via motorista
+    StatusProvaEnum.COM_MOTORISTA_ENTREGA_FINAL,
 )
+"""Wave 5 v4.0: estende a definicao de 'em transito para clicheria' para
+incluir o status v4.0 `COM_MOTORISTA_ENTREGA_FINAL` (etapa pre-RECEBIDA
+das rotas MATRIZ e LAM_MATRIZ). Rotas FILIAL/LAM_FILIAL transitam direto
+de `APROVADA_PELO_VENDEDOR` → `RECEBIDA_PELA_CLICHERIA` (sem etapa
+intermediaria de transito), entao nao contam aqui."""
 
 _VENDEDOR_EM_PODER = (
     StatusProvaEnum.RETIRADA_PELO_VENDEDOR,
     StatusProvaEnum.APROVADA_PELO_VENDEDOR,
 )
+
+
+# ─── v4.0 (Wave 5 v4.0 / Componente 16) — categorias de rota ───────────────
+
+
+_ROTAS_MATRIZ: tuple[RotaEnum, ...] = (
+    RotaEnum.MATRIZ,
+    RotaEnum.LAM_MATRIZ,
+    RotaEnum.PADRAO,
+)
+"""Rotas que pertencem semanticamente a categoria MATRIZ.
+
+Inclui as 2 rotas v4.0 (MATRIZ/LAM_MATRIZ) + a legacy PADRAO (Decisao
+11.1 do Gate 1 do C12 — ADR-158: `ROTA_LABELS.PADRAO = "Matriz"`).
+Provas legacy com `rota=NULL` sao consolidadas em MATRIZ se
+`vendedor.localizacao = MATRIZ` (heuristica do C12 Decisao 11.2)."""
+
+
+_ROTAS_FILIAL: tuple[RotaEnum, ...] = (
+    RotaEnum.FILIAL,
+    RotaEnum.LAM_FILIAL,
+    RotaEnum.DIRETA,
+)
+"""Rotas que pertencem semanticamente a categoria FILIAL.
+
+Inclui as 2 rotas v4.0 (FILIAL/LAM_FILIAL) + a legacy DIRETA (ADR-158:
+`ROTA_LABELS.DIRETA = "Filial"`). Provas legacy com `rota=NULL` sao
+consolidadas em FILIAL se `vendedor.localizacao = FILIAL`."""
+
+
+_CLICHERIA_CHEGADA_LEGACY = (
+    StatusProvaEnum.ENVIADA_PARA_CLICHERIA,
+    StatusProvaEnum.ENCAMINHADA_A_CLICHERIA,
+)
+"""Status legacy que precedem `RECEBIDA_PELA_CLICHERIA` (v3.0)."""
+
+
+_CLICHERIA_CHEGADA_V4_VIA_MOTORISTA = (
+    StatusProvaEnum.COM_MOTORISTA_ENTREGA_FINAL,
+)
+"""Status v4.0 que precede `RECEBIDA_PELA_CLICHERIA` quando a prova
+veio via motorista (rotas MATRIZ + LAM_MATRIZ)."""
+
+
+_CLICHERIA_CHEGADA_V4_VIA_DIRETO = (
+    StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+)
+"""Status v4.0 que precede `RECEBIDA_PELA_CLICHERIA` quando a prova
+veio direto do vendedor da filial (rotas FILIAL + LAM_FILIAL).
+
+NOTA: rotas legacy v3.0 (PADRAO + DIRETA) tambem passam por
+`APROVADA_PELO_VENDEDOR`, mas para essas a chegada final e
+`ENVIADA_PARA_CLICHERIA` (Padrao) ou `ENCAMINHADA_A_CLICHERIA` (Direta);
+o `_aggregate_clicheria` discrimina via `status_anterior` da mov que
+gravou `RECEBIDA_PELA_CLICHERIA`."""
+
+
+_CONTEXTO_MOTORISTA_STATUSES: dict[StatusProvaEnum, DistContextoMotoristaKey] = {
+    StatusProvaEnum.COM_MOTORISTA_IDA_LAMINACAO: "ida_laminacao",
+    StatusProvaEnum.COM_MOTORISTA_VOLTA_LAMINACAO: "volta_laminacao",
+    StatusProvaEnum.COM_MOTORISTA_ENTREGA_FINAL: "entrega_final",
+    # Legacy v3.0 → entrega_final por paridade com contexto_motorista()
+    # do backend Python (Wave 3 v4.0 / C11 ADR-148).
+    StatusProvaEnum.COM_MOTORISTA: "entrega_final",
+}
+"""Mapeamento de status → contexto canonico do motorista (Wave 5 v4.0).
+
+Paridade byte-a-byte com:
+- Frontend TS: `contextoMotorista()` em `lib/types/prova.ts:354`.
+- Backend Python: `app.state_machine.v4.contextos.contexto_motorista()`.
+"""
 
 ExportDataset = Literal["summary", "by-seller", "overdue", "proofs"]
 """Datasets exportaveis em CSV."""
@@ -157,12 +242,16 @@ async def _resolve_filters(
     q: str | None,
     vendedor_id: uuid.UUID | None,
     rota: RotaEnum | None,
+    rota_categoria: RotaCategoria | None,
     status_filter: StatusProvaEnum | None,
 ) -> ReportFilters:
     """Constroi o ReportFilters validado a partir dos query params crus.
 
     Pydantic faz toda a validacao: defaults (30d), invariantes (from < to,
     range <= 366d, q max 200 chars). Erros viram 422 via FastAPI.
+
+    Wave 5 v4.0 (Componente 16): aceita `rota_categoria` (matriz/filial)
+    como filtro consolidado v4.0. Precedencia sobre `rota` exata.
     """
     return ReportFilters.model_validate(
         {
@@ -172,6 +261,7 @@ async def _resolve_filters(
             "q": q,
             "vendedor_id": vendedor_id,
             "rota": rota,
+            "rota_categoria": rota_categoria,
             "status": status_filter,
         }
     )
@@ -224,8 +314,39 @@ def _movimentacao_periodo_filter(filters: ReportFilters):
     )
 
 
+def _categoria_predicate(categoria: RotaCategoria):
+    """Constroi predicado SQLAlchemy para `rota_categoria` (Wave 5 v4.0).
+
+    Categoria `matriz` = `rota IN _ROTAS_MATRIZ` OR (`rota IS NULL` AND
+    JOIN com `usuarios.localizacao = MATRIZ`). Idem para `filial`. Para
+    suportar legacy NULL, usa correlated subquery em vez de JOIN — evita
+    cardinality issues quando o caller ja tem JOIN em Usuario.
+
+    NOTA: a correlated subquery e otimizada pelo Postgres como semi-join;
+    em volume real (>10k provas) `idx_provas_vendedor` cobre o lookup.
+    """
+    rotas = _ROTAS_MATRIZ if categoria == "matriz" else _ROTAS_FILIAL
+    target_loc = (
+        LocalizacaoEnum.MATRIZ if categoria == "matriz" else LocalizacaoEnum.FILIAL
+    )
+    legacy_null_subq = (
+        select(Usuario.id)
+        .where(
+            Usuario.id == ProvaDigital.vendedor_id,
+            Usuario.localizacao == target_loc,
+        )
+        .correlate(ProvaDigital)
+        .exists()
+    )
+    return or_(
+        ProvaDigital.rota.in_(rotas),
+        and_(ProvaDigital.rota.is_(None), legacy_null_subq),
+    )
+
+
 def _aplicar_filtros_provas(stmt, filters: ReportFilters, *, apply_status: bool = True):
-    """Aplica filtros opcionais (q, vendedor_id, rota, status) sobre provas_digitais.
+    """Aplica filtros opcionais (q, vendedor_id, rota, rota_categoria, status)
+    sobre `provas_digitais`.
 
     Args:
         stmt: SQLAlchemy SELECT statement a estender.
@@ -237,10 +358,18 @@ def _aplicar_filtros_provas(stmt, filters: ReportFilters, *, apply_status: bool 
           produziria resultado vazio quando o filtro nao bate com o
           status final esperado). Default True preserva comportamento
           historico das queries que filtram apenas provas.
+
+    Wave 5 v4.0: aceita `filters.rota_categoria` (matriz/filial) com
+    precedencia sobre `filters.rota` quando ambos fornecidos. Categoria
+    expande para `rota IN {...}` + `rota IS NULL AND
+    vendedor.localizacao = ...` (heuristica C12 Decisao 11.2).
     """
     if filters.vendedor_id is not None:
         stmt = stmt.where(ProvaDigital.vendedor_id == filters.vendedor_id)
-    if filters.rota is not None:
+    # Wave 5 v4.0: rota_categoria tem precedencia sobre rota exata
+    if filters.rota_categoria is not None:
+        stmt = stmt.where(_categoria_predicate(filters.rota_categoria))
+    elif filters.rota is not None:
         stmt = stmt.where(ProvaDigital.rota == filters.rota)
     if apply_status and filters.status is not None:
         stmt = stmt.where(ProvaDigital.status == filters.status)
@@ -503,6 +632,31 @@ async def _aggregate_geral(
     cutoff = limite_atraso(now_utc, tempo_atraso_horas)
 
     # Q1+Q2: contadores e serie temporal — provas no periodo
+    # Wave 5 v4.0: contadores de rota expandidos para os 6 valores
+    # (PADRAO + DIRETA + MATRIZ + LAM_MATRIZ + FILIAL + LAM_FILIAL) + NULL.
+    # Provas legacy NULL recebem 3 sub-contadores (matriz/filial/indef.)
+    # via correlated subquery com `usuarios.localizacao` (heuristica do
+    # C12 / Decisao 11.2 — ADR-158). Os 4 contadores rota_v4_* + 2
+    # rota_legacy_* + 3 legacy_null_* alimentam `distribuicao_rota_v4` +
+    # `consolidacao_rota` simultaneamente em UMA query.
+    legacy_null_matriz_subq = (
+        select(Usuario.id)
+        .where(
+            Usuario.id == ProvaDigital.vendedor_id,
+            Usuario.localizacao == LocalizacaoEnum.MATRIZ,
+        )
+        .correlate(ProvaDigital)
+        .exists()
+    )
+    legacy_null_filial_subq = (
+        select(Usuario.id)
+        .where(
+            Usuario.id == ProvaDigital.vendedor_id,
+            Usuario.localizacao == LocalizacaoEnum.FILIAL,
+        )
+        .correlate(ProvaDigital)
+        .exists()
+    )
     stmt_provas = (
         select(
             func.count().label("total"),
@@ -512,15 +666,36 @@ async def _aggregate_geral(
                 .label(f"status_{s.value}")
                 for s in StatusProvaEnum
             ],
+            # Legacy v3.0
             func.count()
             .filter(ProvaDigital.rota == RotaEnum.PADRAO)
             .label("rota_padrao"),
             func.count()
             .filter(ProvaDigital.rota == RotaEnum.DIRETA)
             .label("rota_direta"),
+            # v4.0 (Wave 2 v4.0)
+            func.count()
+            .filter(ProvaDigital.rota == RotaEnum.MATRIZ)
+            .label("rota_matriz"),
+            func.count()
+            .filter(ProvaDigital.rota == RotaEnum.LAM_MATRIZ)
+            .label("rota_lam_matriz"),
+            func.count()
+            .filter(ProvaDigital.rota == RotaEnum.FILIAL)
+            .label("rota_filial"),
+            func.count()
+            .filter(ProvaDigital.rota == RotaEnum.LAM_FILIAL)
+            .label("rota_lam_filial"),
+            # Legacy NULL — total + sub-buckets via heuristica vendedor.localizacao
             func.count()
             .filter(ProvaDigital.rota.is_(None))
-            .label("rota_nula"),
+            .label("rota_nula_total"),
+            func.count()
+            .filter(and_(ProvaDigital.rota.is_(None), legacy_null_matriz_subq))
+            .label("rota_nula_matriz"),
+            func.count()
+            .filter(and_(ProvaDigital.rota.is_(None), legacy_null_filial_subq))
+            .label("rota_nula_filial"),
         )
         .select_from(ProvaDigital)
         .where(_periodo_filter(filters))
@@ -668,6 +843,9 @@ async def _aggregate_geral(
         if int(getattr(row_provas, f"status_{s.value}")) > 0
     ]
 
+    # `distribuicao_rota` (legacy v3) — preservado por compat. Inclui
+    # apenas PADRAO/DIRETA/NULL como antes da v4.0; novos consumidores
+    # devem usar `distribuicao_rota_v4`.
     distribuicao_rota: list[DistRota] = []
     if int(row_provas.rota_padrao) > 0:
         distribuicao_rota.append(
@@ -677,10 +855,90 @@ async def _aggregate_geral(
         distribuicao_rota.append(
             DistRota(rota=RotaEnum.DIRETA, quantidade=int(row_provas.rota_direta))
         )
-    if int(row_provas.rota_nula) > 0:
+    if int(row_provas.rota_nula_total) > 0:
         distribuicao_rota.append(
-            DistRota(rota=None, quantidade=int(row_provas.rota_nula))
+            DistRota(rota=None, quantidade=int(row_provas.rota_nula_total))
         )
+
+    # `distribuicao_rota_v4` (Wave 5 v4.0) — detalhamento completo cobrindo
+    # 9 categorias possiveis. Inclui entradas zero somente para v4.0 +
+    # legacy (helpa frontend renderizar visualmente os 4 valores v4.0
+    # mesmo quando sem dados); legacy_null_* so aparece se quantidade > 0.
+    distribuicao_rota_v4: list[DistRotaV4] = []
+
+    def _push_v4(cat: DistRotaV4Categoria, rota: RotaEnum | None, qtd: int):
+        if qtd > 0:
+            distribuicao_rota_v4.append(
+                DistRotaV4(categoria=cat, rota=rota, quantidade=qtd)
+            )
+
+    _push_v4("v4_matriz", RotaEnum.MATRIZ, int(row_provas.rota_matriz))
+    _push_v4(
+        "v4_lam_matriz", RotaEnum.LAM_MATRIZ, int(row_provas.rota_lam_matriz)
+    )
+    _push_v4("v4_filial", RotaEnum.FILIAL, int(row_provas.rota_filial))
+    _push_v4(
+        "v4_lam_filial", RotaEnum.LAM_FILIAL, int(row_provas.rota_lam_filial)
+    )
+    _push_v4("legacy_padrao", RotaEnum.PADRAO, int(row_provas.rota_padrao))
+    _push_v4("legacy_direta", RotaEnum.DIRETA, int(row_provas.rota_direta))
+    # Sub-buckets de rota=NULL (heuristica vendedor.localizacao)
+    null_total = int(row_provas.rota_nula_total)
+    null_matriz = int(row_provas.rota_nula_matriz)
+    null_filial = int(row_provas.rota_nula_filial)
+    null_indef = null_total - null_matriz - null_filial
+    _push_v4("legacy_null_matriz", None, null_matriz)
+    _push_v4("legacy_null_filial", None, null_filial)
+    _push_v4("legacy_null_indefinida", None, max(0, null_indef))
+
+    # `consolidacao_rota` (Wave 5 v4.0) — 2 baldes (matriz/filial) usado
+    # pelo card ROTA do `ReportGeral` para preservar layout v3.
+    consolidacao = ConsolidacaoRota(
+        matriz=(
+            int(row_provas.rota_matriz)
+            + int(row_provas.rota_lam_matriz)
+            + int(row_provas.rota_padrao)
+            + null_matriz
+        ),
+        filial=(
+            int(row_provas.rota_filial)
+            + int(row_provas.rota_lam_filial)
+            + int(row_provas.rota_direta)
+            + null_filial
+        ),
+        indefinida=max(0, null_indef),
+    )
+
+    # Q7: snapshot de provas com motorista por contexto (Wave 5 v4.0).
+    # NAO filtrado por periodo (snapshot atual). Frontend nao expoe
+    # visualmente nesta sessao (preserva layout v3); valor disponivel
+    # programaticamente e no CSV summary.
+    stmt_contexto = (
+        select(
+            ProvaDigital.status.label("status"),
+            func.count().label("qtd"),
+        )
+        .select_from(ProvaDigital)
+        .where(ProvaDigital.status.in_(list(_CONTEXTO_MOTORISTA_STATUSES.keys())))
+        .group_by(ProvaDigital.status)
+    )
+    contexto_rows = (await db.execute(stmt_contexto)).all()
+    # Agregar por contexto (legacy COM_MOTORISTA + v4.0 COM_MOTORISTA_ENTREGA_FINAL
+    # somam em entrega_final por paridade com contexto_motorista()).
+    contexto_counts: dict[DistContextoMotoristaKey, int] = {
+        "ida_laminacao": 0,
+        "volta_laminacao": 0,
+        "entrega_final": 0,
+    }
+    for r in contexto_rows:
+        ctx = _CONTEXTO_MOTORISTA_STATUSES.get(r.status)
+        if ctx is not None:
+            contexto_counts[ctx] += int(r.qtd)
+    contexto_motorista_dist = [
+        DistContextoMotorista(contexto=ctx, quantidade=q)
+        for ctx, q in contexto_counts.items()
+        if q > 0
+    ]
 
     serie_temporal = [
         PontoSerie(data=r.bucket, quantidade=int(r.qtd)) for r in serie_rows
@@ -696,6 +954,9 @@ async def _aggregate_geral(
         serie_temporal=serie_temporal,
         distribuicao_status=distribuicao_status,
         distribuicao_rota=distribuicao_rota,
+        distribuicao_rota_v4=distribuicao_rota_v4,
+        consolidacao_rota=consolidacao,
+        contexto_motorista_dist=contexto_motorista_dist,
         ranking=ranking,
         provas_atrasadas=provas_atrasadas,
         provas_atrasadas_total=qtd_atrasadas,
@@ -918,7 +1179,28 @@ async def _aggregate_clicheria(
 
     # Q1: recebidas no periodo + tempo medio aguardando recebimento + por origem
     # Recebimento e a movimentacao com status_novo = RECEBIDA_PELA_CLICHERIA.
-    # Origem = ENVIADA (rota PADRAO via motorista) ou ENCAMINHADA (rota DIRETA).
+    #
+    # Wave 5 v4.0 (Componente 16): semantica de origem expandida — `via_padrao`
+    # e `via_direta` agora consolidam legacy + v4.0:
+    #   - via_padrao = chegada via motorista (legacy: COM_MOTORISTA ->
+    #     ENVIADA_PARA_CLICHERIA; v4.0: COM_MOTORISTA_ENTREGA_FINAL para
+    #     rotas MATRIZ/LAM_MATRIZ)
+    #   - via_direta = chegada direto do vendedor da filial (legacy:
+    #     ENCAMINHADA_A_CLICHERIA; v4.0: APROVADA_PELO_VENDEDOR seguido
+    #     direto de RECEBIDA, sem etapa intermediaria)
+    #
+    # Para discriminar, usamos `status_anterior` da propria mov que
+    # gravou `RECEBIDA_PELA_CLICHERIA` (mais direto que olhar trajetoria).
+    chegada_legacy = list(_CLICHERIA_CHEGADA_LEGACY)
+    chegada_v4_motorista = list(_CLICHERIA_CHEGADA_V4_VIA_MOTORISTA)
+    chegada_v4_direto = list(_CLICHERIA_CHEGADA_V4_VIA_DIRETO)
+    chegada_v3_v4_motorista = (
+        [StatusProvaEnum.ENVIADA_PARA_CLICHERIA] + chegada_v4_motorista
+    )
+    chegada_v3_v4_direto = (
+        [StatusProvaEnum.ENCAMINHADA_A_CLICHERIA] + chegada_v4_direto
+    )
+
     chegada_subq = (
         select(
             Movimentacao.prova_id,
@@ -928,10 +1210,11 @@ async def _aggregate_clicheria(
         )
         .where(
             Movimentacao.status_novo.in_(
-                (
-                    StatusProvaEnum.ENVIADA_PARA_CLICHERIA,
-                    StatusProvaEnum.ENCAMINHADA_A_CLICHERIA,
-                )
+                chegada_legacy + chegada_v4_motorista
+                # Nao incluimos APROVADA aqui no `chegada_subq` porque
+                # APROVADA tambem aparece em rotas legacy (PADRAO) antes
+                # de ENVIADA. Em vez disso, contamos via_direta v4.0 via
+                # status_anterior da propria mov RECEBIDA.
             )
         )
         .group_by(Movimentacao.prova_id, Movimentacao.ciclo)
@@ -941,14 +1224,18 @@ async def _aggregate_clicheria(
         "epoch", Movimentacao.created_at - chegada_subq.c.chegada_at
     )
 
+    # Para `via_direta` v4.0 (rotas FILIAL/LAM_FILIAL), examinamos
+    # `Movimentacao.status_anterior` na propria mov de chegada — a transicao
+    # foi APROVADA_PELO_VENDEDOR -> RECEBIDA_PELA_CLICHERIA sem etapa
+    # intermediaria. Filtramos cruzando com `provas.rota` para garantir
+    # que e v4.0 filial (e nao um caso bizarro legacy).
     stmt_recebidas = (
         select(
             func.count().label("total"),
             func.avg(delta_recv).label("media_seg"),
             func.count()
             .filter(
-                chegada_subq.c.origem_status
-                == StatusProvaEnum.ENVIADA_PARA_CLICHERIA
+                chegada_subq.c.origem_status.in_(chegada_v3_v4_motorista)
             )
             .label("via_padrao"),
             func.count()
@@ -956,7 +1243,7 @@ async def _aggregate_clicheria(
                 chegada_subq.c.origem_status
                 == StatusProvaEnum.ENCAMINHADA_A_CLICHERIA
             )
-            .label("via_direta"),
+            .label("via_direta_legacy"),
         )
         .select_from(Movimentacao)
         .join(
@@ -974,6 +1261,33 @@ async def _aggregate_clicheria(
     )
     rec_row = (await db.execute(stmt_recebidas)).one()
 
+    # Q1b: count v4.0 via_direta — provas FILIAL/LAM_FILIAL que transitaram
+    # APROVADA -> RECEBIDA sem etapa intermediaria. Conta movs RECEBIDA
+    # cujo status_anterior == APROVADA_PELO_VENDEDOR + rota.IN (FILIAL,
+    # LAM_FILIAL).
+    stmt_via_direta_v4 = (
+        select(func.count().label("via_direta_v4"))
+        .select_from(Movimentacao)
+        .join(ProvaDigital, ProvaDigital.id == Movimentacao.prova_id)
+        .where(
+            Movimentacao.status_novo == StatusProvaEnum.RECEBIDA_PELA_CLICHERIA,
+            Movimentacao.status_anterior
+            == StatusProvaEnum.APROVADA_PELO_VENDEDOR,
+            ProvaDigital.rota.in_((RotaEnum.FILIAL, RotaEnum.LAM_FILIAL)),
+            Movimentacao.created_at >= filters.from_,
+            Movimentacao.created_at < filters.to,
+        )
+    )
+    via_direta_v4 = int(
+        (await db.execute(stmt_via_direta_v4)).scalar_one() or 0
+    )
+    via_direta_total = int(rec_row.via_direta_legacy) + via_direta_v4
+    # Nota: o `rec_row.total` ja conta v4.0 motorista (via chegada_subq
+    # expandida), mas NAO conta v4.0 direto (que nao passa por chegada
+    # intermediaria). Adicionamos via_direta_v4 ao total se houver — caso
+    # contrario o tempo_medio_aguardando subestima.
+    total_recebidas = int(rec_row.total) + via_direta_v4
+
     # Q2: snapshot em transito (status atual)
     stmt_transito = select(func.count()).where(
         ProvaDigital.status.in_(_CLICHERIA_EM_TRANSITO)
@@ -981,7 +1295,7 @@ async def _aggregate_clicheria(
     em_transito = int((await db.execute(stmt_transito)).scalar_one() or 0)
 
     indicadores = IndicadoresClicheria(
-        recebidas_no_periodo=int(rec_row.total),
+        recebidas_no_periodo=total_recebidas,
         tempo_medio_aguardando_recebimento_horas=arredondar_horas(
             (float(rec_row.media_seg) / 3600.0)
             if rec_row.media_seg is not None
@@ -990,7 +1304,7 @@ async def _aggregate_clicheria(
         em_transito_atual=em_transito,
         por_origem_rota=DistOrigemRota(
             via_padrao=int(rec_row.via_padrao),
-            via_direta=int(rec_row.via_direta),
+            via_direta=via_direta_total,
         ),
     )
 
@@ -1060,8 +1374,31 @@ async def get_report(
     ),
     q: str | None = Query(None, max_length=MAX_Q_LENGTH, description="Busca textual"),
     vendedor_id: uuid.UUID | None = Query(None),
-    rota: RotaEnum | None = Query(None),
-    status_filter: StatusProvaEnum | None = Query(None, alias="status"),
+    rota: RotaEnum | None = Query(
+        None,
+        description=(
+            "Filtro por valor exato de rota. Wave 5 v4.0: aceita os 6 valores "
+            "de RotaEnum (4 v4.0 + 2 legacy). Use `rota_categoria` em vez deste "
+            "param se quiser consolidar v4.0+legacy."
+        ),
+    ),
+    rota_categoria: RotaCategoria | None = Query(
+        None,
+        description=(
+            "[Wave 5 v4.0] Filtro consolidado por categoria (matriz/filial). "
+            "Cobre v4.0 (MATRIZ/LAM_MATRIZ + FILIAL/LAM_FILIAL), legacy "
+            "(PADRAO/DIRETA) e legacy NULL (inferido via vendedor.localizacao). "
+            "Precedencia sobre `rota` se ambos fornecidos."
+        ),
+    ),
+    status_filter: StatusProvaEnum | None = Query(
+        None,
+        alias="status",
+        description=(
+            "Filtro por status. Wave 5 v4.0: aceita os 17 valores de "
+            "StatusProvaEnum (10 v3.0 + 7 v4.0 da Wave 3 v4.0 / C11)."
+        ),
+    ),
     force_refresh: bool = Query(
         False,
         alias="_force",
@@ -1098,6 +1435,7 @@ async def get_report(
             q=q,
             vendedor_id=vendedor_id,
             rota=rota,
+            rota_categoria=rota_categoria,
             status_filter=status_filter,
         )
     except (ValidationError, ValueError) as exc:
@@ -1157,6 +1495,7 @@ async def export_report(
     q: str | None = Query(None, max_length=MAX_Q_LENGTH),
     vendedor_id: uuid.UUID | None = Query(None),
     rota: RotaEnum | None = Query(None),
+    rota_categoria: RotaCategoria | None = Query(None),
     status_filter: StatusProvaEnum | None = Query(None, alias="status"),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(access_required("relatorios")),
@@ -1180,6 +1519,7 @@ async def export_report(
             q=q,
             vendedor_id=vendedor_id,
             rota=rota,
+            rota_categoria=rota_categoria,
             status_filter=status_filter,
         )
     except (ValidationError, ValueError) as exc:
@@ -1200,6 +1540,7 @@ async def export_report(
             "q": filters.q,
             "vendedor_id": str(filters.vendedor_id) if filters.vendedor_id else None,
             "rota": filters.rota.value if filters.rota else None,
+            "rota_categoria": filters.rota_categoria,
             "status": filters.status.value if filters.status else None,
         },
         request=request,
@@ -1252,6 +1593,17 @@ def _format_horas(v: float | None) -> str:
 
 def _format_taxa(v: float) -> str:
     return f"{v * 100:.2f}%"
+
+
+def _contexto_motorista_csv(status: StatusProvaEnum) -> str:
+    """Mapeia status -> string do contexto para o CSV (Wave 5 v4.0).
+
+    Vazio se status nao representa prova com motorista. Paridade com o
+    helper TypeScript `contextoMotorista()` em `lib/types/prova.ts` e
+    com `app.state_machine.v4.contextos.contexto_motorista()`.
+    """
+    ctx = _CONTEXTO_MOTORISTA_STATUSES.get(status)
+    return ctx if ctx is not None else ""
 
 
 async def _stream_csv(
@@ -1331,9 +1683,27 @@ def _summary_rows(payload: Any) -> Iterable[list[str]]:
         rows.append([scope, "qtd_atrasadas", str(ind.qtd_atrasadas)])
         for d in payload.distribuicao_status:
             rows.append([scope, f"status_{d.status.value}", str(d.quantidade)])
+        # Distribuicao por rota — legacy v3 preservada para nao quebrar
+        # parsers existentes; Wave 5 v4.0 acrescenta detalhamento v4.
         for d in payload.distribuicao_rota:
             label = d.rota.value if d.rota is not None else "NAO_DEFINIDA"
             rows.append([scope, f"rota_{label}", str(d.quantidade)])
+        # Wave 5 v4.0: distribuicao detalhada por categoria
+        for d4 in payload.distribuicao_rota_v4:
+            rows.append([scope, f"rota_v4_{d4.categoria}", str(d4.quantidade)])
+        # Wave 5 v4.0: consolidacao em 2 baldes (matriz/filial)
+        cons = payload.consolidacao_rota
+        rows.append([scope, "consolidacao_rota_matriz", str(cons.matriz)])
+        rows.append([scope, "consolidacao_rota_filial", str(cons.filial)])
+        if cons.indefinida > 0:
+            rows.append(
+                [scope, "consolidacao_rota_indefinida", str(cons.indefinida)]
+            )
+        # Wave 5 v4.0: distribuicao por contexto do motorista (snapshot)
+        for dc in payload.contexto_motorista_dist:
+            rows.append(
+                [scope, f"contexto_motorista_{dc.contexto}", str(dc.quantidade)]
+            )
     elif scope == "3studio":
         ind = payload.indicadores
         rows.append([scope, "provas_criadas", str(ind.provas_criadas)])
@@ -1499,6 +1869,9 @@ async def _stream_overdue(
             "cliente",
             "status",
             "rota",
+            # Wave 5 v4.0: contexto canonico do motorista quando status
+            # representa prova com motorista; vazio caso contrario.
+            "contexto_motorista",
             "vendedor_nome",
             "localizacao",
             "created_at",
@@ -1522,6 +1895,7 @@ async def _stream_overdue(
                 row.cliente,
                 row.status.value,
                 row.rota.value if row.rota else "",
+                _contexto_motorista_csv(row.status),
                 row.vendedor_nome,
                 row.localizacao.value if row.localizacao else "",
                 row.created_at.isoformat(),
@@ -1539,11 +1913,16 @@ async def _stream_overdue(
 async def _stream_proofs(
     filters: ReportFilters, db: AsyncSession
 ) -> AsyncIterator[str]:
-    """CSV: 1 linha por prova no periodo (server-side cursor)."""
+    """CSV: 1 linha por prova no periodo (server-side cursor).
+
+    Wave 5 v4.0: adicionadas colunas `codigo_publico` (PRV-AAAA-MM-NNNNNN
+    da Wave 2 v4.0) e `contexto_motorista` (Wave 3 v4.0 C11).
+    """
     stmt = (
         select(
             ProvaDigital.id,
             ProvaDigital.nro_requerimento,
+            ProvaDigital.codigo_publico,
             ProvaDigital.nome,
             ProvaDigital.cliente,
             ProvaDigital.status,
@@ -1567,10 +1946,12 @@ async def _stream_proofs(
         [
             "prova_id",
             "nro_requerimento",
+            "codigo_publico",
             "nome",
             "cliente",
             "status",
             "rota",
+            "contexto_motorista",
             "ciclo_atual",
             "vendedor_nome",
             "localizacao",
@@ -1591,10 +1972,12 @@ async def _stream_proofs(
             [
                 str(row.id),
                 row.nro_requerimento,
+                row.codigo_publico or "",
                 row.nome,
                 row.cliente,
                 row.status.value,
                 row.rota.value if row.rota else "",
+                _contexto_motorista_csv(row.status),
                 str(row.ciclo_atual),
                 row.vendedor_nome,
                 row.localizacao.value if row.localizacao else "",
