@@ -7024,3 +7024,69 @@ atual sem o tachado. AUD-W3C12-006 fica rebaixado para INFO.
 
 
 
+
+---
+
+## ADR-162 — Wave 5 v4.0 / C16: preservar layout v3 exatamente; adaptacoes das 11 decisoes de design
+**Data:** 2026-05-13
+**Componente:** Wave 5 v4.0 / Componente 16 — Relatorios Gerenciais com Distribuicao por Rota
+**Contexto:** Apos analise read-only (Gate 1) propondo as 11 decisoes de design e ASCII wireframes
+para a v4.0, o Mario autorizou: "Vamos seguir sua recomendacao, desde que nao altere nada no layout
+que temos hoje em dia." Esta restricao define a forma de execucao: zero mudancas visuais perceptiveis
+ao usuario; semantica interna expandida; dados aditivos no backend.
+
+**Decisao:** Preservar o layout v3 *exatamente* (mesmas posicoes, mesmos tamanhos, mesmos elementos
+visiveis); estender backend aditivamente; adaptar frontend internamente sem novos elementos visiveis.
+
+**Mapeamento das 11 decisoes:**
+
+| # | Aprovada (Gate 1) | Adaptacao Gate 2 |
+|---|---|---|
+| D1 | (i) tabs preservadas | Sem Linha 3 nova (Tempo Medio por Etapa NAO entregue como UI) |
+| D2 | (ii) Donut compacto | Donut completo NAO renderizado; backend expoe `distribuicao_rota_v4` via API/CSV |
+| D3 | (i) Categoria Legacy | Backend popula `consolidacao_rota` agregando v4.0 + legacy + NULL (heuristica C12 D11.2); UI continua 2 dots |
+| D4 | Todos os 6 filtros | Apenas `rota_categoria` exposto na UI (substitui `rota` no RotaFilter); Contexto Motorista NAO exposto |
+| D5 | (iii) Atalhos + customizado | Sem mudanca |
+| D6 | UTF-8 BOM + virgula | Preservado; colunas aditivas em proofs/overdue/summary |
+| D7 | (iii) Ambos | Ajustado para (ii) puro: tabela sr-only permanente; sem toggle visivel |
+| D8 | (ii) Proxy via metades | Preservado |
+| D9 | (ii) Cache TTL 60s | Preservado |
+| D10 | (i) Endpoint unico | Preservado; novos campos aditivos no schema |
+| D11 | (i) Manter 403 | Preservado |
+
+**Alternativas rejeitadas:**
+- Renderizar Linha 3 com Tempo Medio por Etapa: violaria a restricao do Mario. Adiada para Wave 6
+  quando o operacional pedir o indicador explicitamente.
+- Renderizar Donut completo com 5 segmentos no card ROTA: substituiria o visual v3 (2 dots) por
+  uma nova visualizacao. Violacao direta da restricao. Backend expoe os 9 segmentos via
+  `distribuicao_rota_v4` para consumo programatico (CSV, futuros relatorios).
+- Adicionar filtro Contexto Motorista na FiltersBar: novo elemento visivel. Backend aceita o
+  filtro via query param para consumo programatico mas frontend nao expoe ate decisao explicita.
+- Implementar toggle Grafico/Tabela visivel (D7-i): adicionaria botoes no canto de cada card de
+  grafico. Substituido pela tabela sr-only permanente (D7-ii) que preserva o layout exato.
+
+**Consequencias:**
+- A v4.0 dos relatorios cobre as 4 rotas v4.0 + legacy v3.0 + provas legacy NULL de forma
+  **semanticamente correta** sem alterar o que o usuario ve.
+- Backend devolve campos aditivos suficientes para que futuras iteracoes (Wave 6+) construam
+  os elementos visuais que ficaram fora desta wave (Donut, Tempo por Etapa, Contexto Motorista).
+- A11y melhora (tabela sr-only permanente) sem custo visual.
+- Bundle `/relatorios` aumenta de 11.4 kB para 17.9 kB (+6.5 kB) — overhead aceitavel.
+- `useReportFilters` agora aceita os 17 valores de `StatusProva` (era 10), corrigindo bug
+  silencioso onde `?status=COM_MOTORISTA_IDA_LAMINACAO` na URL era zerado.
+- Trade-off explicito: a wave **nao entrega** todo o escopo proposto no Gate 1 (Linha 3,
+  Donut, Filtro Contexto, Toggle). A entrega cobre o que o backend precisa para a v4.0 e o
+  que o frontend pode fazer SEM alterar layout. Futuras waves podem expor visualmente quando
+  o operacional confirmar a necessidade.
+
+**Como aplicar (referencia para auditoria):**
+- Card ROTA em `ReportGeral.tsx` consome `data.consolidacao_rota?.matriz/filial` com fallback
+  para `distribuicao_rota` legacy — preserva render para clientes com cache antigo.
+- `RotaFilter.tsx` opera sobre `RotaCategoria` (matriz/filial); URL emite `rota_categoria=`
+  em vez de `rota=`.
+- Backend `_aggregate_clicheria` consolida v4.0 nos campos legacy `via_padrao`/`via_direta`
+  sem novos campos no schema — frontend ReportClicheria nao precisa mudar.
+- Tabela `<table class="srOnly">` permanente no DonutChart; `<details>` interno preservado
+  com `aria-hidden="true"`.
+
+**Documento:** `docs/wave5-v4-c16/analysis.md` (Gate 1 + Apendice A).
