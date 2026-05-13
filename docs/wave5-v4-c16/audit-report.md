@@ -691,7 +691,7 @@ A recomendação do auditor é **(a) — Aprovar com correções**.
 | AUD-W5C16-012 | BAIXO | ✅ ACEITO (INFO de revisão) | n/a | `to_cache_key` inclui `scope` corretamente — auditor declarou sem ação. Confirmado. |
 | AUD-W5C16-013 | BAIXO | ✅ ACEITO (padrão Pydantic v2) | n/a | `_defaults_and_invariants` usa `object.__setattr__` — padrão para `frozen=True` Pydantic v2. Confirmado. |
 | AUD-W5C16-014 | INFO | ✅ ACEITO | n/a | Vitest cobertura: 42 testes via `it.each` — CHANGELOG correto. Confirmado. Após AUD-006, módulo `_useReportFilters.parsers.ts` testado diretamente — mesma cobertura efetiva. |
-| AUD-W5C16-015 | INFO | ✅ ACEITO + atualizado | n/a | Backend pytest: 1027 + 10 skipped pós-C16 originalmente. Pós-Audit Fixes: **1034 + 10 skipped** (era 1027 + 7 novos: 1 AUD-004 + 4 AUD-010 + 3 AUD-011 - 1 duplicado = 7). Vide validação na §"Rodar validation". |
+| AUD-W5C16-015 | INFO | ✅ ACEITO + atualizado | n/a | Backend pytest: 1027 + 10 skipped pós-C16 originalmente. Pós-Audit Fixes: **1035 + 10 skipped** (era 1027 + 8 novos: 1 AUD-004 + 4 AUD-010 + 3 AUD-011). Vide validação na §"Rodar validation". |
 | AUD-W5C16-016 | INFO | ✅ ACEITO | n/a | RBAC herdado de `test_reports_api.py` (Wave 5 v3, intocado): 5 cenários 403 cobertos. Confirmado. |
 | AUD-W5C16-017 | INFO | ✅ ACEITO (apêndice em ADR-162) | n/a (registro em DECISIONS.md) | Anti-enumeração 403 (não 404 byte-a-byte) é decisão consciente D11→i registrada em ADR-162. Mario aprovou explicitamente em 5 razões. Apêndice pós-auditoria adicionado ao ADR-162 reafirma posição. Sem código tocado. Follow-up para Wave 6+ se Mario quiser migrar Matriz inteira para 404 byte-a-byte (afeta 11 chaves de RBAC, não apenas `relatorios`). |
 

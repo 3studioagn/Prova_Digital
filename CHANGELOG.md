@@ -36,7 +36,7 @@
 
 ### Validação interna
 
-- **Backend pytest:** **1034 passed + 10 skipped** (era 1027 pós-C16; +7 novos: 1 AUD-004 + 4 AUD-010 + 3 AUD-011; -1 duplicado).
+- **Backend pytest:** **1035 passed + 10 skipped** (era 1027 pós-C16; +8 novos: 1 AUD-004 + 4 AUD-010 + 3 AUD-011).
 - **Frontend Vitest:** **205 passed** (sem regressão; testes do AUD-006 exercem código real do módulo extraído).
 - **`tsc --noEmit`:** exit 0.
 - **`next build`:** 13/13 páginas.

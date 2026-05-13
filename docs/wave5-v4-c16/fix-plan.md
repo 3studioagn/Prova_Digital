@@ -716,14 +716,52 @@ Auditor estimou **~90 min** para os 3 ALTOS sozinhos; estimativa total inclui M�
 
 ---
 
-## 14. Resultado da Execução (placeholder para Gate 2)
+## 14. Resultado da Execução (preenchido no Gate 2 — 2026-05-13)
 
-> Esta seção será preenchida no Gate 2 com:
-> - Lista linear de commits criados (SHA · título · ID do achado).
-> - Diffs entre planejado e realizado (mudanças de estratégia em vôo, justificadas).
-> - Itens da validação interna (§9) com status final.
-> - Achados que se revelaram não-corrigíveis durante a execução (espera-se: nenhum).
+### 14.1 Lista linear de commits
+
+| Ordem | Commit SHA | Tipo | Título | ID achado |
+|---:|---|---|---|---|
+| 0 | `398a125` | docs | `docs(wave5-v4/c16/fixes): plano de correção pós-auditoria` | n/a (Gate 1) |
+| 1 | `605939a` | a11y | `a11y(wave5-v4/c16/AUD-003): mover aria-hidden de <details> para <table>` | AUD-W5C16-003 |
+| 2 | `cbe51d5` | refactor | `refactor(wave5-v4/c16/AUD-004): derivar _CONTEXTO_MOTORISTA_STATUSES da fonte canonica` | AUD-W5C16-004 |
+| 3 | `44aaa4c` | refactor | `refactor(wave5-v4/c16/AUD-006): extrair parsers de useReportFilters` | AUD-W5C16-006 |
+| 4 | `36269f3` | style | `style(wave5-v4/c16/AUD-007+008): renomear .rotaDotPadrao/Direta -> .rotaDotMatriz/Filial` | AUD-W5C16-007 + 008 |
+| 5 | `fb469b0` | a11y | `a11y(wave5-v4/c16/AUD-005): prefers-reduced-motion no relatorios.module.css` | AUD-W5C16-005 |
+| 6 | `f3afc43` | test | `test(wave5-v4/c16/AUD-010): cobertura para legacy_null_indefinida` | AUD-W5C16-010 |
+| 7 | `43dee6c` | fix | `fix(wave5-v4/c16/AUD-011): CSV consolidacao_rota_indefinida sempre emitido` | AUD-W5C16-011 |
+| 8 | `5315edf` | docs | `docs(wave5-v4/c16/AUD-001): criar visual-guide.md stub estruturado` | AUD-W5C16-001 |
+| 9 | `d3d9599` | docs | `docs(wave5-v4/c16/AUD-002): smoke-validation +3 cenarios de borda` | AUD-W5C16-002 |
+| 10 | `1310b24` | docs | `docs(wave5-v4/c16/fixes): CHANGELOG + DECISIONS (apendices ADR-162) + CLAUDE + audit-report (apendice)` | AUD-012/013/014/015/016/017 + acumulativo |
+
+**Total: 11 commits (1 Gate 1 + 10 Gate 2).**
+
+### 14.2 Diffs entre planejado e realizado
+
+| Item planejado | Realizado | Comentário |
+|---|---|---|
+| Ordem topológica §7 do plano | Levemente reordenada: AUD-005 movido para depois de AUD-007+008 | Sem impacto. AUD-005 e AUD-007+008 tocam o mesmo arquivo `relatorios.module.css` em seções diferentes; ordem invertida evitou conflito mental de contexto. |
+| AUD-006 — estratégia | Aplicada conforme plano (extração para `_useReportFilters.parsers.ts` + import direto nos testes) | Sem desvio. |
+| AUD-007+008 — renomear `.rotaDot*` | Aplicada conforme plano (renomeação completa + comentário documentando mapeamento histórico) | Sem desvio. Grep pós-rename confirma 0 ocorrências fora do comentário. |
+| AUD-010 — teste com fixture real | Substituído por testes unitários do schema + replicação da fórmula (`null_indef = null_total - null_matriz - null_filial`) | Justificativa: fixture com `vendedor.localizacao=NULL` exigiria DB real (10 testes integrados skipped por falta de `INTEGRATION_DATABASE_URL`). Teste unitário cobre invariante matemática + schema Pydantic + categoria Literal — equivalente epistêmico sem custo de infra. |
+| AUD-011 — teste do CSV | Aplicado conforme plano + helper `_payload_com_indefinida` usa `model_copy(update={...})` por causa de `frozen=True` (descoberto em runtime) | Pequeno ajuste de implementação detectado durante execução (atribuição direta em modelo frozen falha) — sem impacto no escopo. |
+| AUD-009 — aceitar sem código | Realizado: nenhum touch + registro no apêndice do audit-report | Conforme plano. |
+| AUD-001 — visual-guide.md mínimo | Realizado com 7 seções (era proposto 4 no plano) | Expansão para alinhar com padrão da Wave 3 C12 (8 seções). Sem desvio de escopo. |
+| AUD-002 — 3 cenários no smoke | Realizado conforme plano (#21/#22/#23) | Sem desvio. |
+| AUD-012/013/014/015/016/017 — apêndices | Realizados em commit acumulativo `1310b24` (CHANGELOG + DECISIONS + CLAUDE + audit-report) | Sem desvio. Decisão D11→i reafirmada via Apêndice 2 ao ADR-162 (em vez de novo ADR-163, simplificação registrada). |
+| Contagem backend pytest | Plano previa 1029, realizado 1035 | Diferença: o plano estimou conservadoramente; 4 testes do AUD-010 + 3 do AUD-011 + 1 do AUD-004 = 8 (não 2). CHANGELOG/audit-report/CLAUDE atualizados para 1035. |
+| Bundle `/relatorios` | Plano previa "manter ~17.9 kB" / 220 kB; realizado 18 kB / 220 kB | +0.1 kB Size irrisório justificado pelo @media + comentário expandido. |
+
+### 14.3 Achados que se revelaram não-corrigíveis durante a execução
+
+**NENHUM.** Todos os 12 corrigíveis foram aplicados sem precisar reclassificar para DEFERRED. Nenhum bloqueio por divergência. Nenhuma nova escalação humana.
+
+### 14.4 Status final dos 17 IDs
+
+Ver tabela completa em `docs/wave5-v4-c16/fix-validation.md` §2.
+
+**Resumo:** 12 RESOLVIDOS · 5 ACEITOS sem código · 0 DEFERRED · 0 BLOQUEADOS · 0 nova escalação humana.
 
 ---
 
-**Fim do `fix-plan.md`.** Aguardando autorização Gate 2 para iniciar execução.
+**Fim do `fix-plan.md`.** Sessão de correção encerrada com `fix-validation.md`. Aguardando smoke E2E do Mario + nova auditoria sênior independente antes de merge para `development`.
