@@ -68,9 +68,13 @@ def pode_cancelar(status_atual: StatusProvaEnum) -> bool:
       - RECEBIDA_PELA_CLICHERIA (terminal sucesso)
       - CANCELADA (terminal cancelamento)
 
-    Os outros 15 valores do enum (10 v3.0 + 5 v4.0 ativos) sao todos
-    cancelaveis. Funciona identicamente para provas v3.0 e v4.0 — o
-    cancelamento eh transversal (ver §5.6 do Requisitos).
+    Decomposicao do enum (17 valores totais = 10 v3.0 + 7 v4.0):
+      - 8 v3.0 ativos (10 v3.0 - 2 terminais RECEBIDA + CANCELADA)
+      - 7 v4.0 ativos (todos os v4.0 sao nao-terminais)
+      = 15 ativos cancelaveis.
+
+    Funciona identicamente para provas v3.0 e v4.0 — o cancelamento eh
+    transversal (ver §5.6 do Requisitos).
     """
     return status_atual not in TERMINAIS_V4
 
