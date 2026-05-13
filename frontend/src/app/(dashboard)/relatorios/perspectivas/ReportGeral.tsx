@@ -159,10 +159,22 @@ export function ReportGeral({ data, statusFilter, onStatusClick }: Props) {
 
   // ─── Dados derivados ────────────────────────────────────────────────
 
-  const padraoCount =
-    data.distribuicao_rota.find((d) => d.rota === "PADRAO")?.quantidade ?? 0;
-  const diretaCount =
-    data.distribuicao_rota.find((d) => d.rota === "DIRETA")?.quantidade ?? 0;
+  // Wave 5 v4.0 (Componente 16): card ROTA passa a usar `consolidacao_rota`
+  // (campo novo aditivo do backend) que agrupa as 6 rotas + provas legacy
+  // NULL em 2 baldes — matriz e filial. Preserva o layout v3 (2 dots:
+  // Padrao -> Matriz, Direta -> Filial) com semantica v4.0 completa.
+  //
+  // Fallback para `distribuicao_rota` legacy: se o payload nao trouxer
+  // `consolidacao_rota` (cache antigo ou cliente desatualizado), conta
+  // PADRAO/DIRETA da lista v3 para nao quebrar a UI.
+  const matrizCount =
+    data.consolidacao_rota?.matriz ??
+    data.distribuicao_rota.find((d) => d.rota === "PADRAO")?.quantidade ??
+    0;
+  const filialCount =
+    data.consolidacao_rota?.filial ??
+    data.distribuicao_rota.find((d) => d.rota === "DIRETA")?.quantidade ??
+    0;
 
   // Donut "Provas Ativas": filtra status nao-terminal e aplica cor por status.
   const ativosData = useMemo(
@@ -331,16 +343,16 @@ export function ReportGeral({ data, statusFilter, onStatusClick }: Props) {
                 className={`${styles.rotaDot} ${styles.rotaDotPadrao}`}
                 aria-hidden="true"
               />
-              <span className={styles.rotaLegendLabel}>Padrao</span>
-              <span className={styles.rotaLegendValue}>{padraoCount}</span>
+              <span className={styles.rotaLegendLabel}>Matriz</span>
+              <span className={styles.rotaLegendValue}>{matrizCount}</span>
             </li>
             <li className={styles.rotaLegendItem}>
               <span
                 className={`${styles.rotaDot} ${styles.rotaDotDireta}`}
                 aria-hidden="true"
               />
-              <span className={styles.rotaLegendLabel}>Direta</span>
-              <span className={styles.rotaLegendValue}>{diretaCount}</span>
+              <span className={styles.rotaLegendLabel}>Filial</span>
+              <span className={styles.rotaLegendValue}>{filialCount}</span>
             </li>
           </ul>
         </motion.div>

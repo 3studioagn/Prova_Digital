@@ -327,11 +327,40 @@ export function DonutChart({
         </div>
       )}
 
-      {/* Tabela acessivel */}
-      <details className={styles.chartDetails}>
+      {/* Tabela acessivel — permanente sr-only (Wave 5 v4.0 / D7→Opcao (iii)).
+       *
+       * Leitor de tela acessa imediatamente sem precisar interagir com o
+       * <details>. Layout v3 visualmente preservado (zero pixels novos).
+       *
+       * O <details> abaixo permanece como toggle visivel ao usuario vidente
+       * (estado v3); seu conteudo interno e marcado `aria-hidden="true"`
+       * para evitar duplicacao na leitura por AT (NVDA/JAWS/VoiceOver). */}
+      <table className={styles.srOnly} aria-label={ariaLabel}>
+        <caption>{ariaLabel}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Categoria</th>
+            <th scope="col">Quantidade</th>
+            <th scope="col">Percentual</th>
+          </tr>
+        </thead>
+        <tbody>
+          {segments.map((seg) => (
+            <tr key={`sr-${seg.item.key}`}>
+              <td>{seg.item.label}</td>
+              <td>{formatValue(seg.item.value)}</td>
+              <td>{(seg.pct * 100).toFixed(1)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Tabela visivel sob <details> — preservada da v3 para usuario
+       * vidente que queira inspecionar valores exatos sem hover. Marcada
+       * aria-hidden="true" para nao duplicar com a tabela sr-only acima. */}
+      <details className={styles.chartDetails} aria-hidden="true">
         <summary>Ver dados em formato tabular</summary>
         <table className={styles.chartTable}>
-          <caption className={styles.srOnly}>{ariaLabel}</caption>
           <thead>
             <tr>
               <th scope="col">Categoria</th>

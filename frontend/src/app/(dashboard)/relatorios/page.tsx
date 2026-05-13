@@ -224,8 +224,8 @@ function RelatoriosContent() {
           getToken={getToken}
         />
         <RotaFilter
-          value={filters.rota ?? null}
-          onChange={(rota) => setFilter("rota", rota)}
+          value={filters.rota_categoria ?? null}
+          onChange={(categoria) => setFilter("rota_categoria", categoria)}
         />
       </section>
 
