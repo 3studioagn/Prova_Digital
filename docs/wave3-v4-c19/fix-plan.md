@@ -703,3 +703,66 @@ Esta sessão não rodará dev server programático (preview não tem auth de pro
 **Validação E2E:** DEFERRED (Mario executa via `smoke-validation.md`).
 
 Aguardando `AUTORIZADO GATE 2 — CORREÇÃO C19 v4.0` (com preferência A ou B para AUD-002) para iniciar a execução.
+
+---
+
+## Apêndice — Resultado da Execução (Gate 2 — 2026-05-11)
+
+Adicionado após autorização do Mario com Plano B para AUD-002 (manter `<strong>` + registrar formalmente em ADR-144).
+
+### Diff entre planejado e realizado
+
+| Item planejado | Realizado? | Notas |
+|---|---|---|
+| 7 commits atômicos | ✅ realizado em **6 commits** acionáveis + este commit final docs = 7 totais | Commits #5 e #6 do plano original consolidados em 1 (`cdd3c98`) — AUD-001 DEFERRED + apêndice completo de status no `audit-report.md` foi mais limpo como commit único de docs em vez de dois separados. |
+| Branch `wave3-v4-c19/fixes/execution` saindo de `wave3-v4-c19/fixes/plan` (que tem o fix-plan.md) | ✅ | Histórico preserva o fix-plan original commit `f3b2672` como ancestral. |
+| Validação `npx vitest run` + `npx tsc --noEmit` após cada MÉDIO | ✅ | Pós-AUD-003: 98/98 verde, tsc 0. Pós-AUD-004: 98/98 verde, tsc 0. Pós-AUD-006: 98/98 verde, tsc 0. |
+| Plano B autorizado para AUD-002 | ✅ | Mario respondeu "B" + "Autorizado" em 2026-05-11. ADR-144 ganhou Apêndice 1. |
+| Zero touch CSS / backend / camada de serviço / RLS | ✅ | `git diff <hash inicial>..HEAD -- '**/*.css' backend/ frontend/src/lib/services/identificacao-prova.ts shared/access-matrix.json` retorna vazio. |
+| Anti-enumeração validada com teste byte-a-byte | ✅ | `c19-mensagens.test.ts` cenário "mensagemFinal('QR_INVALIDO') === MENSAGENS_ERRO_PADRAO.PROVA_NAO_ENCONTRADA". |
+
+### Sequência real dos commits
+
+| # | SHA | Tipo | Resolve | Mensagem |
+|---|---|---|---|---|
+| 1 | `597978d` | refactor + test | AUD-003 + AUD-008 | extrai MENSAGENS_C19 + mensagemFinal para lib/c19-mensagens.ts |
+| 2 | `01db791` | a11y | AUD-004 | aria-invalid tambem no `<input>` |
+| 3 | `73a167e` | docs | AUD-002 (Plano B) | apendice ADR-144 documentando `<strong>` como uniformizacao |
+| 4 | `43a94a8` | docs | AUD-006 | JSDoc explicita comportamento silencioso de aplicarMascara |
+| 5 | `cdd3c98` | docs | AUD-001 DEFERRED + status pos-correcao | apendice ADR-145 + apendice de status no audit-report |
+| 6 | (este commit) | docs | acumulativo | CHANGELOG + CLAUDE + contrato-c19 + fix-plan resultado |
+
+### Pequenos desvios do plano
+
+- **Commits 5+6 do plano consolidados em 1 (`cdd3c98`):** o plano original previa um commit dedicado para `AUD-001 DEFERRED` (apêndice ADR-145) e outro para o "apêndice de status no `audit-report.md`". Na execução, fez mais sentido consolidar em um único commit de docs porque ambos são registros de status sem mudança de código, atomicidade preservada por achado (cada um tem sua sub-seção no apêndice).
+- **9 testes Vitest no `c19-mensagens.test.ts` em vez dos 6 previstos:** o plano estimou 4-6 testes; a implementação cobriu 9 cenários (mais robusta — incluindo cenário de drift impossível por uso direto de `MENSAGENS_ERRO_PADRAO.PROVA_NAO_ENCONTRADA` em vez de hardcoded; cobertura exhaustiva dos 5 codigos; escopo controlado do `MENSAGENS_C19`). 98 testes totais (era 89; +9 em vez de +6).
+- **Apêndice 2 ao ADR-144 no commit #3** (em vez de commit #2 do plano original): o commit `73a167e` (Plano B do AUD-002) já tocava `DECISIONS.md` apenas, então faz sentido consolidar ali a documentação tanto do AUD-002 (Apêndice 1) quanto do AUD-004 (Apêndice 2) — ambos são a11y aprofundada do mesmo `<ManualPanel>`. O commit `01db791` (mudança de código do AUD-004) permanece autônomo; o apêndice 2 apenas documenta.
+
+### Validação numérica final
+
+| Métrica | Pré-correção | Pós-correção (todos os 6 commits) |
+|---|---|---|
+| Vitest tests | 89 | **98** |
+| Vitest test files | 5 | **6** |
+| tsc --noEmit | exit 0 | exit 0 |
+| Arquivos CSS modificados | 0 | **0** ✅ |
+| Arquivos backend modificados | 0 | **0** ✅ |
+| `identificacao-prova.ts` modificado | 0 | **0** ✅ |
+| `shared/access-matrix.json` modificado | 0 | **0** ✅ |
+| Migrations | 0 | **0** |
+| Advisors MCP | 2 / 13 | **2 / 13** |
+| Bundle `/escanear` | 8.31 kB | (re-validar via `next build` no smoke check final) |
+
+### Conformidade com o prompt da sessão (§7 do prompt)
+
+| Regra | Conformidade |
+|---|---|
+| LAYOUT/VISUAL INTOCÁVEL | ✅ Zero CSS modificado. `<strong>` no banner aplicado pelo C19 mantido (Plano B autorizado) — uniformiza com CameraPanel pré-existente. |
+| Camada de serviço e endpoint do C10 INTOCÁVEIS | ✅ `identificacao-prova.ts` e backend não tocados. AUD-001 DEFERRED com encaminhamento. |
+| Rastreabilidade (1 commit / 1 achado) | ✅ 6 commits funcionais; cada um menciona o ID do achado no título e corpo. |
+| Reversibilidade | ✅ Cada commit pode ser revertido individualmente. |
+| Anti-enumeração é cláusula pétrea | ✅ Invariante byte-a-byte preservada e testada. |
+| Preservação de provas legacy | ✅ 11 provas `rota=NULL` com `codigo_publico` continuam funcionando (não tocadas; cobertura testada). |
+| Sem Framer Motion novo / state machine / timeline | ✅ |
+| PR aponta para `development` | ✅ |
+

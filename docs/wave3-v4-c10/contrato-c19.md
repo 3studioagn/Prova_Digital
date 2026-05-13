@@ -202,7 +202,7 @@ A camada de servico ja tem 16 testes em
 
 ---
 
-### 3.5 Customizando mensagens no C19 (AUD-W3C10-020)
+### 3.5 Customizando mensagens no C19 (AUD-W3C10-020 + AUD-W3C19-003)
 
 A camada de servico ja resolve a mensagem em pt-BR via
 `result.mensagem`. O C19 pode usar diretamente:
@@ -214,37 +214,53 @@ if (resultado.tipo === "erro") {
 }
 ```
 
-Para **sobrescrever** mensagens (e.g. mensagem mais detalhada para
-o caso `PROVA_NAO_ENCONTRADA` quando o regex client-side ja confirmou
-formato OK):
+**Implementacao real entregue pelo C19** (refatorada pos-auditoria
+em 2026-05-11 — AUD-W3C19-003): a override do C19 e
+`MENSAGENS_C19` + `mensagemFinal` vivem em modulo standalone
+`frontend/src/lib/c19-mensagens.ts` (extraidos de `page.tsx` para
+permitir teste de integracao da invariante anti-enumeracao
+byte-a-byte). O `page.tsx` apenas importa:
 
 ```tsx
+// page.tsx
+import { mensagemFinal } from "@/lib/c19-mensagens";
+
+// lib/c19-mensagens.ts
 import {
-  identificarProvaPorCodigo,
-  mensagemPara,           // helper que retorna a mensagem padrao
-  MENSAGENS_ERRO_PADRAO,  // record completo, se quiser iterar
+  mensagemPara,
+  MENSAGENS_ERRO_PADRAO,
   type CodigoErro,
 } from "@/lib/services/identificacao-prova";
 
-const MENSAGENS_C19: Partial<Record<CodigoErro, string>> = {
-  PROVA_NAO_ENCONTRADA:
-    "Codigo nao encontrado. Confira na etiqueta — formato PRV-AAAA-MM-NNNNNN.",
+export const MENSAGENS_C19: Partial<Record<CodigoErro, string>> = {
+  // Anti-enumeracao em camada UI — aponta direto para a string
+  // padrao do C10 para eliminar drift potencial.
+  QR_INVALIDO: MENSAGENS_ERRO_PADRAO.PROVA_NAO_ENCONTRADA,
 };
 
-function mensagemFinal(codigo: CodigoErro): string {
-  // Fallback para mensagem padrao se C19 nao customizou.
+export function mensagemFinal(codigo: CodigoErro): string {
   return MENSAGENS_C19[codigo] ?? mensagemPara(codigo);
 }
 ```
 
+**Invariante critica** (teste em `__tests__/c19-mensagens.test.ts`,
+9 testes Vitest):
+
+```
+mensagemFinal("QR_INVALIDO") === MENSAGENS_ERRO_PADRAO.PROVA_NAO_ENCONTRADA
+```
+
+Quebrar essa igualdade reintroduz vetor de enumeracao DAT §8.2.
+
 **Importante:**
 
 - O C19 NAO precisa modificar `identificacao-prova.ts`. A logica de
-  apresentacao fica encapsulada na camada do C19.
+  apresentacao fica encapsulada em `c19-mensagens.ts`.
 - Manter as **mesmas decisoes de anti-enumeracao** ao sobrescrever:
-  `PROVA_NAO_ENCONTRADA` continua sendo a mesma resposta para
-  "formato invalido", "inexistente" e "fora do scope". C19 nao deve
-  distinguir esses 3 casos para o usuario.
+  `QR_INVALIDO` (client-side OU 422 backend) usa identica mensagem
+  do `PROVA_NAO_ENCONTRADA` (404 generico para 3 cenarios distintos:
+  inexistente, fora do scope, formato invalido). C19 nao deve
+  distinguir esses casos para o usuario.
 - Se C19 adicionar codigo novo (ex.: `RATE_LIMITED`), estender
   `CodigoErro` na camada de servico (PR no `identificacao-prova.ts`)
   + adicionar entrada em `MENSAGENS_ERRO_PADRAO` (TypeScript barra

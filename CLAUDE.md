@@ -225,6 +225,7 @@ provaDigital/
 │       ├── lib/
 │       │   ├── api.ts           # apiFetch wrapper (token injection, ApiError). Nao usar p/ binarios
 │       │   ├── codigo-publico.ts  # Wave 3 v4.0 C19 — regex/mascara/alfabeto sem 0/O/1/I/L (paridade backend; 43 testes Vitest)
+│       │   ├── c19-mensagens.ts   # Wave 3 v4.0 C19 (AUD-W3C19-003 pos-auditoria) — MENSAGENS_C19 + mensagemFinal extraidos de page.tsx para teste isolado da invariante anti-enumeracao byte-a-byte (9 testes Vitest)
 │       │   ├── types/
 │       │   │   ├── prova.ts     # Wave 2 C06-C08 — tipos completos + STATUS_LABELS + ROTA_LABELS
 │       │   │   ├── usuario.ts   # Wave 2 — tipos TS espelho de schemas/user.py
@@ -619,14 +620,26 @@ backend, etc.).
 - **Anti-enumeracao em UI** (ADR-143): `QR_INVALIDO` (validacao
   client-side OU 422 backend) e uniformizado para
   `"Prova nao encontrada."` via `MENSAGENS_C19` + `mensagemFinal`
-  em `page.tsx`. Identica ao 404 generico do backend — preserva
-  DAT v3.0 §8.2.
+  em `frontend/src/lib/c19-mensagens.ts` (extraidos de `page.tsx`
+  na sessao de correcao pos-auditoria 2026-05-11, AUD-W3C19-003).
+  Identica ao 404 generico do backend — preserva DAT v3.0 §8.2.
+  Invariante critica garantida por 9 testes Vitest em
+  `__tests__/c19-mensagens.test.ts` (paridade byte-a-byte).
 - **Foco automatico** no `<input>` ao mount do `<ManualPanel>`
   (ADR-144) — `useRef` + `useEffect([])`. Dispara em cada troca para
   tab Manual via `AnimatePresence mode="wait"`.
-- **a11y aprofundada** (ADR-144): label sr-only estendida; hint
-  sr-only adicional (`#manual-hint`); `aria-describedby` dinamico
-  apontando para `#manual-error` ou `#manual-hint`.
+- **a11y aprofundada** (ADR-144 + Apendices 1+2 pos-auditoria):
+  - Label sr-only estendida ("Codigo da prova no formato PRV-AAAA-MM-NNNNNN").
+  - Hint sr-only adicional (`#manual-hint`).
+  - `aria-describedby` dinamico apontando para `#manual-error` ou
+    `#manual-hint`.
+  - `aria-invalid` no `<input>` **e** no `<div>` wrapper
+    (AUD-W3C19-004 pos-auditoria — wrapper preservado por causa da
+    regra CSS `.manualInputWrapper[aria-invalid="true"]`).
+  - `<strong>{state.mensagem}</strong>` no banner com `role="alert"`
+    (AUD-W3C19-002 Plano B — uniformizado com CameraPanel
+    pre-existente do C10; regra CSS `.errorBanner strong` ja vinha
+    de `development`).
 - **Botao "Tentar novamente"** no estado `ERRO_REDE` — reseta
   `manualState` sem mexer no codigo digitado.
 - **Estado preservado** ao alternar para tab Camera — `codigoInput`

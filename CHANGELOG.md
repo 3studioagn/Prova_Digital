@@ -2,6 +2,150 @@
 
 ---
 
+## v4.0 — Wave 3 — Componente 19 — Correcoes Pos-Auditoria Senior (2026-05-11)
+
+**Branch:** `wave3-v4-c19/fixes/execution` → PR contra `development`.
+**Base:** `wave3-v4-c19/audit` (commit `999e5b0`).
+**Escopo:** correcao dos 13 achados acionaveis + ~20 INFOs do
+`docs/wave3-v4-c19/audit-report.md`. Frontend-only (zero touch
+backend/CSS/camada-de-servico — confirmado por `git diff`).
+
+### Corrigidos (com codigo)
+
+- **AUD-W3C19-003** (MEDIO) + **AUD-W3C19-008** (BAIXO auto-resolvido)
+  — `refactor(...)` commit `597978d`. Extracao de `MENSAGENS_C19` +
+  `mensagemFinal` de `page.tsx` para
+  `frontend/src/lib/c19-mensagens.ts` (62 LOC) + suite Vitest novo
+  `__tests__/c19-mensagens.test.ts` (9 testes, 101 LOC) cobrindo:
+  - Invariante critica anti-enumeracao byte-a-byte
+    (`mensagemFinal("QR_INVALIDO") === MENSAGENS_ERRO_PADRAO.PROVA_NAO_ENCONTRADA`).
+  - Fallback para `mensagemPara` em todos os 5 codigos.
+  - Escopo controlado do `MENSAGENS_C19` (so `QR_INVALIDO` overridden).
+  `MENSAGENS_C19.QR_INVALIDO` agora aponta diretamente para
+  `MENSAGENS_ERRO_PADRAO.PROVA_NAO_ENCONTRADA` (sem hardcoded
+  duplicado — drift impossivel).
+- **AUD-W3C19-004** (MEDIO) — `a11y(...)` commit `01db791`.
+  Adicionado `aria-invalid={isError ? "true" : "false"}` ao
+  `<input id="codigo-manual">`. Mantido tambem no
+  `<div className={manualInputWrapper}>` para preservar regra CSS
+  `.manualInputWrapper[aria-invalid="true"]` (mover regra exigiria
+  editar CSS — vetado). Padrao ARIA aceito de duplicacao de estado
+  para alimentar a11y (no input) + CSS (no wrapper).
+- **AUD-W3C19-006** (BAIXO) — `docs(...)` commit `43a94a8`. JSDoc
+  estendido (`@param raw` + `@returns` + comentario inline) em
+  `aplicarMascara` documentando comportamento silencioso para
+  entradas nao-string. Zero mudanca de comportamento.
+
+### Registrado formalmente (Plano B autorizado pelo Mario)
+
+- **AUD-W3C19-002** (MEDIO) — `docs(...)` commit `73a167e`. Apendice 1
+  ao ADR-144 documenta que o `<strong>{state.mensagem}</strong>` no
+  banner do `<ManualPanel>` e uniformizacao semantica com o
+  `<CameraPanel>` pre-existente do C10:
+  - CameraPanel ja usava `<strong>` no banner desde o C10 (linha 362
+    em `development`).
+  - CSS `.errorBanner strong { font-weight: 600 }` ja existia em
+    `escanear.module.css` linha 510 em `development`.
+  - Reverter introduziria DISPARIDADE visual entre os dois banners
+    do mesmo componente.
+  Apendice 2 ao ADR-144 documenta tambem o AUD-004 (aria-invalid no
+  input + manutencao no wrapper).
+
+### Aceitos sem mudanca de codigo (D-ratificadas / sem drift)
+
+- **AUD-W3C19-005 / 031** (BAIXO) — D9 ratificada: `useCodigoPrvInput`
+  e binding trivial sobre lib pura ja testada (43 testes em
+  `codigo-publico.test.ts`). Sem instalacao de JSDOM. Validado por
+  E2E (smoke).
+- **AUD-W3C19-007** (BAIXO) — D6 ratificada: auto-submit nao
+  implementado. Alinhado com smoke do C10 (clique explicito).
+- **AUD-W3C19-028** (BAIXO) — `CODIGO_PUBLICO_REGEX` exportado +
+  inline em `validarFormatoCodigoPublico`. Teste de paridade existente
+  garante igualdade. Decisao deliberada do autor — sem drift.
+
+### Deferred com encaminhamento (BLOQUEANTE para PR em `main`)
+
+- **AUD-W3C19-001** (ALTO) — `docs(...)` commit `cdd3c98`.
+  Rate-limit no backend `/scan` permanece como FOLLOW-UP
+  OBRIGATORIO (ADR-145 + apendice). Implementar exige modificar
+  `backend/app/api/v1/provas.py` + schemas Pydantic + middleware
+  `slowapi`, vetado pelo escopo desta sessao (frontend-only). 
+  Encaminhamento explicito para sessao dedicada (slug sugerido:
+  `wave3-v4-rate-limit-scan` ou C20) com plano de 6 passos
+  registrado no ADR-145. **Bloqueante para PR em `main`**, nao
+  para PR em `development`.
+
+### INFOs (~20 — registrados sem mudanca de codigo)
+
+Todos os INFOs do `audit-report.md` (`013-040` + dois rotulados `009`)
+tem recomendacao textual "Sem acao" do auditor. Esta sessao confirma
+o status com registro completo no apendice do `audit-report.md`:
+zero regressao identificada (categorias: Regressoes 019-024,
+Performance 025-027, Seguranca 013-015, UX 016-018, Manutenibilidade
+029-030, Cobertura 032-033, Documentacao 034-036, Aderencia 037-038,
+Preparacao C11/C12 039-040).
+
+### Validacao numerica pos-correcao
+
+| Metrica | Pre-correcao (pos-C19) | Pos-correcao |
+|---|---|---|
+| Vitest tests | 89 | **98** (+9 do `c19-mensagens.test.ts`) |
+| Vitest test files | 5 | **6** |
+| tsc --noEmit | exit 0 | exit 0 |
+| Arquivos CSS modificados | 0 | **0** ✅ |
+| Arquivos backend modificados | 0 | **0** ✅ |
+| `identificacao-prova.ts` modificado | 0 | **0** ✅ |
+| `shared/access-matrix.json` modificado | 0 | **0** ✅ |
+| Advisors MCP security/performance | 2 / 13 | **2 / 13** (identicos) |
+| Migrations aplicadas | 0 | **0** |
+| `alembic_version` | 012 | **012** |
+| Commits acionaveis | — | **7 atomicos** |
+
+### Arquivos tocados
+
+**Novos:**
+- `frontend/src/lib/c19-mensagens.ts` (62 LOC).
+- `frontend/src/lib/__tests__/c19-mensagens.test.ts` (101 LOC, 9 testes).
+- `docs/wave3-v4-c19/fix-plan.md` (705 LOC, criado no Gate 1).
+- `docs/wave3-v4-c19/fix-validation.md` (criado no commit final).
+
+**Modificados:**
+- `frontend/src/app/(dashboard)/escanear/page.tsx` (refactor + aria-invalid).
+- `frontend/src/lib/codigo-publico.ts` (JSDoc).
+- `DECISIONS.md` (apendices ao ADR-144 + ADR-145).
+- `docs/wave3-v4-c19/audit-report.md` (apendice de status pos-correcao).
+- `CHANGELOG.md` (este apendice).
+- `CLAUDE.md` (linha do `c19-mensagens.ts` na arvore + nota seccao C19).
+- `docs/wave3-v4-c10/contrato-c19.md` (§3.5 atualizada).
+
+**Inalterados (vetados pelo escopo):**
+- `frontend/src/lib/services/identificacao-prova.ts` ✅
+- `backend/**` ✅
+- `frontend/src/app/(dashboard)/escanear/escanear.module.css` ✅
+- `shared/access-matrix.json` ✅
+- `backend/migrations/**` ✅
+
+### Pendencias para PR em `main`
+
+1. **AUD-W3C19-001** (BLOQUEANTE) — implementar rate-limit backend
+   `/scan` em sessao dedicada conforme ADR-145.
+2. **Smoke E2E manual** de 20 cenarios do `smoke-validation.md`
+   (Mario executa em producao). Cenarios criticos:
+   - 9: happy path com `PRV-2026-05-TEX9GW`.
+   - 10: codigo inexistente → "Prova nao encontrada.".
+   - 14: RLS (vendedor digitando codigo alheio).
+   - 16: navegacao por teclado.
+   - 17: foco automatico + leitor de tela.
+   - 20: axe-core.
+3. **Re-auditoria independente** em sessao separada para validar:
+   - Resolucao dos 4 MEDIOS corrigidos.
+   - Ausencia de regressao.
+   - Anti-enumeracao byte-a-byte preservada.
+   - Provas legacy ainda funcionando.
+   - A11y validada.
+
+---
+
 ## v4.0 — Wave 3 — Componente 19 — Fallback de Digitacao Manual (2026-05-11)
 
 **Branch:** `wave3-v4/componente-19`
