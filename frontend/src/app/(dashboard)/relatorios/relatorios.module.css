@@ -911,6 +911,37 @@
   white-space: nowrap;
 }
 
+/*
+ * srOnlyBlock — variante para elementos de bloco inteiros (ex: <table>
+ * dedicada ao leitor de tela). Wave 5 v4.0 (C16).
+ *
+ * Diferenca em relacao a `.srOnly`: usa `position: absolute` para tirar
+ * o elemento do flow do documento, garantindo que NAO empurra outros
+ * elementos para baixo. O `.srOnly` puro nao usa `position: absolute`
+ * por causa de bug historico (caption empurrava html.scrollHeight para
+ * 1236px alem da viewport — auditoria 2026-04-29).
+ *
+ * O `position: absolute` aqui exige que o ANCESTRAL POSICIONADO seja
+ * controlado. Uso atual: `<table>` dentro de `.donutContainer` que ja
+ * tem `position: relative` (linha 1312-1313) — absolute se ancora ali,
+ * fora do flow, sem estourar scroll.
+ *
+ * NAO usar em `<caption>` dentro de `<table>` static — para isso, usar
+ * `.srOnly` puro. Aplicacao errada pode estourar scrollHeight do html.
+ */
+.srOnlyBlock {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* ─── Layout match imagem do Mario (Wave 5 ajustes) ───────────────────── */
 
 /* Linha 1 do Geral: 4 KPIs com proporcoes desiguais (design Mario).

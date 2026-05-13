@@ -327,7 +327,15 @@ export function DonutChart({
         </div>
       )}
 
-      {/* Tabela acessivel — permanente sr-only (Wave 5 v4.0 / D7→Opcao (iii)).
+      {/* Tabela acessivel — permanente sr-only (Wave 5 v4.0 / D7→Opcao (ii)).
+       *
+       * Usa `srOnlyBlock` (NAO `srOnly` puro) porque a <table> e um elemento
+       * de bloco que, mesmo com `width: 1px; height: 1px`, continuaria no
+       * flow e empurraria os cards de KPI/Donut para baixo (bug observado
+       * pelo Mario antes da correcao). `srOnlyBlock` adiciona
+       * `position: absolute` ancorando no `.donutContainer` pai que ja eh
+       * `position: relative` — fora do flow, sem afetar layout, mantendo
+       * 100% da acessibilidade.
        *
        * Leitor de tela acessa imediatamente sem precisar interagir com o
        * <details>. Layout v3 visualmente preservado (zero pixels novos).
@@ -335,7 +343,7 @@ export function DonutChart({
        * O <details> abaixo permanece como toggle visivel ao usuario vidente
        * (estado v3); seu conteudo interno e marcado `aria-hidden="true"`
        * para evitar duplicacao na leitura por AT (NVDA/JAWS/VoiceOver). */}
-      <table className={styles.srOnly} aria-label={ariaLabel}>
+      <table className={styles.srOnlyBlock} aria-label={ariaLabel}>
         <caption>{ariaLabel}</caption>
         <thead>
           <tr>
