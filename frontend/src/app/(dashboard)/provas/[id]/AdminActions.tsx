@@ -9,8 +9,16 @@ import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { ProvaResponse, StatusProva } from "@/lib/types/prova";
 import styles from "./detalhe.module.css";
 
-/** Estados ativos que permitem cancelamento (RN-005). */
+/** Estados ativos que permitem cancelamento (RN-005).
+ *
+ * Wave 3 v4.0 / C11: 7 novos valores adicionados ao status_prova_enum.
+ * Todos os ativos (nao-terminais) sao cancelaveis — espelho de
+ * `pode_cancelar` em backend/app/state_machine/v4/machine.py. Os unicos
+ * 2 estados NAO cancelaveis sao terminais: RECEBIDA_PELA_CLICHERIA
+ * (sucesso) e CANCELADA (ja cancelada).
+ */
 const CANCELAVEIS: Set<StatusProva> = new Set([
+  // Legacy v3.0 (8 ativos)
   "CRIADA",
   "RETIRADA_PELO_VENDEDOR",
   "APROVADA_PELO_VENDEDOR",
@@ -19,6 +27,14 @@ const CANCELAVEIS: Set<StatusProva> = new Set([
   "ENVIADA_PARA_CLICHERIA",
   "ENCAMINHADA_A_CLICHERIA",
   "REPROVADA_PELO_VENDEDOR",
+  // v4.0 (7 novos — todos ativos por construcao)
+  "COM_MOTORISTA_IDA_LAMINACAO",
+  "COM_MOTORISTA_VOLTA_LAMINACAO",
+  "COM_MOTORISTA_ENTREGA_FINAL",
+  "ENCAMINHADA_PARA_LAMINACAO",
+  "LAMINACAO_CONCLUIDA",
+  "DE_VOLTA_3STUDIO_POS_LAMINACAO",
+  "ENCAMINHADA_PARA_O_VENDEDOR",
 ]);
 
 interface Props {

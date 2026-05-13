@@ -44,18 +44,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Status que motorista visualiza ("Em Trânsito"). Wave 1 v4.0: apenas
-# COM_MOTORISTA (legado v3.0). Wave 3 v4.0 ampliara para os 3 contextos
-# COM_MOTORISTA_IDA_LAMINACAO / VOLTA_LAMINACAO / ENTREGA_FINAL.
+# Status que motorista visualiza ("Em Transito"). Wave 3 v4.0 / C11
+# (AUD-W3C11-001 pos-auditoria): estendido para os 3 contextos v4.0
+# derivados da migration 013 + RLS 014. Defesa primaria (Python) agora
+# bate com a secundaria (RLS) + Matriz canonica Secao 5 (Lam.Matriz,
+# Lam.Filial e Matriz transicoes envolvendo motorista). COM_MOTORISTA
+# legacy v3.0 preservado (ADR-148 — provas legacy continuam funcionando).
 _MOTORISTA_STATUSES: tuple[StatusProvaEnum, ...] = (
-    StatusProvaEnum.COM_MOTORISTA,
+    StatusProvaEnum.COM_MOTORISTA,                  # legacy v3.0
+    StatusProvaEnum.COM_MOTORISTA_IDA_LAMINACAO,    # v4.0 — Lam.Matriz / Lam.Filial
+    StatusProvaEnum.COM_MOTORISTA_VOLTA_LAMINACAO,  # v4.0 — Lam.Matriz
+    StatusProvaEnum.COM_MOTORISTA_ENTREGA_FINAL,    # v4.0 — Matriz / Lam.Matriz
 )
 
-# Status que clicheria visualiza.
+# Status que clicheria visualiza. Wave 3 v4.0 / C11 (AUD-W3C11-002
+# pos-auditoria): estendido para os 4 estados v4.0 onde clicheria atua
+# (US-007 v4.0 — laminacao + transicao final Matriz/Lam.Matriz).
+# Defesa primaria (Python) + secundaria (RLS 015) batem com a Matriz
+# canonica Secao 5 das 4 rotas. COM_MOTORISTA_ENTREGA_FINAL incluido
+# para que clicheria possa concluir a ultima transicao de Matriz e
+# Lam.Matriz (RECEBIDA_PELA_CLICHERIA).
 _CLICHERIA_STATUSES: tuple[StatusProvaEnum, ...] = (
+    # Legacy v3.0
     StatusProvaEnum.ENVIADA_PARA_CLICHERIA,
     StatusProvaEnum.ENCAMINHADA_A_CLICHERIA,
     StatusProvaEnum.RECEBIDA_PELA_CLICHERIA,
+    # v4.0 — etapas de laminacao (US-007)
+    StatusProvaEnum.ENCAMINHADA_PARA_LAMINACAO,    # clicheria recebe para laminar
+    StatusProvaEnum.COM_MOTORISTA_IDA_LAMINACAO,   # clicheria ve a caminho — confirma chegada
+    StatusProvaEnum.LAMINACAO_CONCLUIDA,           # clicheria preparou — visivel ate retirar
+    # v4.0 — entrega final (Matriz, Lam.Matriz — ultima transicao da rota)
+    StatusProvaEnum.COM_MOTORISTA_ENTREGA_FINAL,   # clicheria escaneia para confirmar recebimento
 )
 
 

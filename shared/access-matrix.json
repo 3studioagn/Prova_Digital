@@ -17,10 +17,10 @@
     "clicheria": "/dashboard"
   },
   "scope_kinds": {
-    "_comment": "Identificadores das regras de escopo aplicadas quando acesso = 'parcial'. Cada um corresponde a uma clausula SQL no scope_filter_for() do backend e a um filtro UI no frontend.",
+    "_comment": "Identificadores das regras de escopo aplicadas quando acesso = 'parcial'. Cada um corresponde a uma clausula SQL no scope_filter_for() do backend e a um filtro UI no frontend. Wave 3 v4.0 / C11 audit fixes (AUD-W3C11-003): strings de motorista e clicheria expandidas para refletir Matriz canonica Secao 5 + RLS 015 (estado pos-correcao).",
     "self_vendedor": "vendedor_id = current_user.id (vendedor ve apenas suas provas)",
-    "status_motorista_em_transito": "status IN (estados COM_MOTORISTA*) (motorista ve apenas em transito)",
-    "status_clicheria": "status IN (ENVIADA_PARA_CLICHERIA, ENCAMINHADA_A_CLICHERIA, RECEBIDA_PELA_CLICHERIA)"
+    "status_motorista_em_transito": "status IN (COM_MOTORISTA, COM_MOTORISTA_IDA_LAMINACAO, COM_MOTORISTA_VOLTA_LAMINACAO, COM_MOTORISTA_ENTREGA_FINAL) — motorista ve em transito; v3.0 legacy + 3 contextos v4.0",
+    "status_clicheria": "status IN (ENVIADA_PARA_CLICHERIA, ENCAMINHADA_A_CLICHERIA, RECEBIDA_PELA_CLICHERIA, ENCAMINHADA_PARA_LAMINACAO, COM_MOTORISTA_IDA_LAMINACAO, LAMINACAO_CONCLUIDA, COM_MOTORISTA_ENTREGA_FINAL) — clicheria ve onde atua; 3 v3.0 + 4 v4.0 (US-007 + entrega final Matriz/Lam.Matriz)"
   },
   "rules": [
     {

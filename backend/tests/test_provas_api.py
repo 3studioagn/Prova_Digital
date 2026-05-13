@@ -1315,6 +1315,32 @@ async def test_list_motorista_scope_com_motorista(mock_db):
     assert "'COM_MOTORISTA'" in sql
 
 
+async def test_list_motorista_inclui_3_contextos_v4(mock_db):
+    """AUD-W3C11-001 (pos-auditoria): motorista listando provas ve os
+    3 contextos v4.0 alem do COM_MOTORISTA legacy.
+
+    Cenario critico: motorista em Lam.Matriz precisa ver provas em
+    COM_MOTORISTA_IDA_LAMINACAO (para confirmar chegada na clicheria),
+    COM_MOTORISTA_VOLTA_LAMINACAO (volta para 3Studio) e
+    COM_MOTORISTA_ENTREGA_FINAL (entrega final na clicheria)."""
+    motorista = make_user(setor=SetorEnum.MOTORISTA, localizacao=None)
+    _setup(mock_db, user=motorista)
+    _capture_list_stmts(mock_db, count=0, rows=[])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/")
+
+    assert resp.status_code == 200
+    sql = _compiled_sql(mock_db._captured_stmts[0])
+    for estado in (
+        "'COM_MOTORISTA'",
+        "'COM_MOTORISTA_IDA_LAMINACAO'",
+        "'COM_MOTORISTA_VOLTA_LAMINACAO'",
+        "'COM_MOTORISTA_ENTREGA_FINAL'",
+    ):
+        assert estado in sql, f"esperado {estado} na clausula motorista; sql={sql}"
+
+
 async def test_list_clicheria_scope_status(mock_db):
     """CLICHERIA ve apenas provas em status ENVIADA/ENCAMINHADA/RECEBIDA clicheria."""
     clicheria = make_user(setor=SetorEnum.CLICHERIA, localizacao=None)
@@ -1329,6 +1355,36 @@ async def test_list_clicheria_scope_status(mock_db):
     assert "'ENVIADA_PARA_CLICHERIA'" in sql
     assert "'ENCAMINHADA_A_CLICHERIA'" in sql
     assert "'RECEBIDA_PELA_CLICHERIA'" in sql
+
+
+async def test_list_clicheria_inclui_4_estados_v4(mock_db):
+    """AUD-W3C11-002 (pos-auditoria): clicheria listando provas ve os
+    4 estados v4.0 alem dos 3 v3.0.
+
+    Cenario critico: COM_MOTORISTA_ENTREGA_FINAL precisa estar para
+    que clicheria possa concluir a ultima transicao das rotas Matriz
+    e Lam.Matriz (RECEBIDA_PELA_CLICHERIA). Antes do fix: 0 linhas."""
+    clicheria = make_user(setor=SetorEnum.CLICHERIA, localizacao=None)
+    _setup(mock_db, user=clicheria)
+    _capture_list_stmts(mock_db, count=0, rows=[])
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE) as ac:
+        resp = await ac.get(f"{PREFIX}/")
+
+    assert resp.status_code == 200
+    sql = _compiled_sql(mock_db._captured_stmts[0])
+    for estado in (
+        # Legacy v3.0
+        "'ENVIADA_PARA_CLICHERIA'",
+        "'ENCAMINHADA_A_CLICHERIA'",
+        "'RECEBIDA_PELA_CLICHERIA'",
+        # v4.0 (US-007 + entrega final)
+        "'ENCAMINHADA_PARA_LAMINACAO'",
+        "'COM_MOTORISTA_IDA_LAMINACAO'",
+        "'LAMINACAO_CONCLUIDA'",
+        "'COM_MOTORISTA_ENTREGA_FINAL'",
+    ):
+        assert estado in sql, f"esperado {estado} na clausula clicheria; sql={sql}"
 
 
 async def test_list_admin_sem_scope(admin_user, mock_db):

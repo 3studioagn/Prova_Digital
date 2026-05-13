@@ -6247,3 +6247,527 @@ esses componentes).
 - Achado AUD-W3C19-001 marcado RESOLVIDO=DEFERRED no apendice de
   `audit-report.md`.
 
+
+---
+
+
+## ADR-146 — Ator da transicao `FILIAL.CRIADA → ENCAMINHADA_PARA_O_VENDEDOR` = VENDEDOR
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-1)
+**Contexto:** A Secao 5.4 do `RequisitosProvasDigitais_v4_0.docx` lista
+a transicao `Criada → Encaminhada para o Vendedor` da rota Filial com
+ator literal **Vendedor**. O UML drawio (aba 06.3), no entanto, posiciona
+essa atividade visualmente na coluna do 3Studio. Divergencia aparente
+unica encontrada no cruzamento texto vs UML.
+
+**Decisao:** **Opcao A** — adotar o ator literal do texto canonico:
+**Vendedor**. Codigo em `backend/app/state_machine/v4/rules.py`:
+```python
+(RotaEnum.FILIAL, _CRIADA): frozenset({
+    Transition(_ENV_VENDEDOR, _VENDEDOR),
+}),
+```
+
+**Justificativa:**
+1. Backlog C11 (Componente 11 Justificativa) declara explicitamente que
+   "A Matriz de Transicoes da v4.0 (Requisitos v4.0, Secao 5) eh a
+   especificacao canonica". Texto > UML quando divergem.
+2. Interpretacao semantica defensavel: o estado destino
+   `ENCAMINHADA_PARA_O_VENDEDOR` descreve o RESULTADO (prova esta com
+   vendedor que assinou ao receber) — analogamente a rota Matriz onde
+   o vendedor assina em `CRIADA → RETIRADA_PELO_VENDEDOR`.
+
+**Alternativas:**
+- **Opcao B** (UML/analogia Lam. Filial: ator = 3Studio). Rejeitada
+  porque o texto canonico prevalece.
+- **Opcao C** (vendedor "como ator que assina ao receber"). Equivalente
+  operacional a A — adotada como interpretacao semantica documentada.
+
+**Consequencias:**
+- Test `test_filial_criada_vai_para_encaminhada_vendedor_via_vendedor`
+  valida explicitamente (rules_v4).
+- Test `test_executar_filial_criada_para_encaminhada` valida E2E.
+- UI de criacao da prova (C06) NAO muda: admin escolhe a rota Filial,
+  prova nasce `CRIADA`. Vendedor entao escaneia → estado vira
+  `ENCAMINHADA_PARA_O_VENDEDOR`.
+
+
+---
+
+
+## ADR-147 — Ampliar `status_prova_enum` em vez de coluna nova ou enum novo
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-2)
+**Contexto:** A v4.0 adiciona 7 estados novos a maquina. Tres caminhos
+arquiteturais sao defensaveis:
+(A) ALTER TYPE status_prova_enum ADD VALUE (uma coluna `status`); (B)
+coluna nova `status_v4` em `provas_digitais` + COALESCE nas queries;
+(C) enum novo `status_prova_v4_enum` + coluna nova. Cada caminho carrega
+trade-offs distintos (queries, RLS, drift, isolamento).
+
+**Decisao:** **Opcao A** — `ALTER TYPE status_prova_enum ADD VALUE
+IF NOT EXISTS '<NOVO>'` x 7. Total: 17 valores no enum.
+
+**Justificativa:**
+1. Recomendacao explicita das **Notas Tecnicas do Componente 11 v4.0**
+   no `BACKLOG_RastreioProvasDigitais_v4_0.docx`: "Migration Alembic
+   deve usar ALTER TYPE para adicionar os novos valores ao enum existente,
+   preservando os dados da v3.0".
+2. Uma coluna `status`, RLS policies se ajustam diretamente, queries
+   simples, dashboard/relatorios sem COALESCE.
+3. Drift entre v3.0 e v4.0 mitigado por:
+   - `test_status_prova_enum_drift.py` confronta as 3 camadas.
+   - Roteador `app.state_machine.executar_transicao` despacha
+     conforme `prova.rota` — provas v3.0 nunca veem valores v4.0 e
+     vice-versa.
+
+**Alternativas:**
+- **Opcao B** (coluna `status_v4` separada). Rejeitada: queries de
+  dashboard/relatorios precisariam COALESCE; dobra complexidade de RLS;
+  ainda exige drift testing.
+- **Opcao C** (enum novo + coluna nova). Rejeitada: 2 enums para o
+  mesmo conceito; pior do que B.
+
+**Consequencias:**
+- Migration 013 aplicada via MCP em transacao unica.
+- Sub-decisao M-2b(a) — ver ADR-148.
+
+
+---
+
+
+## ADR-148 — `COM_MOTORISTA` legacy v3.0 ≠ `COM_MOTORISTA_ENTREGA_FINAL` v4.0
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-2b)
+**Contexto:** A maquina v3.0 tem `COM_MOTORISTA` como 1 unico contexto
+(motorista carregando prova para a clicheria). A v4.0 distingue 3
+contextos do motorista (ida laminacao, volta laminacao, entrega final).
+O `COM_MOTORISTA_ENTREGA_FINAL` v4.0 eh operacionalmente equivalente ao
+`COM_MOTORISTA` v3.0. Tres caminhos: (a) manter ambos como valores
+distintos, (b) renomear `COM_MOTORISTA` para `COM_MOTORISTA_ENTREGA_FINAL`,
+(c) alias em codigo Python.
+
+**Decisao:** **Opcao (a)** — manter ambos como valores DISTINTOS no
+`status_prova_enum`. Provas legacy v3.0 (rota IS NULL ou PADRAO/DIRETA)
+continuam usando `COM_MOTORISTA`. Provas v4.0 usam
+`COM_MOTORISTA_ENTREGA_FINAL`.
+
+**Justificativa:**
+1. Renomear (opcao b) requer COPY de toda a tabela `provas_digitais`
+   + `movimentacoes` no Postgres (limitacao do `ALTER TYPE`). Destrutivo.
+2. Alias em Python (opcao c) introduz comportamento ambiguo no SQL —
+   queries dashboard `WHERE status = 'COM_MOTORISTA'` nao casariam
+   provas v4.0 sem ajuste manual.
+3. Mantendo distintos:
+   - Zero risco para provas legacy v3.0 (continuam usando o valor antigo).
+   - `contexto_motorista()` mapeia AMBOS para `"entrega_final"`
+     visualmente — UX uniformizada via helper.
+   - Drift detection automatico.
+
+**Consequencias:**
+- `state_machine.v4.contextos.contexto_motorista`:
+  ```python
+  if status == COM_MOTORISTA_ENTREGA_FINAL: return "entrega_final"
+  if status == COM_MOTORISTA: return "entrega_final"  # legacy compat
+  ```
+- C12 (Timeline) trata os dois como "Entrega final" no label visual.
+- Wave 7 (Componente 21) PODE renomear COM_MOTORISTA → equivalente v4.0
+  via backfill (fora do escopo C11).
+
+
+---
+
+
+## ADR-149 — Reusar `POST /{id}/transicoes` em vez de criar endpoints v4.0 dedicados
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-3)
+**Contexto:** A v4.0 introduz transicoes novas (ex: 3Studio encaminha
+para laminacao em Lam.*). Caminhos arquiteturais: (A) reusar o endpoint
+generico existente; (B) endpoint dedicado por nova transicao (~5+);
+(C) endpoint admin dedicado so para US-005, demais reusam.
+
+**Decisao:** **Opcao A** — handler `POST /api/v1/provas/{prova_id}/transicoes`
+permanece generico. O facade `app.state_machine.executar_transicao`
+dispatcha v3.0 ou v4.0 conforme `prova.rota` internamente.
+
+**Justificativa:**
+1. **Contrato HTTP estavel** — UI atual (escanear/page.tsx,
+   useExecutarTransicao) continua funcionando sem modificacao.
+2. **DRY** — duplicar handlers ~5x para transicoes que tem o mesmo shape
+   (status_novo + assinatura) seria refactor desnecessario.
+3. **Pydantic ja aceita os 7 novos valores** via `StatusProva` sincronizado.
+
+**Alternativas:**
+- **Opcao B** (1 endpoint por transicao). Rejeitada: multiplicacao
+  desnecessaria; manutencao pior.
+- **Opcao C** (so US-005 dedicado). Rejeitada: assimetrico — por que
+  so essa?
+
+**Consequencias:**
+- Backend: zero novo endpoint. 0 new route in `provas.py`.
+- Frontend: zero novo hook. `useExecutarTransicao` ja funciona.
+- Total de rotas publicas backend: 34 (inalterado vs C19).
+
+
+---
+
+
+## ADR-150 — Sem trigger PostgreSQL semantico de validacao de transicoes v4.0
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-4)
+**Contexto:** Defesa em profundidade pode incluir um trigger PostgreSQL
+BEFORE UPDATE que valida `(rota, OLD.status, NEW.status)` contra a Matriz.
+Trade-off: replicar a tabela de transicoes no banco (viola principio de
+invariancia DAT §4.2) vs garantia adicional contra UPDATE direto.
+
+**Decisao:** **Opcao A** — NAO criar trigger semantico. A validacao de
+transicao continua sendo responsabilidade da camada Python
+(`state_machine.v4.machine`).
+
+**Justificativa:**
+1. DAT v3.0 §4.2 explicita: "As regras de transicao NAO vivem no banco
+   de dados. Vivem em codigo versionado. Bug em transicao eh detectado
+   pelos testes unitarios (>=95% cobertura) antes do deploy."
+2. RLS deny-by-default ja restringe escritas: backend usa service_role
+   (bypassa RLS) — usuarios finais via Supabase client nao podem UPDATE
+   `provas_digitais.status` diretamente.
+3. Trigger existente `trg_provas_rota_imutavel` (Wave 2 v4.0 / ADR-117)
+   ja protege rota imutavel. Trigger de status seria nova classe.
+4. Check constraint ja existente em `movimentacoes`:
+   `CHECK (status_anterior != status_novo)` cobre minimo de integridade.
+
+**Alternativas:**
+- **Opcao B** (trigger consulta tabela explicita no banco). Rejeitada:
+  duplicacao de fonte de verdade; estado adicional para manter.
+- **Opcao C** (trigger so de integridade basica). Rejeitada: redundante
+  com o check constraint atual.
+
+**Consequencias:**
+- Apenas o backend FastAPI (via facade `state_machine`) eh capaz de
+  efetivar transicoes. Acesso direto via psql/admin bypassaria a
+  validacao — mas isso eh aceito como risco de operador admin.
+- Defesa em profundidade preservada via RLS + check constraint +
+  trigger de imutabilidade da rota.
+
+
+---
+
+
+## ADR-151 — Contexto do motorista derivado de status + audit_log.detalhes_json
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-5)
+**Contexto:** O motorista atua em 3 contextos distintos (US-006 v4.0):
+ida laminacao, volta laminacao, entrega final. Onde persistir/derivar
+o contexto? (A) derivar de `status_novo` em runtime; (B) coluna nova
+`movimentacoes.contexto_motorista`; (C) em `audit_log.detalhes_json`.
+
+**Decisao:** **Opcoes A + C combinadas**:
+- **A**: contexto eh DERIVADO de `status_novo` via helper
+  `state_machine.v4.contextos.contexto_motorista(status)`.
+- **C**: o helper eh tambem GRAVADO em `audit_log.detalhes_json.
+  contexto_motorista` durante `executar_transicao_v4` para investigacao
+  futura sem precisar re-derivar.
+
+**Justificativa:**
+1. Estado v4.0 distintos JA carregam a informacao
+   (`COM_MOTORISTA_IDA_LAMINACAO` literalmente significa "motorista
+   em ida laminacao"). Coluna separada seria redundante.
+2. Zero migration adicional necessaria — `audit_logs.detalhes_json` ja
+   eh JSONB livre.
+3. Investigacoes operacionais (auditoria, dashboards) podem filtrar
+   `WHERE detalhes_json->>'contexto_motorista' = 'ida_laminacao'`.
+4. Frontend (C12) deriva client-side via helper espelho em TypeScript
+   (ver contrato-c12.md secao 2).
+
+**Alternativas:**
+- **Opcao B** (coluna nova). Rejeitada: redundante; migracao extra.
+- **Opcao C sozinha** (sem A). Rejeitada: forcaria queries pesadas em
+  JSONB para casos simples; o tipo do status ja basta.
+
+**Consequencias:**
+- `executar_transicao_v4` grava `detalhes_json["contexto_motorista"]`
+  quando aplicavel (4 estados: 3 v4.0 + 1 legacy).
+- C12 podera renderizar badges contextuais via derivacao client-side.
+
+
+---
+
+
+## ADR-152 — Payload `POST /{id}/transicoes` inalterado (sem `rota_esperada` opcional)
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-6)
+**Contexto:** A `TransicaoRequest` atual tem 3 campos: `status_novo`,
+`assinatura_base64`, `motivo_reprovacao`. Para v4.0, considerou-se
+adicionar campo opcional `rota_esperada: RotaEnum | None` para defesa
+em profundidade contra cliente desatualizado (cliente envia
+`rota_esperada=MATRIZ` mas a prova esta em outra rota — backend rejeita
+com 409).
+
+**Decisao:** **Opcao A** — manter `TransicaoRequest` inalterado.
+
+**Justificativa:**
+1. Backend eh a UNICA autoridade sobre `prova.rota`. Cliente nao deveria
+   replicar.
+2. Race entre cliente desatualizado e UPDATE concorrente ja eh tratado
+   pelo FOR UPDATE + `TransicaoInvalidaError → 409` (ADR-084 Decisao 3).
+   Mensagem "Status da prova mudou. Recarregue e tente novamente." cobre
+   esses casos.
+3. Adicionar campo opcional aumenta superficie da API sem ganho real.
+
+**Alternativas:**
+- **Opcao B** (`rota_esperada` opcional). Rejeitada: defesa em
+  profundidade marginal; UI atual nem usaria.
+- **Opcao C** (`version: Literal["v3","v4"]`). Rejeitada como
+  anti-padrao — cliente nao deveria saber qual maquina usar.
+
+**Consequencias:**
+- Frontend `useExecutarTransicao` zero touch.
+- Pydantic `TransicaoRequest` zero touch.
+- Total de rotas publicas backend: 34 (inalterado).
+
+
+---
+
+
+## ADR-153 — Sem rate limit em `/transicoes` nesta wave (follow-up)
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-8)
+**Contexto:** O endpoint `POST /{id}/transicoes` nao tem rate limit
+hoje. A defesa atual depende de:
+- FOR UPDATE + 409 Conflict para race entre 2 usuarios.
+- RLS + access_required para auth/scoping.
+
+**Decisao:** **Opcao A** — NAO adicionar rate limit nesta wave.
+
+**Justificativa:**
+1. FOR UPDATE serializa via lock no banco — duas requests simultaneas
+   na mesma prova: uma vence, outra recebe 409. UX clara.
+2. Tentativas em massa contra provas diferentes seriam absurdas
+   operacionalmente (vendedor escaneia, assina, submita — fluxo
+   manual).
+3. ADR-145 (do C19) ja registrou rate limit em `/scan` como
+   **FOLLOW-UP OBRIGATORIO antes do PR para `main`**. Sessao dedicada
+   apos C12 deve cobrir `/scan` + `/transicoes` + outros endpoints
+   simultaneamente — coerencia operacional + auditoria unica.
+
+**Alternativas:**
+- **Opcao B** (rate limit via `slowapi` agora). Rejeitada: adiciona
+  dependencia + configuracao que ficariam desalinhadas com a futura
+  sessao de rate limiting global.
+- **Opcao C** (Idempotency-Key header). Rejeitada: cliente ainda pode
+  retentar — solucao real eh o FOR UPDATE no banco.
+
+**Consequencias:**
+- Endpoint sem rate limit hoje (igual ao /scan, /cancelar, /reiniciar).
+- Risco aceito: ataque de inundacao causaria DoS no Postgres antes
+  de ser bloqueado em outras camadas (Cloudflare? nao configurado).
+- Follow-up agendado: sessao dedicada a rate limit antes do PR para
+  `main` cobrindo todos os endpoints sensiveis.
+
+
+---
+
+
+## ADR-154 — Mensagens de erro v4.0 em pt-BR concisas, voz ativa (M-7 post-hoc)
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 — Gate 1 Decisao M-7;
+ADR formal registrado pos-correcao em 2026-05-13 — AUD-W3C11-009/014).
+**Contexto:** A v4.0 introduziu transicoes novas e cada caso de erro
+(`TransicaoInvalidaError`, `AtorNaoAutorizadoError`, estado terminal)
+precisa de mensagem em pt-BR consistente. A `analysis.md §A.1` listou
+3 propostas (A: longa+tecnica; B: voz ativa concisa; C: enumerar
+permitidos). Decisao Gate 1 ficou registrada apenas em
+`analysis.md` — auditor classificou como falta de ADR formal
+(AUD-W3C11-009 MEDIO + AUD-W3C11-014 BAIXO).
+
+**Decisao:** **Opcao B** — voz ativa concisa.
+
+Templates verificados em `backend/app/state_machine/v4/machine.py`:
+- TransicaoInvalidaError (rota nao permite):
+  `f"Esta prova segue a rota {rota.value}, que nao permite a transicao
+   {status_atual.value} -> {status_destino.value}."`
+- AtorNaoAutorizadoError:
+  `f"Voce nao tem permissao para esta transicao (setor {usuario.setor.value})."`
+- Estado terminal em cancelamento:
+  `f"Prova em {status_atual.value} eh estado final."`
+
+**Justificativa:**
+1. **Melhor UX** — frases curtas, acionaveis. "voce nao tem permissao"
+   eh mais direto que "Apenas {atores_permitidos} podem executar".
+2. **Menor risco anti-enumeracao (DAT §8.2)** — Opcao A enumeraria os
+   atores permitidos no erro, vazando estrutura interna; Opcao B nao
+   expoe (motorista nao descobre "X permitido" ao receber erro).
+3. **Consistencia** com outros erros do sistema (login, cancelamento,
+   reinicio) que ja seguem voz ativa concisa.
+
+**Alternativas:**
+- **Opcao A** (longa+tecnica): rejeitada por verbosidade + risco de
+  vazamento de info.
+- **Opcao C** (enumerar permitidos): rejeitada por mesmo risco de
+  enumeracao + UX inferior em comparacao com B.
+
+**Consequencias:**
+- Implementacao em `backend/app/state_machine/v4/machine.py:186-207`
+  (executar_transicao_v4 + validar_transicao_v4).
+- Anti-enumeracao preservada — auditor verificou
+  (AUD-W3C11-020 INFO).
+- C12 (timeline visual) deve reusar mesmo tom se exibir mensagens
+  proprias — registrado em `contrato-c12.md §8`.
+
+
+---
+
+
+## ADR-155 — Critério 15 (botões inline transição) DEFERRED para pós-Wave 3
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 audit fixes — Decisao
+do Mario sobre AUD-W3C11-005, Opcao A aceita).
+
+**Contexto:** O prompt original do C11 (`§6.3 criterio 15`) pedia
+"botoes inline de transicao (Aprovar/Reprovar/Encaminhar) na pagina de
+detalhe `/provas/[id]`". Nao foi entregue. `analysis.md §A.4`
+registrou deferral. Auditor classificou como HIGH (AUD-W3C11-005)
+e pediu decisao explicita do Mario:
+(a) aceitar deferral + criar ADR; OR
+(b) abrir nova sessao dedicada.
+
+**Decisao:** **Opcao (a)** — aceitar deferral. Botoes inline ficam como
+follow-up tecnico opcional pos-Wave 3.
+
+**Justificativa:**
+1. **Scanner ja cumpre RNF-002** (≤ 2s captura → assinatura). UX
+   canonica em `/escanear` com signature canvas integrado.
+2. **Consistencia com C10 + C19** — caminho canonico unico de transicao
+   evita duplicidade de superficie (botao inline exigiria signature
+   canvas modal adicional ~150-200 LOC + hook
+   `useTransitionFromDetail` + lista dinamica de transicoes; reduplica
+   logica ja em `escanear/page.tsx`).
+3. **AdminActions ja oferece Cancelar + Reiniciar** na detail page
+   (Wave 3 C13/C14). Tipos de transicao restantes
+   (Aprovar/Reprovar/Encaminhar) usam scanner.
+4. **Sem bloqueio funcional** — admin/vendedor/motorista/clicheria
+   conseguem operar 100% das transicoes da Matriz canonica via
+   scanner `/escanear`.
+
+**Alternativas:**
+- **Opcao B** (nova sessao dedicada). Rejeitada por:
+  - Custo de desenvolvimento (~150-200 LOC novos) sem ganho
+    funcional — apenas conveniencia UX.
+  - Bloqueio do PR para `main` da Wave 3 inteira por feature opcional.
+  - Risco de divergencia visual entre signature canvas inline e
+    signature canvas do scanner.
+
+**Consequencias:**
+- C11 fecha sem o criterio 15. Apendice de status no `audit-report.md`
+  marca AUD-W3C11-005 como **RESOLVIDO via documentacao** (deferral
+  registrado).
+- Follow-up tecnico OPCIONAL pos-Wave 3 — sessao separada que
+  decida se vale entregar (depende de feedback de operadores reais
+  apos C12 + smoke E2E em producao).
+- C12 (timeline) nao afetado.
+- `CHANGELOG.md` registra esta decisao na secao de Correcoes
+  Pos-Auditoria.
+
+
+---
+
+
+## ADR-156 — Drift Python<->Postgres em CI sem INTEGRATION_DATABASE_URL
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 audit fixes —
+decisao tecnica sobre AUD-W3C11-007).
+
+**Contexto:** O teste `test_status_prova_enum_drift_python_postgres`
+em `backend/tests/test_status_prova_enum_drift.py` valida que o enum
+no Postgres bate com `StatusProvaEnum` no Python. Tem `@pytest.mark.
+skipif(_INTEGRATION_DB_URL is None, ...)` — em CI normal (sem env
+var configurada) eh skipped. Auditor (AUD-W3C11-007 MEDIO) sinalizou
+que drift Python<->Postgres NAO eh detectado automaticamente em PR.
+
+**Opcoes consideradas:**
+- **A** Setup de Postgres container no CI (`services: postgres` em
+  workflows GitHub Actions) + rodar a suite integrada por padrao.
+- **B** Manter skipif + adicionar pre-commit hook que valida via MCP
+  apply_migration em branch temporario antes do merge.
+- **C** Aceitar como gap conhecido — drift detectado por validacao
+  MCP manual + outras camadas (Python<->TS regex ja roda em CI;
+  Python<->JSON SSoT ja roda).
+
+**Decisao:** **Opcao C** — aceitar como gap conhecido, com
+mitigacoes existentes documentadas.
+
+**Justificativa:**
+1. **Drift Python<->TS ja eh detectado em CI** via regex
+   `test_status_prova_drift_typescript_python` (pure Python — sem
+   env var).
+2. **Drift Python<->JSON SSoT** ja eh detectado via
+   `test_matrix_structure.py` (acesso, nao enum, mas mesmo padrao).
+3. **Validacao MCP manual** em cada migration eh procedimento atual
+   da Wave 3 v4.0 (`SELECT enumlabel FROM pg_enum` apos cada
+   ALTER TYPE). Documentado em `CLAUDE.md` "Como adicionar valor".
+4. **Custo da Opcao A** (~30 min setup CI + diagnostico de falsos
+   negativos por timing) eh desproporcional ao risco — adicionar
+   valor ao enum em apenas uma camada ja eh capturado por code
+   review e pelos drift tests pure-Python (Python<->TS) que mostrariam
+   inconsistencia indireta.
+5. **Opcao B** (pre-commit MCP) introduz dependencia em MCP local
+   em ambiente CI — fragil e fora do padrao do projeto.
+
+**Alternativas:**
+- A: ainda viavel se PR futuro adicionar valor inconsistente.
+  Recomendacao: revisitar Opcao A na sessao de CI/CD post-Wave 3
+  (junto com rate limit dedicado).
+
+**Consequencias:**
+- Teste integrado continua opt-in via `INTEGRATION_DATABASE_URL` —
+  rodado em produccao via MCP apos cada migration.
+- Drift entre Python e Postgres em PR seria capturado em retest
+  manual + validacao MCP — process check, nao automation check.
+- Risco residual aceito. Documentado em apendice deste ADR e em
+  `CLAUDE.md` "Como adicionar valor ao enum status_prova_enum".
+
+
+---
+
+
+## ADR-157 — Benchmark dedicado de /transicoes DEFERRED
+
+**Data:** 2026-05-13 (Wave 3 v4.0 / Componente 11 audit fixes —
+AUD-W3C11-017).
+
+**Contexto:** `analysis.md §A.5` declarou "Lookup O(1) na tabela em
+memoria; benchmark indireto via 961 testes em 4s". Auditor
+(AUD-W3C11-017 BAIXO) notou que nao ha benchmark real medindo tempo
+end-to-end de `POST /{id}/transicoes`. RNF-001 (≤ 1s) eh requisito
+funcional mas nao tem evidencia numerica direta.
+
+**Decisao:** **DEFERRED** para sessao dedicada de rate limit +
+benchmarks (junto com ADR-145 e ADR-153) **antes do PR para `main`**.
+
+**Justificativa:**
+1. **Operacao matematicamente O(1)** — `dict.get((rota, status))`
+   sobre dict de 24 entradas + iteracao linear sobre `frozenset`
+   pequeno (max 2-3 elementos).
+2. **3 round-trips ao banco** (lock + INSERT + audit_log) — bem
+   abaixo do orcamento de 1s mesmo em sa-east-1 com latencia ~100ms.
+3. **Cobertura indireta** ja existe via 961 testes em 4s — media
+   ~4ms por teste, inclui mocks de IO.
+4. **Sessao dedicada de rate limit + benchmarks** ja agendada antes
+   do PR para `main` — concentra trabalho relacionado num unico
+   PR.
+5. **Risco residual baixo** — se algum cliente reportar transicao
+   > 1s, eh capturado pelo `audit_log.detalhes_json.duration` (gravado
+   por executar_transicao_v4 via log_audit) e aparece nas queries de
+   debug.
+
+**Alternativas:**
+- Benchmark dedicado agora: rejeitado por timing — encaixa melhor na
+  sessao consolidada de rate limit.
+
+**Consequencias:**
+- AUD-W3C11-017 marcado **DEFERRED — encaminhado para sessao de rate
+  limit pos-merge para `main`**.
+- Apendice de status no `audit-report.md` registra deferral.
+- Sem mudanca de codigo nesta sessao.
+
+

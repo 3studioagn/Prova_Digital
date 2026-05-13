@@ -2,7 +2,315 @@
 
 ---
 
-## v4.0 — Wave 3 — Componente 19 — Correcoes Pos-Auditoria Senior (2026-05-11)
+## v4.0 — Wave 3 — Componente 11 — Correcoes Pos-Auditoria (2026-05-13)
+
+**Branch:** `wave3-v4-c11/fixes/execution` → PR contra
+`wave3-v4/componente-11` (que por sua vez vai PR para `development`).
+**Base:** `wave3-v4/componente-11` (commit `f57ba28`).
+**Tipo:** Correcoes acionaveis do `docs/wave3-v4-c11/audit-report.md`
+(2 CRITICOS · 3 ALTOS · 5 MEDIOS · 6 BAIXOS · 6 INFO = 22 entradas
+IDs · 19 unicos apos dedup).
+
+### Corrigidos (com codigo)
+
+- **AUD-W3C11-001** (CRITICO) — `backend/app/access/scopes.py`:
+  `_MOTORISTA_STATUSES` estendido para 4 estados (1 legacy + 3 v4.0).
+  Defesa primaria do scope motorista agora bate com Matriz Secao 5 +
+  RLS 014. Antes: motorista escaneando prova v4.0 recebia 404.
+- **AUD-W3C11-002** (CRITICO) + **AUD-W3C11-008/016** (MEDIO) —
+  `backend/app/access/scopes.py`: `_CLICHERIA_STATUSES` estendido para
+  7 estados (3 legacy + 4 v4.0 incluindo `COM_MOTORISTA_ENTREGA_FINAL`).
+  Migration RLS 015
+  (`015_clicheria_entrega_final_e_uniformizar_exists.sql`) DROP+CREATE
+  das 3 policies de SELECT, adiciona `COM_MOTORISTA_ENTREGA_FINAL` em
+  todas (paridade primaria<->secundaria) e uniformiza
+  `pol_movimentacoes_select` para EXISTS (estilo consistente com
+  `pol_etiquetas_select`). Aplicada via MCP. Antes: clicheria nao
+  conseguia concluir ultimas transicoes das rotas Matriz e Lam.Matriz.
+- **AUD-W3C11-003** (HIGH) — `shared/access-matrix.json scope_kinds`:
+  strings de motorista e clicheria expandidas com enumeracao literal
+  dos 4 e 7 estados respectivamente. SSoT alinhada com Python (scopes.py)
+  + RLS (015) + Matriz canonica Secao 6.
+- **AUD-W3C11-004 + AUD-W3C11-006** (HIGH dup) —
+  `backend/tests/access/test_scope_filter_for.py` (4 novos) +
+  `backend/tests/test_provas_api.py` (2 novos) = 6 testes novos
+  asserindo cada literal v4.0 explicitamente no SQL renderizado (em
+  vez de checar substring "COM_MOTORISTA" que era satisfeito pela
+  substring prefix). Total: scope filter 11 testes (era 7) +
+  provas API tests cobertos.
+- **AUD-W3C11-005** (HIGH) — Opcao (a) aceita pelo Mario em 2026-05-13:
+  criterio 15 (botoes inline na detail page) DEFERRED para follow-up
+  tecnico opcional pos-Wave 3. ADR-155 registrado.
+- **AUD-W3C11-009 + AUD-W3C11-014** (MED+LOW dup) — ADR-154
+  documentando decisao M-7 (mensagens em pt-BR voz ativa concisa) com
+  formato consistente dos ADRs 146-153. Implementacao verificada em
+  `machine.py:186-207` ja era a Opcao B; ADR formaliza.
+- **AUD-W3C11-010** (MED) — `backend/app/state_machine/v4/machine.py`:
+  docstring de `pode_cancelar` corrigida — decomposicao "10 v3.0 +
+  5 v4.0 ativos" -> "8 v3.0 ativos + 7 v4.0 ativos = 15 cancelaveis".
+- **AUD-W3C11-011** (LOW) — `frontend/src/lib/types/prova.ts`: JSDoc
+  do `STATUS_LABELS_SHORT` reflete 17 estados (era "10 estados").
+
+### Registrado formalmente sem mudanca de codigo
+
+- **AUD-W3C11-007** (MED) — ADR-156 documenta decisao tecnica de
+  manter drift Python<->Postgres como **gap conhecido** com
+  mitigacoes existentes (Python<->TS regex em CI + validacao MCP
+  manual em cada migration). Revisitar Opcao A (Postgres container)
+  na sessao de CI/CD pos-Wave 3.
+- **AUD-W3C11-012** (LOW) — narrativa "9 estados v3.0 para 14 estados
+  v4.0" da secao C11 original do CHANGELOG **NAO REESCRITA** —
+  preservada por valor historico. Esta secao de correcoes deixa
+  registrado: implementacao real eh 10 valores v3.0 + 7 valores v4.0
+  = 17 valores no enum (canonicamente 14 estados unicos via unificacao
+  semantica entre COM_MOTORISTA legacy v3.0 e COM_MOTORISTA_ENTREGA_FINAL
+  v4.0 — ADR-148).
+- **AUD-W3C11-013** (LOW) — contagem de testes esclarecida: o `139`
+  declarado no CHANGELOG/analysis inclui as expansoes de
+  `@pytest.mark.parametrize` (uma funcao com N parametrize values
+  conta como N test instances no `pytest -q`). Funcoes base
+  = 87 (`grep -c "^def test_"`); diferenca dos 52 sao parametrize
+  expansions. Sem reescrita do numero — declaracao correta com
+  esta interpretacao.
+- **AUD-W3C11-017** (LOW) — ADR-157 documenta benchmark dedicado
+  como **DEFERRED** para sessao de rate limit + benchmarks junto
+  com ADRs 145/153 antes do PR para `main`.
+
+### Aceitos sem mudanca de codigo (auditor declarou aceitavel)
+
+- **AUD-W3C11-024** (LOW) — `motivo_cancelamento_norm` aceitavel;
+  comportamento identico ao v3.0. Registrado no apendice do
+  audit-report.md como "ACEITO".
+- **AUD-W3C11-015/018/019/020/021/022** (INFO) — sem acao. Auditor
+  declarou explicitamente "Sem acao" em cada. Registrados no apendice
+  do audit-report.md como "ACEITO".
+
+### Migrations aplicadas
+
+- **RLS 015** (`015_clicheria_entrega_final_e_uniformizar_exists.sql`)
+  — DROP+CREATE das 3 policies de SELECT. Aplicada via MCP
+  `apply_migration`. Validacao pos-aplicacao via MCP `pg_policies`
+  confirma `COM_MOTORISTA_ENTREGA_FINAL` em todas as 3 clausulas de
+  clicheria. `get_advisors`: zero novos alertas.
+
+### Validado
+
+- Tests backend: TODO os 961 da base C11 + 6 novos AUD-004
+  (em-progresso confirmar contagem final no smoke check).
+- `backend/tests/access/`: 11/11 pass (scope) + 19/19 pass (structure)
+  + 40/40 total.
+- `backend/tests/state_machine/v4/`: 55/55 pass em machine_v4
+  (sem regressao).
+- MCP `apply_migration` RLS 015: success.
+- MCP `get_advisors security`: apenas 2 pre-existentes (ADR-025 +
+  ADR-027); zero novos.
+- `git diff` em arquivos da maquina v3.0, CSS, C10/C06/C19: VAZIO.
+
+### Decisoes registradas
+
+- ADRs novos: 154 (M-7 post-hoc) + 155 (AUD-005 (a) DEFERRED) + 156
+  (drift CI/CD) + 157 (benchmark DEFERRED).
+- Total ADRs Wave 3 v4.0 C11: 146-157 (12 ADRs).
+- 8/8 decisoes M-1..M-8 documentadas (M-7 originalmente em
+  `analysis.md §A.1`, agora formalizada em ADR-154).
+
+### Pendencias para PR em `main`
+
+- AUD-W3C11-005 Opcao (a) deferral fica documentado; nao bloqueia
+  Wave 3.
+- AUD-W3C11-007 + AUD-W3C11-017: DEFERREDs encaminhados para sessao
+  de rate limit + benchmarks (junto com ADR-145 + ADR-153) antes do
+  PR para `main`. Sessao **OBRIGATORIA** antes do PR para `main`.
+- Wave 7 (Componente 21) fara backfill `rota NULL -> valor` deduzido
+  da localizacao do vendedor; depois disso, provas legacy passam a
+  usar maquina v4.0 (`rota` permanecera NULLABLE ate Wave 7).
+
+---
+
+
+## v4.0 — Wave 3 — Componente 11 — Maquina de Estados Expandida (2026-05-13)
+
+**Branch:** `wave3-v4/componente-11` → PR contra `development`.
+**Base:** `development` (commit `4aaf806`).
+**Tipo:** 3a entrega da Wave 3 v4.0 (de 4). **Maior risco da v4.0** —
+expande a maquina de estados de 9 estados v3.0 para 14 estados v4.0
+distribuidos por 4 rotas, em **coexistencia** com a v3.0 (provas legacy
+continuam funcionando).
+
+### Decisoes Gate 1 fixadas (M-1 a M-8 — ver DECISIONS.md ADRs 146-153)
+
+| ID | Decisao | Opcao |
+|---|---|---|
+| M-1 | Ator de `FILIAL.CRIADA -> ENCAMINHADA_PARA_O_VENDEDOR` | **A** — Vendedor (texto literal §5.4 prevalece sobre UML) |
+| M-2 | Estrutura do enum | **A** — ALTER TYPE no `status_prova_enum` existente (Backlog C11 NT) |
+| M-2b | `COM_MOTORISTA` legacy ≠ `COM_MOTORISTA_ENTREGA_FINAL` v4.0 | **(a)** — valores DISTINTOS, legacy intocado |
+| M-3 | Endpoints da v4.0 | **A** — reusar `POST /{id}/transicoes` (zero novo endpoint) |
+| M-4 | Trigger PostgreSQL semantico | **A** — NAO criar (invariancia no Python, DAT §4.2) |
+| M-5 | Contexto do motorista | **A+C** — derivado de status + `audit_log.detalhes_json` |
+| M-6 | Payload `POST /{id}/transicoes` | **A** — inalterado |
+| M-7 | Mensagens de erro pt-BR | **B** — conciso, voz ativa |
+| M-8 | Rate limit | **A** — sem rate limit nesta wave (follow-up junto com ADR-145) |
+
+### Adicionado
+
+- **Migration Alembic 013** (`013_expand_status_prova_enum_v4.py`) — adiciona 7
+  valores ao `status_prova_enum` em ordem alfabetica (Decisao M-2):
+    COM_MOTORISTA_ENTREGA_FINAL
+    COM_MOTORISTA_IDA_LAMINACAO
+    COM_MOTORISTA_VOLTA_LAMINACAO
+    DE_VOLTA_3STUDIO_POS_LAMINACAO
+    ENCAMINHADA_PARA_LAMINACAO
+    ENCAMINHADA_PARA_O_VENDEDOR
+    LAMINACAO_CONCLUIDA
+  Total final: **17 valores** (10 v3.0 + 7 v4.0). `ALTER TYPE ADD VALUE
+  IF NOT EXISTS` (idempotente). Aplicado em producao via MCP +
+  `alembic_version='013'` setado via UPDATE manual. Os 10 valores v3.0
+  permanecem intocados.
+
+- **Modulo `backend/app/state_machine/`** — facade publica + maquina v4.0
+  prescrita pelo DAT v3.0 §4.1:
+  - `__init__.py` — roteador `executar_transicao` que dispatcha por
+    `prova.rota`:
+      - `rota IS NULL` ou `rota IN {PADRAO, DIRETA}` → maquina v3.0 (legacy)
+      - `rota IN {MATRIZ, LAM_MATRIZ, FILIAL, LAM_FILIAL}` → maquina v4.0
+    Re-exporta excecoes do v3.0 (`TransicaoInvalidaError`,
+    `AtorNaoAutorizadoError`, `RotaIndeterminavelError`) para preservar
+    contratos HTTP do ADR-084.
+  - `v4/rules.py` — **24 entradas** em `TRANSITION_RULES` (5+10+3+6 das
+    4 rotas v4.0) + dataclass `Transition(destino, ator,
+    motivo_obrigatorio)` + `TERMINAIS_V4` + `ROTAS_V4` + helper
+    `estados_da_rota(rota)` para C12.
+  - `v4/machine.py` — `validar_transicao_v4`, `executar_transicao_v4`,
+    `transicoes_validas_v4`, `motivo_obrigatorio_em_v4`, `pode_cancelar`.
+    Reinicio de ciclo + cancelamento sao TRANSVERSAIS (fora da tabela);
+    rota preservada na v4.0 (RN-002 + ADR-123).
+  - `v4/contextos.py` — `contexto_motorista(status)` retornando
+    `Literal["ida_laminacao", "volta_laminacao", "entrega_final"]` ou
+    `None`. Decisao M-5: contexto NAO eh persistido em coluna; vai
+    para `audit_log.detalhes_json`.
+
+- **Migration RLS 014** (`014_expand_visibility_v4_states.sql`) — expande
+  policies para reconhecer os 7 novos estados:
+  - MOTORISTA ve provas em 4 estados (1 legacy + 3 v4.0 contextos).
+  - CLICHERIA ve provas em 6 estados (3 legacy + 3 v4.0 laminacao).
+  - 3 policies atualizadas via DROP+CREATE: `pol_provas_select`,
+    `pol_movimentacoes_select`, `pol_etiquetas_select`.
+  - Aplicada em producao via MCP. Total: 6 policies em `public.*` —
+    inalterado.
+
+- **TypeScript types** em `frontend/src/lib/types/prova.ts`:
+  - `StatusProva` agora tem 17 valores agrupados por funcao na docstring.
+  - `STATUS_LABELS` (full pt-BR) e `STATUS_LABELS_SHORT` (abreviado para
+    listagem) estendidos com 7 entradas novas.
+  - `STATUS_OPTIONS` reorganizado em ordem canonica de fluxo
+    (inicio → laminacao v4.0 → vendedor → motorista entrega → clicheria
+    → terminais).
+  - `STATUS_DONUT_COLOR` em `ReportGeral.tsx` estendido com paleta para
+    os 7 v4.0 (tons verde-amarelo para laminacao, laranjas para
+    motorista contextos).
+
+- **`AdminActions.tsx` CANCELAVEIS** estendido com os 7 estados v4.0 —
+  admin agora pode cancelar provas v4.0 em qualquer estado ativo
+  (espelho de `pode_cancelar` do backend).
+
+- **Suite de testes v4.0** em `backend/tests/state_machine/`:
+  - `test_rules_v4.py` (56 testes) — sanidade do shape + cada rota
+    individualmente + reprovacao transversal parametrizada +
+    `estados_da_rota` helper + dataclass `Transition`.
+  - `test_contextos_v4.py` (18 testes) — 3 contextos v4.0 + 1 legacy
+    + 13 estados que NAO produzem contexto + exhaustividade.
+  - `test_machine_v4.py` (50 testes) — `pode_cancelar`,
+    `transicoes_validas_v4`, `motivo_obrigatorio_em_v4`,
+    `validar_transicao_v4` (happy + rejeicoes), `executar_transicao_v4`
+    (mocks de DB + log_audit, 4 fluxos completos das rotas,
+    reprovacao, cancelamento, reinicio).
+  - `test_facade.py` (15 testes) — `is_rota_v4`, roteamento v3.0/v4.0,
+    passagem de kwargs sem perda.
+  - **Cobertura: 100%** em `app/state_machine/__init__.py` +
+    `app/state_machine/v4/*` (187 stmts, 0 missing). Acima do alvo
+    95% prescrito pelo DAT §3+§4.2 + Backlog C11 criterio.
+
+- **Teste de drift `test_status_prova_enum_drift.py`** — confronta
+  Python `StatusProvaEnum` vs TypeScript `StatusProva` vs PostgreSQL
+  `pg_enum`. 3 testes pure-Python sempre rodam; 1 teste contra banco
+  real skipped sem `INTEGRATION_DATABASE_URL` (validado via MCP).
+
+- **`docs/wave3-v4-c11/`** — analysis.md (Gate 1) + _agent_extraction.md
+  (extrato literal dos 4 documentos canonicos v4.0) + contrato-c12.md
+  (leitura obrigatoria do prompt do C12).
+
+### Modificado
+
+- **`backend/app/db/models.py`** — `StatusProvaEnum` com 17 valores
+  agrupados na docstring por funcao (legacy v3.0, 3 contextos motorista,
+  etapas laminacao, pos-laminacao, vendedor Filial direto).
+
+- **`backend/app/api/v1/provas.py`** — imports refatorados para usar
+  facade `app.state_machine` (executar_transicao, pode_cancelar,
+  excecoes). `_computar_transicoes_permitidas` ramifica no topo:
+  rota v4.0 → `transicoes_validas_v4` + `motivo_obrigatorio_em_v4`;
+  rota legacy → logica v3.0 preservada integralmente. Endpoints
+  `/scan`, `/transicoes`, `/cancelar`, `/reiniciar-ciclo` agora dispatcham
+  automaticamente via facade. Removido import unused `determinar_rota`.
+
+- **`backend/tests/test_state_machine.py`** — `test_todos_estados_v3_
+  aparecem_em_transicoes` renomeado e escopado para os 10 valores v3.0
+  apenas (os 7 v4.0 nao precisam estar em `TRANSICOES` v3.0 — sao
+  roteados para a maquina nova).
+
+### Migrations aplicadas
+
+- `013_expand_status_prova_enum_v4` (Alembic 013) — ALTER TYPE x7.
+  Aplicada via MCP `apply_migration` em transacao unica. Idempotente
+  (IF NOT EXISTS). alembic_version bumpado para `'013'`.
+
+- `014_expand_visibility_v4_states` (RLS 014) — 3 policies via DROP +
+  CREATE. Aplicada via MCP `apply_migration`.
+
+### Validado
+
+- Backend pytest: **961 passed + 10 skipped, zero failure** (Wave 2 v4.0
+  audit baseline era 825 + 9 skipped — +136 testes novos da Wave 3 v4.0
+  C11 + ajuste 1 teste v3.0 renomeado).
+- Cobertura `app/state_machine/v4/*`: **100%** (187/187 stmts).
+- Frontend tsc --noEmit: **exit 0**.
+- Frontend Vitest: **98/98 passing**.
+- Supabase advisors security: **sem novos alertas** (1 INFO + 1 WARN
+  pre-existentes).
+- MCP `SELECT enumlabel FROM pg_enum`: 17 valores coerentes com
+  `StatusProvaEnum` Python + TypeScript `StatusProva`.
+
+### Limitacoes assumidas (transparencia)
+
+- **Botoes de transicao na pagina de detalhe (criterio 15 do prompt
+  §6.3)**: NAO entregue. O scanner em `/escanear` permanece como
+  caminho canonico de transicao (com assinatura digital via
+  signature canvas). A pagina de detalhe agora exibe os labels v4.0
+  corretos e o `AdminActions` continua oferecendo cancelar + reiniciar
+  para admin — mas nao foram adicionados botoes "Aprovar/Reprovar/
+  Encaminhar" inline no detalhe. Justificativa: a UI requereria
+  signature canvas modal (~150-200 LOC adicional) e a UX canonica
+  ja eh via scanner (RNF-002: ≤2s da captura ate tela de assinatura).
+  Follow-up registrado se Mario quiser este enhancement.
+
+- **Trigger PostgreSQL semantico de validacao de transicoes**: NAO
+  criado (Decisao M-4 Opcao A). Invariancia mantida no Python (DAT §4.2);
+  defesa em profundidade via RLS deny-by-default + service_role-only
+  para escritas via backend.
+
+- **Rate limit em `/transicoes`**: NAO entregue. Mantido como
+  follow-up unificado com o ADR-145 do C19 antes do PR para `main`.
+
+### Decisoes a confirmar no merge
+
+- A entrega cobre TUDO o que esta no escopo da Decisao Gate 1 e do
+  prompt §6.3 EXCETO o criterio 15 (botoes inline no detalhe). Solicito
+  ao Mario decisao explicita: aceitar essa limitacao no merge ou
+  pedir nova sessao para entregar antes do PR para `main`.
+
+---
+
+
 
 **Branch:** `wave3-v4-c19/fixes/execution` → PR contra `development`.
 **Base:** `wave3-v4-c19/audit` (commit `999e5b0`).

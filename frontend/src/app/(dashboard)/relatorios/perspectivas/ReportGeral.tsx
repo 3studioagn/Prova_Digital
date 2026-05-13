@@ -89,6 +89,7 @@ const STATUS_ATIVOS_SET = new Set<StatusProva>([
  * cinza claro. Mantém match com o design Mario.
  */
 const STATUS_DONUT_COLOR: Record<StatusProva, string> = {
+  // ── Legacy v3.0 ────────────────────────────────────────────────────────
   CRIADA: "var(--color-accent, #ffcb5c)",
   RETIRADA_PELO_VENDEDOR: "#ffd97a",
   APROVADA_PELO_VENDEDOR: "#f5b041",
@@ -100,6 +101,18 @@ const STATUS_DONUT_COLOR: Record<StatusProva, string> = {
   // Terminais (nao usados aqui mas mantemos a cobertura do enum):
   CANCELADA: "#9ca3af",
   RECEBIDA_PELA_CLICHERIA: "#34d399",
+  // ── v4.0 (Wave 3 / Componente 11) — tons coerentes com os legacy ───────
+  // Laminacao: variantes complementares (verde-amarelo) para distinguir
+  // visualmente das etapas tradicionais sem destoar da paleta.
+  ENCAMINHADA_PARA_LAMINACAO: "#c0ca33",
+  COM_MOTORISTA_IDA_LAMINACAO: "#ffa726",
+  LAMINACAO_CONCLUIDA: "#9ccc65",
+  COM_MOTORISTA_VOLTA_LAMINACAO: "#ff9800",
+  DE_VOLTA_3STUDIO_POS_LAMINACAO: "#fbc02d",
+  // Vendedor Filial / Lam. Filial recebe direto
+  ENCAMINHADA_PARA_O_VENDEDOR: "#ffe082",
+  // Entrega final (motorista v4.0) - tom similar ao COM_MOTORISTA legacy
+  COM_MOTORISTA_ENTREGA_FINAL: "#ff7043",
 };
 
 /**
