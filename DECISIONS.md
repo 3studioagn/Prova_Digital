@@ -7090,3 +7090,64 @@ visiveis); estender backend aditivamente; adaptar frontend internamente sem novo
   com `aria-hidden="true"`.
 
 **Documento:** `docs/wave5-v4-c16/analysis.md` (Gate 1 + Apendice A).
+
+---
+
+### Apendice 1 ao ADR-162 — Sessao de correcoes pos-auditoria (2026-05-13)
+
+Auditoria senior independente (`docs/wave5-v4-c16/audit-report.md`,
+commit `57a76d2`) classificou a entrega como **APROVADO COM CORRECOES**
+(0 CRITICO · 3 ALTO · 5 MEDIO · 5 BAIXO · 4 INFO = 17 achados).
+
+Sessao de correcao (`wave5-v4-c16/fixes/execution`, base `57a76d2`)
+executou TODOS os 17 achados em 11 commits atomicos:
+
+- **12 RESOLVIDOS** (codigo tocado):
+  - AUD-001 (visual-guide.md criado), AUD-002 (smoke +3 cenarios
+    estados de borda), AUD-003 (`aria-hidden-focus` no DonutChart),
+    AUD-004 (`_CONTEXTO_MOTORISTA_STATUSES` via comprehension da fonte
+    canonica), AUD-005 (`prefers-reduced-motion` no CSS),
+    AUD-006 (extracao parsers para modulo `_useReportFilters.parsers`),
+    AUD-007+008 (rename `.rotaDotPadrao/Direta` -> `.rotaDotMatriz/Filial`
+    + comentario), AUD-010 (teste `TestLegacyNullIndefinida`),
+    AUD-011 (CSV `consolidacao_rota_indefinida` sempre emitido).
+- **5 ACEITOS sem codigo**:
+  - AUD-009 (docstring `_CLICHERIA_EM_TRANSITO` ja cobre — auditor
+    confirmou), AUD-012/013 (INFO de revisao), AUD-014/015/016 (INFO
+    de cobertura), AUD-017 (anti-enumeracao 403 — ver Apendice 2 abaixo).
+
+### Apendice 2 ao ADR-162 — Confirmacao pos-auditoria da Decisao D11→i (anti-enumeracao 403)
+
+Auditor classificou AUD-W5C16-017 como **INFO**: "RBAC retorna 403
+(nao 404 byte-a-byte como prompt da auditoria pediu)". Esta decisao
+D11→i foi originalmente registrada neste ADR-162 com 5 justificativas;
+sessao de correcao 2026-05-13 reafirma a posicao com expansao das
+razoes:
+
+1. **Coerencia com Matriz Wave 1 v4.0**: as 11 chaves de `access_required`
+   retornam 403, nao 404. Mudar apenas `relatorios` para 404 byte-a-byte
+   quebraria homogeneidade arquitetural.
+2. **Defesa em profundidade preservada**: middleware Next.js redireciona
+   antes da chamada chegar ao backend; RLS Postgres `pol_provas_select`
+   retorna 0 rows se chegar; backend retorna 403 como ultima camada.
+3. **Anti-enumeracao em outros pontos**: `/scan` retorna 404 unificado
+   (Decisao do C10) — protege contra enumeracao de codigos publicos
+   alfanumericos. Relatorios nao tem mesmo vetor (recurso unico
+   admin-only, sem path-parameter enumeravel).
+4. **Vendedor nao consegue chegar ao backend**: middleware redireciona
+   antes; ataque a `/api/v1/reports` so e possivel com token de vendedor
+   manualmente forjado — RBAC do backend reforca defense in depth.
+5. **Mudanca seria global**: migrar 403 -> 404 byte-a-byte deveria
+   afetar as 11 chaves de RBAC coerentemente, com revisao de cada
+   celula da Matriz Wave 1 v4.0 — sessao dedicada com escopo maior
+   que o C16.
+
+Mario aprovou explicitamente em Gate 1 do C16 e em revisao pos-auditoria
+(Gate 2 da sessao de correcao 2026-05-13). Sem modificacao de codigo
+nesta sessao.
+
+**Follow-up registrado para Wave 6+:** se Mario quiser migrar Matriz
+inteira para 404 byte-a-byte, abrir sessao dedicada cobrindo as 11
+chaves (relatorios + auditoria + usuarios + configuracoes + scan +
+provas detail + provas list + provas create + provas cancel + provas
+restart + outras a inventariar). NAO escopo desta sessao.

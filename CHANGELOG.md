@@ -2,6 +2,69 @@
 
 ---
 
+## v4.0 — Wave 5 — Componente 16 — Correções Pós-Auditoria (2026-05-13)
+
+**Branch:** `wave5-v4-c16/fixes/execution` → PR contra `development`.
+**Base:** `wave5-v4-c16/audit` (commit `57a76d2` — auditoria sênior pós-C16).
+**Origem:** [docs/wave5-v4-c16/audit-report.md](docs/wave5-v4-c16/audit-report.md) — veredito **APROVADO COM CORREÇÕES**.
+**Achados:** 0 CRÍTICO · 3 ALTO · 5 MÉDIO · 5 BAIXO · 4 INFO = **17 totais**.
+**Resultado:** 12 RESOLVIDOS · 5 ACEITOS sem código · 0 DEFERRED · 0 BLOQUEADOS · 0 nova escalação humana.
+
+### RESOLVIDOS — código tocado (12)
+
+#### ALTOS (3)
+- **AUD-W5C16-001** (`5315edf`) — `docs/wave5-v4-c16/visual-guide.md` criado com 7 seções estruturadas (227 LOC). Padrão da Wave 3 C12 AUD-W3C12-003.
+- **AUD-W5C16-002** (`d3d9599`) — `smoke-validation.md` expandido 20 → 23 cenários (+#21 estado vazio + #22 estado de erro + #23 acesso negado).
+- **AUD-W5C16-003** (`605939a`) — `aria-hidden="true"` movido do `<details>` para a `<table>` interna no DonutChart. WAI-ARIA 1.1 §4.3.2 conforme — `<summary>` permanece focável.
+
+#### MÉDIOS (5)
+- **AUD-W5C16-004** (`cbe51d5`) — `_CONTEXTO_MOTORISTA_STATUSES` derivado por dict comprehension da fonte canônica `app.state_machine.v4.contextos.contexto_motorista`. Novo teste `test_cross_validation_with_canonical_contexto_motorista` itera sobre os 17 valores de `StatusProvaEnum` validando paridade.
+- **AUD-W5C16-005** (`fb469b0`) — bloco `@media (prefers-reduced-motion: reduce)` adicionado em `relatorios.module.css` cobrindo 8 seletores.
+- **AUD-W5C16-006** (`44aaa4c`) — parsers extraídos para `frontend/src/hooks/_useReportFilters.parsers.ts` (módulo puro). Hook importa do módulo; testes Vitest importam diretamente (sem re-implementação).
+- **AUD-W5C16-007+008** (`36269f3`) — `.rotaDotPadrao` → `.rotaDotMatriz`; `.rotaDotDireta` → `.rotaDotFilial`. Bloco de comentário documenta mapeamento histórico v3→v4 e cita ADR-158.
+
+#### BAIXOS (2)
+- **AUD-W5C16-010** (`f3afc43`) — classe `TestLegacyNullIndefinida` com 4 testes cobrindo `null_indef = null_total - null_matriz - null_filial`, schema `ConsolidacaoRota.indefinida >= 0`, e `DistRotaV4.categoria='legacy_null_indefinida'`.
+- **AUD-W5C16-011** (`43dee6c`) — guard `if cons.indefinida > 0` removido em `_summary_rows`; linha CSV `consolidacao_rota_indefinida` agora sempre emitida (simetria com `_matriz`/`_filial`). Classe `TestCsvSummaryConsolidacaoIndefinida` com 3 testes.
+
+### ACEITOS sem código (5)
+
+- **AUD-W5C16-009** — `_CLICHERIA_EM_TRANSITO` sem `COM_MOTORISTA_IDA/VOLTA_LAMINACAO` (semanticamente correto; docstring atual já cobre).
+- **AUD-W5C16-012/013** — INFO de revisão; sem ação.
+- **AUD-W5C16-014/015/016** — INFO de cobertura; sem ação.
+- **AUD-W5C16-017** — anti-enumeração 403 (não 404 byte-a-byte): Decisão D11→i registrada em ADR-162 com 5 justificativas. **Apêndice 2 ao ADR-162** reafirma posição pós-auditoria. Follow-up registrado para Wave 6+ se Mario quiser migrar Matriz inteira para 404 byte-a-byte.
+
+### Validação interna
+
+- **Backend pytest:** **1034 passed + 10 skipped** (era 1027 pós-C16; +7 novos: 1 AUD-004 + 4 AUD-010 + 3 AUD-011; -1 duplicado).
+- **Frontend Vitest:** **205 passed** (sem regressão; testes do AUD-006 exercem código real do módulo extraído).
+- **`tsc --noEmit`:** exit 0.
+- **`next build`:** 13/13 páginas.
+- **Bundle `/relatorios`:** mantém ~17.9 kB / ~220 kB (sem regressão).
+- **`git diff` em paths intocados** (`contrato-c12.md`, dashboard/, máquina v4, state_machine, escanear, provas, nova-prova, RLS, migrations, Wave 1 RBAC, middleware, services frontend): **VAZIO**.
+- **MCP advisors** (security + performance): idênticos ao baseline pós-C16.
+
+### Documentos
+
+- Plano de correção: [docs/wave5-v4-c16/fix-plan.md](docs/wave5-v4-c16/fix-plan.md) (729 LOC).
+- Visual guide stub: [docs/wave5-v4-c16/visual-guide.md](docs/wave5-v4-c16/visual-guide.md) (227 LOC, novo — AUD-001).
+- Smoke validation expandido: [docs/wave5-v4-c16/smoke-validation.md](docs/wave5-v4-c16/smoke-validation.md) (23 cenários — AUD-002).
+- Apêndice de status no audit-report: [docs/wave5-v4-c16/audit-report.md](docs/wave5-v4-c16/audit-report.md) (corpo original preservado).
+- Validação interna: [docs/wave5-v4-c16/fix-validation.md](docs/wave5-v4-c16/fix-validation.md).
+- ADRs novos: nenhum. **Apêndice 1+2 ao ADR-162** em `DECISIONS.md`.
+
+### Pendências para PR `development → main`
+
+Mantidas (herdadas Wave 3 + Wave 5 v3): rate limit C19 (ADR-145), benchmarks C11 (ADRs 153/157), CI/CD pós-Wave 3 (ADR-156).
+
+Específicas C16 Audit Fixes: smoke E2E manual do Mario (23 cenários incluindo os 3 novos de borda); nova rodada de auditoria sênior independente.
+
+### MARCO
+
+- **Última sessão de correção de componente da Wave 5 v4.0.** Wave 5 v4.0 inteira pronta para revisão consolidada pré-merge (Wave 3 + Wave 5 juntas) antes do merge `development → main`.
+
+---
+
 ## v4.0 — Wave 5 — Componente 16 (atualização v4.0) (2026-05-13)
 **Branch:** `wave5-v4/componente-16` (sai de `development`).
 **Restrição do Mario:** preservar layout v3 exatamente (zero mudanças visuais perceptíveis).

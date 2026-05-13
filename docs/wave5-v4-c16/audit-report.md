@@ -665,3 +665,43 @@ Após correção dos 3 ALTOS (estimativa total ~90 min), realizar **sessão de r
 - (c) **Reprovar e refazer:** caso queira incluir Linha 3 (Tempo Médio por Etapa), Donut completo de 5 segmentos, ou filtro Contexto Motorista visível — extensão de escopo que reverte a restrição "preservar layout v3 exatamente". Não recomendado pelo auditor (ADR-162 documenta a decisão consciente).
 
 A recomendação do auditor é **(a) — Aprovar com correções**.
+
+---
+
+## Apêndice — Status pós-correção (Wave 5 v4.0 / C16 Audit Fixes)
+
+**Sessão:** 2026-05-13 (branch `wave5-v4-c16/fixes/execution`, base `wave5-v4-c16/audit` `57a76d2`).
+**Decisão do Mario:** Opção (a) — Aprovar com correções (escolhida pós-leitura do `fix-plan.md`).
+**Escopo da correção:** TODOS os 17 achados (não apenas os 3 ALTOS sugeridos pelo auditor).
+**Resultado:** 12 RESOLVIDOS · 5 ACEITOS (sem código). 0 DEFERRED · 0 BLOQUEADOS · 0 escalações novas.
+
+| ID | Sev. | Status final | Commit SHA | Critério objetivo da resolução |
+|---|:---:|:---:|:---:|---|
+| AUD-W5C16-001 | ALTO | ✅ RESOLVIDO | `5315edf` | `docs/wave5-v4-c16/visual-guide.md` criado com 7 seções estruturadas (227 LOC). Mario preenche screenshots no smoke. |
+| AUD-W5C16-002 | ALTO | ✅ RESOLVIDO | `d3d9599` | `smoke-validation.md` expandido de 20 → 23 cenários (+ #21 estado vazio + #22 estado de erro + #23 acesso negado). |
+| AUD-W5C16-003 | ALTO | ✅ RESOLVIDO | `605939a` | `<details aria-hidden="true">` → `<details>` + `<table aria-hidden="true">` interna. WAI-ARIA 1.1 §4.3.2 conforme. Vitest 205/205 + tsc 0. |
+| AUD-W5C16-004 | MÉDIO | ✅ RESOLVIDO | `cbe51d5` | `_CONTEXTO_MOTORISTA_STATUSES` derivado por comprehension de `contexto_motorista()` canônica. Novo teste `test_cross_validation_with_canonical_contexto_motorista` itera sobre os 17 valores de `StatusProvaEnum` validando paridade. |
+| AUD-W5C16-005 | MÉDIO | ✅ RESOLVIDO | `fb469b0` | Bloco `@media (prefers-reduced-motion: reduce)` adicionado no final de `relatorios.module.css` cobrindo 8 seletores (cards, donut, bar row, sparkline, presets, scope). Padrão da Wave 3 C12. |
+| AUD-W5C16-006 | MÉDIO | ✅ RESOLVIDO | `44aaa4c` | Parsers extraídos para `frontend/src/hooks/_useReportFilters.parsers.ts` (módulo puro). Hook importa do módulo; testes Vitest importam diretamente do módulo (sem re-implementação). 42/42 passam. |
+| AUD-W5C16-007 | MÉDIO | ✅ RESOLVIDO | `36269f3` | Classes CSS renomeadas: `.rotaDotPadrao` → `.rotaDotMatriz`, `.rotaDotDireta` → `.rotaDotFilial`. Grep pós-rename: 0 ocorrências dos nomes legacy fora do comentário. |
+| AUD-W5C16-008 | MÉDIO | ✅ RESOLVIDO | `36269f3` (combinado com AUD-007) | Bloco de comentário Wave 5 v4.0 / C16 fix AUD-W5C16-007+008 acima das classes em `relatorios.module.css` documenta mapeamento histórico v3→v4 e cita ADR-158. |
+| AUD-W5C16-009 | BAIXO | ✅ ACEITO (sem código) | n/a | Auditor explicitamente declarou "semanticamente correto, mas vale documentar para Dashboard futuro". A docstring atual de `_CLICHERIA_EM_TRANSITO` (reports.py:127-139) já cobre. Sem código tocado. |
+| AUD-W5C16-010 | BAIXO | ✅ RESOLVIDO | `f3afc43` | Classe `TestLegacyNullIndefinida` em `test_reports_v4.py` com 4 testes cobrindo `null_indef = null_total - null_matriz - null_filial`, schema `ConsolidacaoRota.indefinida >= 0`, e `DistRotaV4.categoria='legacy_null_indefinida'`. |
+| AUD-W5C16-011 | BAIXO | ✅ RESOLVIDO | `43dee6c` | Guard `if cons.indefinida > 0` removido em `_summary_rows`; linha `consolidacao_rota_indefinida` agora sempre emitida (simetria com `_matriz`/`_filial`). Classe `TestCsvSummaryConsolidacaoIndefinida` com 3 testes. |
+| AUD-W5C16-012 | BAIXO | ✅ ACEITO (INFO de revisão) | n/a | `to_cache_key` inclui `scope` corretamente — auditor declarou sem ação. Confirmado. |
+| AUD-W5C16-013 | BAIXO | ✅ ACEITO (padrão Pydantic v2) | n/a | `_defaults_and_invariants` usa `object.__setattr__` — padrão para `frozen=True` Pydantic v2. Confirmado. |
+| AUD-W5C16-014 | INFO | ✅ ACEITO | n/a | Vitest cobertura: 42 testes via `it.each` — CHANGELOG correto. Confirmado. Após AUD-006, módulo `_useReportFilters.parsers.ts` testado diretamente — mesma cobertura efetiva. |
+| AUD-W5C16-015 | INFO | ✅ ACEITO + atualizado | n/a | Backend pytest: 1027 + 10 skipped pós-C16 originalmente. Pós-Audit Fixes: **1034 + 10 skipped** (era 1027 + 7 novos: 1 AUD-004 + 4 AUD-010 + 3 AUD-011 - 1 duplicado = 7). Vide validação na §"Rodar validation". |
+| AUD-W5C16-016 | INFO | ✅ ACEITO | n/a | RBAC herdado de `test_reports_api.py` (Wave 5 v3, intocado): 5 cenários 403 cobertos. Confirmado. |
+| AUD-W5C16-017 | INFO | ✅ ACEITO (apêndice em ADR-162) | n/a (registro em DECISIONS.md) | Anti-enumeração 403 (não 404 byte-a-byte) é decisão consciente D11→i registrada em ADR-162. Mario aprovou explicitamente em 5 razões. Apêndice pós-auditoria adicionado ao ADR-162 reafirma posição. Sem código tocado. Follow-up para Wave 6+ se Mario quiser migrar Matriz inteira para 404 byte-a-byte (afeta 11 chaves de RBAC, não apenas `relatorios`). |
+
+**Resumo final:**
+- **12 ALTOs+MÉDIOs+BAIXOs corrigíveis:** todos RESOLVIDOS.
+- **5 BAIXOs/INFOs sem ação:** todos ACEITOS (com justificativa por achado).
+- **DEFERRED:** 0.
+- **BLOQUEADOS por divergência:** 0.
+- **Novas escalações humanas:** 0.
+
+**Validação interna pós-correção:** ver [docs/wave5-v4-c16/fix-validation.md](fix-validation.md) com checklist completo, evidências por achado e auto-crítica adversarial.
+
+**Próximo passo recomendado:** sessão de **auditoria sênior independente** dedicada a validar (a) que cada achado original foi resolvido sem introduzir regressão; (b) que as 11 decisões de ADR-162 permanecem implementadas conforme registrado; (c) que `contrato-c12.md`, C15 (Dashboard v3) e outras entregas continuam intocados; (d) que os 23 cenários do smoke renderizam corretamente; (e) que `prefers-reduced-motion` zera animações em DevTools emulation; (f) que `aria-hidden-focus` não é mais flagrado pelo axe-core; (g) que CSV summary emite `consolidacao_rota_indefinida` sempre. Após re-auditoria, **sessão de revisão consolidada pré-merge** (Wave 3 + Wave 5 juntas) antes do merge `development → main`.
