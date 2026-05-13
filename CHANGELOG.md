@@ -2,6 +2,297 @@
 
 ---
 
+## v4.0 — Wave 3 — Componente 12 — Correções Pós-Auditoria (2026-05-13)
+
+**Branch:** `wave3-v4-c12/fixes/execution` → PR contra `development`.
+**Base:** `wave3-v4-c12/audit` (commit `2a18794` — auditoria sênior pós-C12).
+**Origem:** [docs/wave3-v4-c12/audit-report.md](docs/wave3-v4-c12/audit-report.md) — veredito APROVADO COM CORREÇÕES MENORES.
+**Achados:** 0 CRÍTICO · 0 ALTO · 4 MÉDIO · 5 BAIXO · 4 INFO = **13 totais**.
+**Resultado:** 8 RESOLVIDOS · 3 DEFERRED · 2 ACEITOS · Zero não-tratados.
+
+### Corrigido
+
+- **AUD-W3C12-001** ([commit `d5dc3b7`](#)) — Remove `<AnimatePresence>`
+  sem motion children em [Timeline.tsx](frontend/src/app/(dashboard)/provas/%5Bid%5D/Timeline.tsx).
+  Wrapper sem efeito visual (filhos não eram `motion.*` com
+  `initial/animate/exit`). Também removido `AnimatePresence` do import
+  de framer-motion. **Bonus:** bundle `/provas/[id]` baixou de **16.1
+  kB / 214 kB** para **14.4 kB / 212 kB** (-1.7 kB / -2 kB First Load).
+- **AUD-W3C12-002** ([commit `7667355`](#)) — Reconcilia LOCs reais em
+  4 documentos (CLAUDE.md, CHANGELOG.md, pr-description.md, analysis.md
+  §17.6 nova). Valores reais via `wc -l`: Timeline.tsx **561** LOC
+  (era documentado 410 — divergência de 151 não-documentada referente a
+  73 LOC de SVG icons inline + 22 LOC de JSDoc + ~60 LOC de subcomponentes
+  inline); timeline.module.css **471** LOC (era 372); timeline-builder.ts
+  **354** LOC (era 240); prova.ts **681** (era 690); prova.test.ts
+  **350** (era 308); timeline-builder.test.ts **552** (era 410).
+- **AUD-W3C12-003** ([commit `f40f7b6`](#)) — Cria
+  [docs/wave3-v4-c12/visual-guide.md](docs/wave3-v4-c12/visual-guide.md)
+  stub estruturado com 8 seções (uma por cenário obrigatório).
+  Cenários 1, 5, 6, 7, 8 com provas representativas em produção
+  (PRV-2026-05-TEX9GW, PRV-2026-04-B9CZ37, etc.); cenários 2/3/4
+  (LAM_MATRIZ/FILIAL/LAM_FILIAL) marcados SKIP por R-4 (sem fixtures).
+  Roteiro explícito para Mario preencher screenshots pós-smoke E2E.
+- **AUD-W3C12-004** ([commit `7c61350`](#)) — Captura coverage snapshot
+  em [docs/wave3-v4-c12/coverage-snapshot.md](docs/wave3-v4-c12/coverage-snapshot.md).
+  Instalação pontual de `@vitest/coverage-v8@~2.1.0` com `--no-save`
+  e desinstalação após captura — preserva D-13 da Wave 1 v4.0 (Vitest
+  minimal). Coverage: timeline-builder.ts **99.46% lines / 100% funcs**;
+  prova.ts **94.94% lines / 100% funcs do C12**; global agregado
+  **97.15%** — confortavelmente acima do limiar 80% do critério 19.
+- **AUD-W3C12-005** ([commit `07222ba`](#)) — `<aside role="alert">` →
+  `<div role="alert">` no CancellationCard. `<aside>` significa "side
+  content" na semântica HTML5; `<div>` é mais adequado para alerta.
+  `role="alert"` preservado — leitor de tela mantém anúncio imediato.
+- **AUD-W3C12-006** ([commit `27e0b8e`](#)) — Rebaixado de BAIXO para
+  **INFO** + resolvido via **Opção A**. Apêndice à Decisão 7 em
+  DECISIONS.md (após ADR-161) registrando consciente não-implementação
+  do tachado/strikethrough no nó anterior ao cancelamento. Mario aprovou
+  Opção A em 2026-05-13. Justificativa: (1) honestidade histórica — tachado
+  significa "deletado/anulado" e a movimentação anterior aconteceu de
+  fato; (2) os 3 mecanismos atuais (card vermelho `role="alert"` + nó
+  cinza CANCELADA + motivo destacado em vermelho) preservam a essência
+  da Decisão 7 sem ambiguidade; (3) a11y equivalente — `role="alert"`
+  já dispara anúncio; (4) princípio "do no harm".
+- **AUD-W3C12-007** ([commit `c55285a`](#)) — Remove `role="list"`
+  redundante de 3 ocorrências em Timeline.tsx (linhas 388, 471, 539).
+  `<ol>` e `<ul>` mantêm role implícito por HTML5. Algumas
+  implementações de leitor de tela podem anunciar 2× quando o role é
+  explícito + implícito.
+- **AUD-W3C12-010** ([commit `f973a0b`](#)) — Remove `aria-label` do
+  rotaBadge em Timeline.tsx:171 (texto interno `{`Rota: ${rotaLabel}`}`
+  era idêntico ao `aria-label` — leitor de tela já anuncia via texto
+  interno).
+
+### Deferred ou Aceito (sem código nesta sessão)
+
+- **AUD-W3C12-008** — Performance < 500ms — **DEFERRED** para smoke 15
+  manual do Mario (DevTools Performance no cenário 5 multi-ciclos).
+  Estimativa do auditor: < 50ms (folga 10× do RNF-001).
+- **AUD-W3C12-009** — Snapshot tests + E2E — **ACEITO como tradeoff
+  documentado** em `analysis.md §17.3.1` (preservar D-13 da Wave 1
+  v4.0 sem `@testing-library/react` + `jsdom`). Substituído por smoke
+  manual + 20 testes unitários do builder.
+- **AUD-W3C12-011** — R-12 filtros C07 com duplicação visual —
+  **DEFERRED** para decisão pós-merge. Mario decide se vale colapsar
+  opções (5-8 LOCs em `ROTA_OPTIONS` da listagem) ou aceitar até Wave
+  7 / C21 fazer o backfill do enum.
+- **AUD-W3C12-012** — Consolidado com AUD-W3C12-009 (mesma decisão).
+- **AUD-W3C12-013** — Subcomponentes inline em Timeline.tsx — **ACEITO**
+  como decisão consciente documentada em `analysis.md §17.3.2`.
+
+### Validação Final
+
+- `npx vitest run`: **163/163** testes passados (sem regressão).
+- `npx tsc --noEmit`: exit 0.
+- `npx next build`: **13/13 páginas**; `/provas/[id]` em **14.4 kB / 212 kB**
+  (era 16.1 kB / 214 kB — Δ -1.7 kB / -2 kB First Load via remoção do
+  `AnimatePresence` sem motion children).
+- `git diff --name-only origin/development..HEAD --` em paths protegidos
+  (backend/, contrato-c12.md, escanear/, AdminActions.tsx, page.tsx do
+  detalhe, detalhe.module.css, services/, codigo-publico, c19-mensagens,
+  middleware.ts, shared/, useProvaDetail.ts, state_machine/): **vazio**.
+- MCP `get_advisors security` + `get_advisors performance`: **idênticos
+  ao baseline pós-C11** (1 INFO + 1 WARN security; 13 INFO unused_index
+  performance — todos pré-existentes).
+
+### ADRs novos
+
+Nenhum novo (apenas apêndice à Decisão 7 em DECISIONS.md, sem número
+ADR — registro de decisão consciente pós-auditoria, não nova
+arquitetura).
+
+### Pendências para PR para `main` (Wave 3 inteira)
+
+Pendências herdadas das entregas anteriores da Wave 3 v4.0
+(BLOQUEANTES para `main`, NÃO-bloqueantes para `development`):
+
+1. **Rate limit backend** (ADR-145 do C19) — `/scan` precisa de 30/min/user
+   → 429 (slowapi). Sessão dedicada.
+2. **Benchmarks** (ADR-153 + ADR-157 do C11) — medições de latência em
+   `/transicoes`. Sessão dedicada.
+3. **CI/CD pós-Wave 3** (ADR-156 do C11) — drift Python↔Postgres em CI
+   com `INTEGRATION_DATABASE_URL`. Sessão dedicada.
+
+Específicas do C12 (manter):
+
+4. **Smoke E2E manual** (`smoke-validation.md` 18 cenários). Cenários
+   2/3/4 SKIP em produção (R-4 — sem fixtures LAM_MATRIZ/FILIAL/LAM_FILIAL).
+5. **Validação leitor de tela** (smoke 12) + **axe-core manual** (smoke 14)
+   + **performance medida** (smoke 15 — AUD-008).
+6. **Screenshots para visual-guide.md** preenchendo placeholders (criar
+   `docs/wave3-v4-c12/screenshots/`).
+7. **Decisão R-12 do AUD-011** — filtros C07 com duplicação visual.
+
+### MARCO — fim da Wave 3 v4.0
+
+Esta é a **última sessão de correção de componente da Wave 3 v4.0.**
+Após esta correção (e eventual re-auditoria), recomenda-se **sessão de
+revisão de Wave 3 inteira pré-merge `main`** — sessão dedicada, fora
+desta correção — antes do merge `development → main`.
+
+Wave 3 inteira completa em `development`. Próximo passo é revisão
+consolidada da wave (C10 + C19 + C11 + C12 + Audit Fixes), não merge
+direto.
+
+**Documentos:** [fix-plan.md](docs/wave3-v4-c12/fix-plan.md) ·
+[fix-validation.md](docs/wave3-v4-c12/fix-validation.md) ·
+[coverage-snapshot.md](docs/wave3-v4-c12/coverage-snapshot.md) ·
+[visual-guide.md](docs/wave3-v4-c12/visual-guide.md) ·
+[audit-report.md (apêndice de status)](docs/wave3-v4-c12/audit-report.md).
+
+---
+
+## v4.0 — Wave 3 — Componente 12 (2026-05-13)
+
+**Branch:** `wave3-v4/componente-12` → PR contra `development`.
+**Base:** `development` (commit `bdd4442` — pos-C11 Audit Fixes).
+**Tipo:** 4ª e ultima entrega da Wave 3 v4.0 (de 4 — C10, C19, C11, C12).
+Fechando o C12, a Wave 3 inteira fica pronta para merge `development →
+main`. Frontend-only, zero touch em backend, RLS ou migrations.
+
+### Adicionado
+
+- **Timeline visual reformulada** ([Timeline.tsx](frontend/src/app/(dashboard)/provas/%5Bid%5D/Timeline.tsx))
+  com suporte completo as 4 rotas v4.0 (Matriz, Lam. Matriz, Filial,
+  Lam. Filial) + 2 legacy v3.0 (PADRAO/DIRETA) + rota=NULL com heuristica.
+- **Bloco visual destacado "Etapa de laminacao"** envolvendo nos
+  adjacentes com `inLaminationBlock=true` — borda tracejada verde
+  (#c0ca33) + label uppercase. Aparece nas rotas Lam. Matriz (5 estados)
+  e Lam. Filial (3 estados). Decisao 3 do Gate 1.
+- **3 contextos do motorista** diferenciados visualmente via badge
+  textual: "→ Laminação" (ida), "Laminação →" (volta), "→ Clicheria"
+  (entrega final). Espelha o helper Python `contexto_motorista`.
+  Decisao 4 do Gate 1.
+- **Multiplos ciclos** renderizados empilhados verticalmente com
+  separador "↻ reinício de ciclo" + header diferenciado por ciclo
+  passado ("Ciclo N · reprovado em DD/MM" + badge "Reprovado") vs
+  atual ("Ciclo N" + badge "Em andamento"). Motivo da reprovacao
+  destacado em vermelho dentro do ciclo passado. Decisao 5 do Gate 1.
+- **Etapas pendentes** (futuras) renderizadas com dot outline cinza +
+  conector tracejado + label "Aguardando". Permite visualizar o que
+  falta no fluxo. Decisao 6 do Gate 1.
+- **Card transversal de cancelamento** aparece quando o ciclo atual
+  esta cancelado — vermelho com icone alert-triangle + ator, motivo,
+  timestamp. Decisao 7 do Gate 1.
+- **Badge "Concluida"** no terminal sucesso (RECEBIDA_PELA_CLICHERIA)
+  + icone check-circle verde + header global com badge OK. Decisao 8.
+- **Indicador de estado atual:** dot amarelo + box-shadow amarelo claro
+  + pulse animado via framer-motion (`motion.span` com
+  scale=[1,1.9,1] em loop) + badge "Atual". Respeita
+  `useReducedMotion` (RNF-010). Decisao 6.
+- **Modulo puro [lib/timeline-builder.ts](frontend/src/lib/timeline-builder.ts)**
+  (354 LOC reais — era documentado como 240, reconciliado em
+  AUD-W3C12-002 pos-auditoria) com pipeline
+  `buildTimeline(prova, movimentacoes) -> BuiltTimeline`. Helpers internos: `buildConcreteNodes`,
+  `derivePendingNodes`, `groupCyclesWithMetadata`,
+  `extractCancellationInfo`. Testavel em
+  `vitest --environment node` (D-13 da Wave 1 v4.0 preservado).
+- **Helpers TypeScript** em [lib/types/prova.ts](frontend/src/lib/types/prova.ts):
+  `ContextoMotorista` type + `contextoMotorista(status)` (espelho Python)
+  + `ESTADOS_LAMINACAO` + `isInLaminationBlock(status)` + `ROTA_ETAPAS`
+  (sequencia canonica por rota) + `LEGACY_ROTA_PADRAO` (7 estados) +
+  `LEGACY_ROTA_DIRETA` (5 estados) + `getRotaEtapas(rota, vendedor_loc)`
+  (resolve com heuristica) + `getRotaLabel(rota, vendedor_loc)` (badge
+  do header).
+- **Acessibilidade AA:**
+  - `role="region"` na raiz + `aria-label` com `nro_requerimento`
+  - `role="list"` / `role="listitem"` nos `<ol>/<ul>/<li>` semanticos
+  - `aria-current="step"` no no atual
+  - `aria-label` descritivo por no (label + fase + ator + timestamp)
+  - `role="group"` + `aria-label="Etapa de laminação"` no bloco
+  - `role="alert"` no card de cancelamento
+  - `useReducedMotion` (framer-motion) + `@media prefers-reduced-motion`
+    como dupla defesa para RN-012 / RNF-010
+- **Icones SVG inline** seguindo o padrao do projeto (sem lucide-react):
+  `CheckCircleIcon`, `AlertTriangleIcon`, `BanIcon`.
+
+### Modificado
+
+- **`ROTA_LABELS["PADRAO"]: "Padrao" -> "Matriz"`** + **`ROTA_LABELS["DIRETA"]: "Direta" -> "Filial"`**
+  (Decisao 11.1 do Gate 1 — supersede ADR-126 do C08 v4.0). Mudanca
+  centralizada em [prova.ts](frontend/src/lib/types/prova.ts) propaga
+  para todas as superficies (detalhe da prova, listagem C07, relatorios
+  C16, CSV export). Conceitualmente: PADRAO v3.0 = "Matriz sem laminacao"
+  e DIRETA v3.0 = "Filial sem laminacao" — alinhamento operacional com
+  a nomenclatura v4.0. Distincao tecnica preservada via
+  `LEGACY_ROTA_PADRAO`/`LEGACY_ROTA_DIRETA` no builder + ausencia de
+  bloco de laminacao.
+- **`formatRota(null)` e `getRotaLabel(null, vendedor_loc)`** — Decisao
+  11.2 do Gate 1: provas com `rota=NULL` usam heuristica baseada em
+  `vendedor_localizacao` (MATRIZ → "Matriz" + sequencia LEGACY_ROTA_PADRAO;
+  FILIAL → "Filial" + sequencia LEGACY_ROTA_DIRETA). Fallback "—" se
+  ambos NULL. Em producao (validado via MCP) as 11 provas com `rota=NULL`
+  tem todas `vendedor_localizacao=FILIAL`.
+
+### Testes
+
+- **`lib/types/__tests__/prova.test.ts`** — **53 testes** (era 8 +
+  45 novos): cobertura de `formatRota` atualizada para a Decisao 11.1,
+  `contextoMotorista` (paridade Python — 7 cenarios), `isInLaminationBlock`
+  (10 cenarios), `ROTA_ETAPAS` exhaustivo (4 rotas + sanity transversais),
+  `getRotaEtapas` (9 cenarios com heuristica), `getRotaLabel` (9
+  cenarios), sanity `STATUS_LABELS/SHORT` para 17 valores.
+- **`lib/__tests__/timeline-builder.test.ts` (novo)** — **20 testes**:
+  - 5 cobrindo as 4 rotas v4.0 (em andamento + terminal sucesso)
+  - 5 cobrindo provas legacy (PADRAO, DIRETA, NULL+MATRIZ, NULL+FILIAL,
+    NULL+NULL)
+  - 2 cobrindo multiplos ciclos (reprovado + reiniciado)
+  - 2 cobrindo cancelamento (mid-ciclo + nao-cancelada)
+  - 3 cobrindo os 3 contextos do motorista
+  - 3 edge cases (movs=null, sem movs, sem rota+localizacao)
+- **Suite total Vitest:** **163 passed** (era 98 + 65 novos do C12).
+  Sem regressao em codigo-publico (43), c19-mensagens (9),
+  identificacao-prova (18), path-active (5), middleware (15).
+
+### Validacao
+
+- `npx tsc --noEmit` exit 0
+- `npx next build` 13/13 paginas; `/provas/[id]` em **16.1 kB / 214 kB**
+  (era ~11.4 kB / 209 kB — overhead +4.7 kB pelo redesign + framer-motion
+  expandido na Timeline). Build sem warnings novos.
+- `npx vitest run` 163 passed (sem regressao)
+- MCP `get_advisors security` identico ao baseline pos-C11
+  (1 INFO `alembic_version` intencional ADR-025 + 1 WARN
+  `auth_leaked_password` WONTFIX ADR-027)
+- Smoke programatico no preview Next: `/login` renderiza sem erros (0
+  console errors, 0 server errors). Timeline em si vive em `/provas/[id]`
+  (autenticado) — smoke E2E manual em `docs/wave3-v4-c12/smoke-validation.md`.
+
+### ADRs novos
+
+- **ADR-158** — `ROTA_LABELS["PADRAO"]="Matriz"` e `ROTA_LABELS["DIRETA"]="Filial"`
+  (supersede ADR-126). Justificativa: alinhamento conceitual com a
+  v4.0 sem custo de migration (Wave 7 fara o backfill final do enum
+  Postgres).
+- **ADR-159** — Heuristica `vendedor_localizacao → rota visual` para
+  `rota=NULL`. Apenas client-side, nao muda o banco. Antecipa
+  parcialmente o trabalho da Wave 7 / C21 sem persistir.
+- **ADR-160** — Bloco visual "Etapa de laminacao" agrupa nos adjacentes
+  com `inLaminationBlock=true` em um wrapper `<div>` com borda
+  tracejada verde + label. Decisao 3 do Gate 1.
+- **ADR-161** — Nos pendentes (futuros) renderizados com dot outline
+  cinza + conector tracejado. Decisao 6 do Gate 1.
+
+### Pendencias para PR para `main` (Wave 3 inteira)
+
+- Smoke E2E manual em `docs/wave3-v4-c12/smoke-validation.md` (criar
+  fixtures em ambiente de teste para Lam. Matriz / Filial / Lam. Filial
+  — em producao so existe 1 prova MATRIZ v4.0 + 16 legacy).
+- Rate limit backend (ADR-145 do C19) + benchmarks (ADR-153 do C11 +
+  ADR-157 do C11) — pendencias herdadas das entregas anteriores da
+  Wave 3 v4.0.
+- Validacao manual com leitor de tela (VoiceOver / NVDA) + axe-core
+  manual em browser real.
+
+### FECHA A WAVE 3 v4.0
+
+Wave 3 v4.0 completa em `development` apos merge deste C12.
+Proximo passo: revisao de wave (auditoria independente recomendada)
+seguida de merge `development → main`.
+
+---
+
 ## v4.0 — Wave 3 — Componente 11 — Correcoes Pos-Auditoria (2026-05-13)
 
 **Branch:** `wave3-v4-c11/fixes/execution` → PR contra

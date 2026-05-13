@@ -1,49 +1,194 @@
-/* ── Timeline Visual — Componente 12 (Wave 3 Lote B) ─────────────────
+/* ── Timeline Visual — Componente 12 (Wave 3 v4.0) ───────────────────
+ *
  * Renderiza dentro do card preto (.timelineCard em detalhe.module.css).
- * Todas as cores assumem fundo #000.
+ * Fundo #000, tipografia branca, accent amarelo + danger vermelho +
+ * success verde (paleta C08 herdada).
+ *
+ * Estrutura DOM:
+ *   .timeline (raiz)
+ *   ├── .header (badge rota + ícone terminal/cancelado)
+ *   └── .cycles (lista de TimelineCycle)
+ *       └── .cycle (cada ciclo)
+ *           ├── .cycleHeader (Ciclo N · phase)
+ *           ├── .nodeList (steps + bloco de laminacao)
+ *           │   ├── .laminationBlock (wrapper opcional)
+ *           │   │   └── .node[*]
+ *           │   └── .node[*] (passed / current / pending)
+ *           └── .cancellationCard (opcional)
+ *
+ * Decisoes do Gate 1:
+ *   D1 vertical · D2 mesmo layout + badge rota + bloco laminacao
+ *   D3 bloco visualmente separado · D4 badge textual motorista
+ *   D5 ciclos empilhados · D6 dot amarelo + badge "Atual" + pulse
+ *   D7 cancelamento card + no cinza + motivo · D8 check verde + "Concluida"
+ *   D9 estatica · D10 densa · D11 ROTA_LABELS atualizado em prova.ts
  */
 
-/* ── Container ──────────────────────────────────────────────────────── */
+/* ── Container raiz ─────────────────────────────────────────────────── */
 
 .timeline {
   display: flex;
   flex-direction: column;
+  gap: 1.5rem;
 }
 
-/* ── Agrupamento por ciclo ──────────────────────────────────────────── */
+/* ── Header da timeline (badge rota + ícone terminal) ──────────────── */
 
-.cycleGroup + .cycleGroup {
-  margin-top: 1.5rem;
-  padding-top: 1.5rem;
-  border-top: 1px dashed rgba(255, 255, 255, 0.15);
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
-.cycleLabel {
-  font-size: 0.7rem;
+.rotaBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.85rem;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  letter-spacing: 0.02em;
+}
+
+.headerStatusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.85rem 0.35rem 0.65rem;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+}
+
+.headerStatusBadgeOk {
+  background: color-mix(in srgb, var(--color-success) 16%, transparent);
+  color: var(--color-success);
+}
+
+.headerStatusBadgeOk svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.headerStatusBadgeCancelled {
+  background: rgba(134, 134, 134, 0.2);
+  color: #d4d4d4;
+}
+
+/* ── Lista de ciclos ─────────────────────────────────────────────────── */
+
+.cycles {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.cycle {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.cyclePassed {
+  padding: 0.85rem 1rem 0.95rem;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-card);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.cycleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.cycleHeaderTitle {
+  font-size: var(--fs-xs);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--color-text-dim);
-  margin-bottom: 1rem;
-  padding-left: 2rem;
+  margin: 0;
 }
 
-/* ── Lista de nos ───────────────────────────────────────────────────── */
+.cycleHeaderTitle strong {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.cycleHeaderPhase {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  letter-spacing: 0.02em;
+}
+
+.cycleHeaderPhaseAtual {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.cycleHeaderPhaseReprovacao {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.cycleHeaderMotivo {
+  margin-top: 0.45rem;
+  padding: 0.55rem 0.75rem;
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: #ffffff;
+  line-height: 1.45;
+}
+
+.cycleHeaderMotivo strong {
+  font-weight: 600;
+  margin-right: 0.25rem;
+}
+
+/* Separador entre ciclos (label "reinicio de ciclo") */
+.cycleSeparator {
+  font-size: 0.7rem;
+  color: var(--color-text-dim);
+  padding-left: 2rem;
+  margin: 0.15rem 0 -0.4rem;
+  font-style: italic;
+}
+
+/* ── Lista de nos dentro de um ciclo ─────────────────────────────────── */
 
 .nodeList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
 }
 
-/* ── No individual ──────────────────────────────────────────────────── */
+/* ── No individual (step) ─────────────────────────────────────────────── */
 
 .node {
   display: flex;
   gap: 0.875rem;
 }
 
-/* ── Coluna do ponto + conector ──────────────────────────────────────── */
-
+/* Coluna do dot + conector */
 .dotColumn {
   display: flex;
   flex-direction: column;
@@ -56,14 +201,27 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--color-accent);
   flex-shrink: 0;
   position: relative;
   z-index: 1;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+/* Estados do dot por phase + tipo */
+.nodePassed .dot {
+  background: var(--color-accent);
 }
 
 .nodeCurrent .dot {
+  background: var(--color-accent);
   box-shadow: 0 0 0 3px rgba(255, 203, 92, 0.3);
+}
+
+.nodePending .dot {
+  background: transparent;
+  border: 1.5px solid var(--color-text-dim);
+  width: 12px;
+  height: 12px;
 }
 
 .nodeReprovacao .dot {
@@ -71,31 +229,36 @@
 }
 
 .nodeCancelamento .dot {
-  background: #575757;
+  background: #868686;
 }
 
-.nodeTerminal .dot {
+.nodeTerminalOk .dot {
   background: var(--color-success);
 }
 
-/* Pulso animado no no atual */
+/* Pulso animado no no atual (Decisao 6 — framer-motion via JS,
+   fallback CSS abaixo para prefers-reduced-motion) */
 .dotPulse {
   position: absolute;
   inset: -1px;
   border-radius: 50%;
   background: var(--color-accent);
+  pointer-events: none;
 }
 
-.nodeReprovacao .dotPulse {
-  background: var(--color-danger);
-}
-
-/* Conector vertical entre nos */
+/* Conector vertical entre nos consecutivos */
 .connector {
   width: 2px;
   flex: 1;
   min-height: 0.75rem;
   background: rgba(255, 255, 255, 0.12);
+}
+
+/* Conector tracejado entre estados pendentes */
+.connectorPending {
+  background: transparent;
+  border-left: 2px dashed rgba(255, 255, 255, 0.18);
+  width: 0;
 }
 
 /* ── Conteudo do no ─────────────────────────────────────────────────── */
@@ -106,7 +269,6 @@
   padding-bottom: 1.25rem;
 }
 
-/* Remove padding do ultimo no de cada ciclo */
 .node:last-child .nodeContent {
   padding-bottom: 0;
 }
@@ -130,12 +292,20 @@
 }
 
 .nodeCancelamento .nodeStatus {
-  color: #868686;
+  color: var(--color-text-dim);
 }
 
-/* ── Badges ──────────────────────────────────────────────────────────── */
+.nodeTerminalOk .nodeStatus {
+  color: var(--color-success);
+}
 
-.rotaBadge {
+.nodePending .nodeStatus {
+  color: var(--color-text-dim);
+  font-weight: 500;
+}
+
+/* Badges acessorias */
+.currentBadge {
   display: inline-flex;
   align-items: center;
   padding: 0.1rem 0.5rem;
@@ -144,22 +314,37 @@
   border-radius: var(--radius-pill);
   background: var(--color-accent-soft);
   color: var(--color-accent);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
 }
 
-.currentBadge {
+.terminalBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.55rem 0.1rem 0.4rem;
+  font-size: 0.675rem;
+  font-weight: 600;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--color-success) 18%, transparent);
+  color: var(--color-success);
+}
+
+.terminalBadge svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.motoristaBadge {
   display: inline-flex;
   align-items: center;
   padding: 0.1rem 0.5rem;
   font-size: 0.675rem;
   font-weight: 600;
   border-radius: var(--radius-pill);
-  background: rgba(255, 203, 92, 0.2);
-  color: var(--color-accent);
+  background: rgba(255, 152, 0, 0.15);
+  color: #ffb74d;
+  letter-spacing: 0.01em;
 }
-
-/* ── Metadata (usuario + setor + data) ──────────────────────────────── */
 
 .nodeMeta {
   font-size: var(--fs-xs);
@@ -171,8 +356,6 @@
   color: var(--color-text-dim);
 }
 
-/* ── Motivo de reprovacao ────────────────────────────────────────────── */
-
 .nodeMotivo {
   margin-top: 0.4rem;
   padding: 0.4rem 0.65rem;
@@ -183,7 +366,74 @@
   line-height: 1.4;
 }
 
-/* ── Empty state ─────────────────────────────────────────────────────── */
+.nodeMotivo strong {
+  font-weight: 600;
+  margin-right: 0.25rem;
+}
+
+/* ── Bloco de laminacao (Decisao 3 — bloco visualmente separado) ────── */
+
+.laminationBlock {
+  position: relative;
+  padding: 0.65rem 0.85rem 0.5rem;
+  margin: 0.25rem 0;
+  border: 1px dashed rgba(192, 202, 51, 0.35);
+  border-radius: var(--radius-card);
+  background: rgba(192, 202, 51, 0.04);
+}
+
+.laminationBlockTitle {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #c0ca33;
+  margin: 0 0 0.55rem;
+  padding-left: 2rem;
+}
+
+/* ── Card de cancelamento (Decisao 7 — card transversal vermelho) ────── */
+
+.cancellationCard {
+  padding: 0.9rem 1rem;
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
+  border-radius: var(--radius-card);
+  color: #ffffff;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+}
+
+.cancellationCardIcon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--color-danger);
+  margin-top: 0.1rem;
+}
+
+.cancellationCardBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.cancellationCardTitle {
+  font-weight: 600;
+  color: var(--color-danger);
+  margin-bottom: 0.2rem;
+  font-size: var(--fs-sm);
+}
+
+.cancellationCardMeta {
+  font-size: var(--fs-xs);
+  color: var(--color-text-secondary);
+  line-height: 1.45;
+}
+
+/* ── Empty / fallback states ──────────────────────────────────────────── */
 
 .empty {
   padding: 1.5rem 0 0.5rem;
@@ -201,11 +451,21 @@
   color: var(--color-text-dim);
 }
 
-/* ── Null state (movimentacoes nao carregaram) ────────────────────────── */
-
 .fallback {
   padding: 1rem 0;
   text-align: center;
   font-size: var(--fs-sm);
   color: var(--color-text-dim);
+}
+
+/* ── prefers-reduced-motion (RN-012 + RNF-010) ───────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .dotPulse {
+    display: none;
+  }
+  .node {
+    transition: none !important;
+    animation: none !important;
+  }
 }

@@ -6770,4 +6770,257 @@ benchmarks (junto com ADR-145 e ADR-153) **antes do PR para `main`**.
 - Apendice de status no `audit-report.md` registra deferral.
 - Sem mudanca de codigo nesta sessao.
 
+---
+
+## ADR-158 — `ROTA_LABELS["PADRAO"]="Matriz"` e `ROTA_LABELS["DIRETA"]="Filial"` (supersede ADR-126)
+
+**Wave:** 3 v4.0 / Componente 12
+**Data:** 2026-05-13
+**Status:** ATIVO — supersede ADR-126 do C08 v4.0
+**Contexto:** Decisao 11.1 do Gate 1 do C12.
+
+**Decisao:**
+Renomear globalmente os labels exibidos das rotas legacy v3.0:
+- `ROTA_LABELS["PADRAO"]`: `"Padrao"` → `"Matriz"`
+- `ROTA_LABELS["DIRETA"]`: `"Direta"` → `"Filial"`
+
+**Por que:**
+- O vendedor opera com a mesma logica visual: "Padrao" v3.0 = "Matriz
+  sem laminacao" e "Direta" v3.0 = "Filial sem laminacao".
+- Alinhamento operacional com a nomenclatura v4.0 reduz cargas
+  cognitivas durante a coexistencia v3.0 ↔ v4.0 (ate Wave 7).
+- O label nao toca o enum Postgres — Wave 7 / C21 fara o backfill
+  do enum quando apropriado.
+
+**Como aplicar:**
+- Mudanca pontual em `frontend/src/lib/types/prova.ts` — 2 strings
+  em 1 arquivo (centralizado em `ROTA_LABELS`).
+- Propaga automaticamente para todas as superficies que consomem
+  `ROTA_LABELS[rota]` ou `formatRota(rota)`: detalhe da prova, listagem
+  C07, relatorios C16, CSV export.
+- Distincao tecnica preservada via `LEGACY_ROTA_PADRAO`/`LEGACY_ROTA_DIRETA`
+  no `lib/timeline-builder.ts` (sequencias diferentes das v4.0) e via
+  ausencia de bloco de laminacao para legacy.
+
+**Alternativas:**
+- Manter "Padrao"/"Direta" globalmente: rejeitado — operacional disse
+  que vendedor nao reconhece esses nomes.
+- Renomear so na Timeline (escopo β): rejeitado — inconsistencia entre
+  detalhe ("Rota: Padrao") e Timeline (badge "Matriz") confundiria.
+
+**Consequencias:**
+- ADR-126 do C08 v4.0 ("sufixo (legada v3.0) removido") fica
+  superseded — a distincao legacy/v4.0 nao aparece mais no label,
+  apenas na sequencia da Timeline.
+- Filtros da listagem (C07) podem ter duplicacao visual: 2 opcoes
+  "Matriz" (MATRIZ + PADRAO) e 2 "Filial" (FILIAL + DIRETA). **A
+  confirmar pos-merge se vale colapsar.** Registrado como R-12 no
+  `analysis.md` (Gate 1).
+- Testes Vitest atualizados: `formatRota("PADRAO")` agora retorna
+  `"Matriz"`; idem `formatRota("DIRETA")` → `"Filial"`.
+
+---
+
+## ADR-159 — Heuristica `vendedor_localizacao → rota visual` para `rota=NULL`
+
+**Wave:** 3 v4.0 / Componente 12
+**Data:** 2026-05-13
+**Status:** ATIVO ate Wave 7 / C21 fazer o backfill final
+**Contexto:** Decisao 11.2 do Gate 1 do C12. Em producao (validado
+via MCP) ha 11 provas com `rota=NULL` — todas com
+`vendedor_localizacao=FILIAL` no momento do C12.
+
+**Decisao:**
+Quando `prova.rota IS NULL`, derivar visualmente a rota usando
+`prova.vendedor_localizacao`:
+- MATRIZ → label "Matriz" + sequencia `LEGACY_ROTA_PADRAO`
+- FILIAL → label "Filial" + sequencia `LEGACY_ROTA_DIRETA`
+- NULL → label "—" + sem etapas pendentes (so historico real)
+
+**Por que:**
+- Operacional sem rotulo claro confunde o vendedor — pior UX.
+- Heuristica eh apenas client-side, nao toca o banco; nao concorre
+  com a Wave 7 / C21 (que fara backfill correto).
+- O risco de classificar erroneamente eh baixo porque a base atual
+  eh 100% FILIAL e a v3.0 nao tinha rotas com laminacao.
+
+**Como aplicar:**
+- `getRotaEtapas(rota, vendedor_localizacao)` em
+  `frontend/src/lib/types/prova.ts` — resolve a sequencia.
+- `getRotaLabel(rota, vendedor_localizacao)` em mesmo arquivo —
+  resolve o badge do header.
+- Ambos consumidos pelo builder em `lib/timeline-builder.ts` e pela
+  Timeline.
+
+**Alternativas:**
+- Manter "—" (opcao (a) do Gate 1): rejeitado — pior UX.
+- Badge "v3.0" / "Legada" (opcao (c)): rejeitado — usuario nao
+  precisa saber detalhes tecnicos.
+
+**Consequencias:**
+- Provas legacy com `rota=NULL` agora aparecem na UI como se fossem
+  Matriz ou Filial.
+- Se a Wave 7 / C21 backfill diferir da heuristica (improvavel — ela
+  usa a mesma fonte de verdade `vendedor.localizacao`), a Timeline
+  apenas reorganiza automaticamente quando `prova.rota` virar nao-nulo.
+- Sem persistencia: zero risco de drift permanente.
+
+---
+
+## ADR-160 — Bloco visual "Etapa de laminacao" agrupa nos adjacentes
+
+**Wave:** 3 v4.0 / Componente 12
+**Data:** 2026-05-13
+**Status:** ATIVO
+**Contexto:** Decisao 3 do Gate 1 do C12 (opcao a) — bloco visualmente
+separado.
+
+**Decisao:**
+A Timeline detecta sequencias adjacentes de nos com
+`inLaminationBlock=true` e as envolve em um `<div>` com borda
+tracejada verde (#c0ca33) + label uppercase "Etapa de laminação".
+
+**Estados marcados como `inLaminationBlock`:**
+- `ENCAMINHADA_PARA_LAMINACAO`
+- `COM_MOTORISTA_IDA_LAMINACAO`
+- `LAMINACAO_CONCLUIDA`
+- `COM_MOTORISTA_VOLTA_LAMINACAO` (so LAM_MATRIZ)
+- `DE_VOLTA_3STUDIO_POS_LAMINACAO` (so LAM_MATRIZ)
+
+**Por que:**
+- A Lam. Matriz tem 11 etapas — sem agrupamento visual, fica confusa.
+- A Lam. Filial tem 7 etapas, com 3 de laminacao — bloco visual
+  comunica claramente o "desvio" do fluxo principal.
+- Cor verde (#c0ca33) ja eh usada pelo ReportGeral (paleta donut chart)
+  para estados de laminacao — consistencia visual.
+
+**Como aplicar:**
+- `RenderNodes` (interno a Timeline.tsx) itera os nos do ciclo; quando
+  encontra um com `inLaminationBlock=true`, coleta adjacentes e
+  renderiza um wrapper `.laminationBlock`.
+- Bloco eh transparente para a a11y: `role="group"` + `aria-label="Etapa
+  de laminação"`. Os nos dentro mantem `role="listitem"`.
+- Provas legacy v3.0 nao tem nenhum no com `inLaminationBlock=true`,
+  portanto o bloco nunca aparece para legacy (Decisao 11.3 do Gate 1).
+
+**Alternativas:**
+- Opcao (b) subconjunto com indicador sutil: rejeitado — passa
+  despercebido.
+- Opcao (c) branch lateral: rejeitado — complexidade grafica alta
+  em layout vertical.
+
+**Consequencias:**
+- Bloco aparece apenas em rotas com laminacao (Lam. Matriz, Lam. Filial).
+- Padrao consistente com pipelines visuais conhecidos (GitLab,
+  GitHub Actions).
+- Custo CSS: ~30 linhas em `timeline.module.css`.
+
+---
+
+## ADR-161 — Nos pendentes (futuros) renderizados com dot outline cinza
+
+**Wave:** 3 v4.0 / Componente 12
+**Data:** 2026-05-13
+**Status:** ATIVO
+**Contexto:** Decisao 6 do Gate 1 do C12. A Timeline anterior (do
+C08+C11) so renderizava nos concretos (movimentacoes que ja aconteceram).
+O C12 expande para mostrar os estados pendentes da rota — usuario ve
+visualmente quanto falta.
+
+**Decisao:**
+Cada rota tem uma sequencia canonica (`ROTA_ETAPAS[rota]` ou
+`LEGACY_ROTA_*`). Apos o `current` (status da prova), os estados
+ainda nao atingidos viram nos `phase: "pending"`:
+- Dot outline cinza (sem fill) com `border: 1.5px solid var(--color-text-dim)`
+- Conector tracejado entre nos pendentes (`border-left: 2px dashed`)
+- Label do estado em cinza, peso 500 (vs branco peso 600 dos concretos)
+- Texto "Aguardando" no lugar de ator+timestamp+motivo
+- `aria-label` adicional "{label} — pendente"
+
+**Por que:**
+- Visualizacao do fluxo total ajuda o vendedor a saber "o que vem
+  depois" sem ter que consultar manuais.
+- A Lam. Matriz com 11 etapas se beneficia muito disso (4-5 sao
+  pendentes na maioria do tempo).
+
+**Como aplicar:**
+- `derivePendingNodes(prova, concretosCicloAtual)` em
+  `lib/timeline-builder.ts` — calcula a lista de estados pendentes
+  apos o status atual, descontando o que ja foi atingido.
+- So renderiza pendentes no ciclo ATUAL (`ciclo_atual`); ciclos
+  passados nao tem.
+- Nao renderiza pendentes se: terminal sucesso, cancelada, ou
+  reprovada (esperando reinicio admin) — nesses estados nao ha
+  "proximo step automatico".
+
+**Alternativas:**
+- Nao renderizar pendentes: rejeitado — feedback do Mario foi
+  explicito de querer ver o fluxo total.
+- Renderizar como cinza CHEIO (igual cancelado): rejeitado — visual
+  conflitaria com o estado "Cancelada".
+
+**Consequencias:**
+- Total de nos renderizados aumenta — pior caso na Lam. Matriz CRIADA
+  sao 11 nos visiveis (1 current + 10 pendentes).
+- Snapshot tests cobrem essa logica explicitamente.
+
+---
+
+## Apendice a Decisao 7 do C12 — strikethrough nos passos anteriores ao cancelamento (registro pos-auditoria)
+
+**Wave:** 3 v4.0 / Componente 12 — Correcoes Pos-Auditoria
+**Data:** 2026-05-13
+**Status:** ACEITO COMO ESTA — decisao consciente pos-auditoria
+**Contexto:** AUD-W3C12-006 da auditoria senior do C12 (commit `2a18794`).
+
+**Achado original:** A Decisao 7 aprovada pelo Mario em 2026-05-13
+listou 3 mecanismos sobrepostos para comunicar cancelamento: "(b)+(c)
+tachado no ultimo ativo + no 'Cancelada' cinza + motivo destacado". A
+entrega do C12 implementou 3 dos 4 mecanismos (card vermelho
+`role="alert"` extra + no cinza `CANCELADA` + motivo destacado em
+vermelho), mas o **tachado/strikethrough no no imediatamente anterior
+ao cancelamento NAO foi implementado**.
+
+**Decisao pos-auditoria (Opcao A do fix-plan):** ACEITAR a implementacao
+atual sem o tachado. AUD-W3C12-006 fica rebaixado para INFO.
+
+**Por que nao implementar o tachado:**
+1. **Honestidade historica do registro.** A movimentacao imediatamente
+   anterior ao cancelamento (ex.: "Retirada pelo vendedor por Joao da
+   Silva em 12/05") aconteceu de fato — esta gravada em `movimentacoes`
+   com trigger de imutabilidade. Tachar visualmente esse no usa uma
+   convencao de UI cuja semantica forte eh "deletado/anulado/invalido",
+   o que comunicaria algo factualmente impreciso: a etapa anterior NAO
+   foi anulada, apenas o processo posterior foi interrompido.
+2. **Os 3 mecanismos ja implementados sao suficientes.** Card vermelho
+   transversal `role="alert"` (anuncio imediato no leitor de tela) + no
+   terminal cinza `CANCELADA` + motivo destacado em vermelho comunicam
+   o cancelamento sem ambiguidade. O proprio auditor classificou o
+   achado como BAIXO e usou a frase explicita "a essencia da Decisao 7
+   esta preservada via card vermelho + no cinza + motivo".
+3. **A11y permanece equivalente.** Tachado nao adiciona nada para
+   leitor de tela; `role="alert"` no card vermelho ja dispara anuncio
+   imediato.
+4. **Principio "do no harm".** Mexer agora em Timeline.tsx + builder +
+   CSS + adicionar teste — mesmo que ~10 LOCs — toca os 3 arquivos
+   centrais do C12 ja estabilizados, contra um ganho visual questionavel.
+
+**Como aplicar:**
+- Implementacao atual permanece inalterada.
+- AUD-W3C12-006 rebaixado de BAIXO para INFO no apendice de status do
+  `docs/wave3-v4-c12/audit-report.md`.
+
+**Alternativa rejeitada:**
+- Opcao B do fix-plan: implementar `text-decoration: line-through;
+  opacity: 0.6` no no anterior via flag `precedesCancellation:
+  boolean` calculada no builder. Rejeitada pelos motivos 1-4 acima.
+
+**Consequencias:**
+- Wave 3 nao tem strikethrough no cenario de cancelamento — comportamento
+  estavel para as proximas waves.
+- Wave 4 (dashboard) pode reusar `buildTimeline` sem campos adicionais.
+- Se uma futura iteracao quiser reabrir esta decisao (ex.: feedback
+  do operacional), abrir nova ADR superseding este apendice.
+
+
 
