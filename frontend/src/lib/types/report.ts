@@ -11,7 +11,7 @@
  * RN-008 literal, alinhado com Wave 4 Dashboard).
  */
 
-import type { Localizacao, Rota, StatusProva } from "./prova";
+import type { ContextoMotorista, Localizacao, Rota, StatusProva } from "./prova";
 
 // ─── Filtros de query ──────────────────────────────────────────────────
 
@@ -31,6 +31,23 @@ export const REPORT_SCOPE_LABELS: Record<ReportScope, string> = {
   clicheria: "Clicheria",
 };
 
+/** Categoria consolidada de rota (Wave 5 v4.0 — Componente 16).
+ *
+ * Espelha `RotaCategoria` Python em
+ * `backend/app/services/report_filters.py`.
+ *
+ * - `matriz`: provas com `rota IN {MATRIZ, LAM_MATRIZ, PADRAO}` + provas
+ *   legacy `rota=NULL` cujo vendedor esta em `localizacao=MATRIZ`.
+ * - `filial`: provas com `rota IN {FILIAL, LAM_FILIAL, DIRETA}` + provas
+ *   legacy `rota=NULL` cujo vendedor esta em `localizacao=FILIAL`.
+ *
+ * Quando enviado via `?rota_categoria=...`, toma precedencia sobre
+ * `?rota=...` (mais abrangente). O `RotaFilter` atual (3 botoes:
+ * Todas/Matriz/Filial) emite `rota_categoria` para preservar layout
+ * v3 cobrindo v4.0.
+ */
+export type RotaCategoria = "matriz" | "filial";
+
 export interface ReportFilters {
   scope: ReportScope;
   /** ISO-8601 datetime UTC. Se ausente, backend usa default (to - 30d). */
@@ -40,7 +57,11 @@ export interface ReportFilters {
   /** Busca textual (max 200 chars). */
   q?: string | null;
   vendedor_id?: string | null;
+  /** Filtro por valor exato de rota (6 valores: 4 v4.0 + 2 legacy). */
   rota?: Rota | null;
+  /** [Wave 5 v4.0] Categoria consolidada (matriz/filial). Precedencia
+   * sobre `rota` se ambos fornecidos. */
+  rota_categoria?: RotaCategoria | null;
   status?: StatusProva | null;
 }
 
@@ -66,6 +87,49 @@ export interface DistStatusItem {
 export interface DistRotaItem {
   /** `null` representa provas com rota nao definida (status pre-aprovacao). */
   rota: Rota | null;
+  quantidade: number;
+}
+
+/** Categoria detalhada para `distribuicao_rota_v4` (Wave 5 v4.0). */
+export type DistRotaV4Categoria =
+  | "v4_matriz"
+  | "v4_lam_matriz"
+  | "v4_filial"
+  | "v4_lam_filial"
+  | "legacy_padrao"
+  | "legacy_direta"
+  | "legacy_null_matriz"
+  | "legacy_null_filial"
+  | "legacy_null_indefinida";
+
+/** Distribuicao detalhada de provas por rota v4.0 + legacy.
+ *
+ * Wave 5 v4.0: substitui funcionalmente `DistRotaItem` para clientes que
+ * precisam do detalhamento. Frontend atual (preservando layout v3) consome
+ * `ConsolidacaoRota` no card ROTA; este detalhamento e exposto no CSV e
+ * fica disponivel para downstream sem render visivel. */
+export interface DistRotaV4Item {
+  categoria: DistRotaV4Categoria;
+  /** Rota subjacente (null para legacy NULL inferida via localizacao). */
+  rota: Rota | null;
+  quantidade: number;
+}
+
+/** Consolidacao em 2 categorias (Wave 5 v4.0).
+ *
+ * Usado pelo card ROTA do `ReportGeral` para preservar layout v3 (2 dots)
+ * com semantica v4.0 (cobre 4 rotas v4.0 + 2 legacy + null inferido).
+ */
+export interface ConsolidacaoRota {
+  matriz: number;
+  filial: number;
+  indefinida: number;
+}
+
+/** Distribuicao de provas atualmente com motorista por contexto canonico
+ * (Wave 5 v4.0). Snapshot — nao filtrado por periodo. */
+export interface DistContextoMotoristaItem {
+  contexto: ContextoMotorista;
   quantidade: number;
 }
 
@@ -171,7 +235,18 @@ export interface ReportResponseGeral {
   indicadores: IndicadoresGeral;
   serie_temporal: PontoSerie[];
   distribuicao_status: DistStatusItem[];
+  /** [LEGACY v3] Distribuicao por rota — apenas PADRAO/DIRETA/NULL.
+   * Preservada por compat; usar `distribuicao_rota_v4` para detalhamento. */
   distribuicao_rota: DistRotaItem[];
+  /** [Wave 5 v4.0] Distribuicao detalhada cobrindo 9 categorias possiveis
+   * (4 rotas v4.0 + 2 legacy + 3 sub-buckets para `rota=NULL`). Opcional
+   * para compat com payloads antigos cached. */
+  distribuicao_rota_v4?: DistRotaV4Item[];
+  /** [Wave 5 v4.0] Consolidacao matriz/filial usada pelo card ROTA. */
+  consolidacao_rota?: ConsolidacaoRota;
+  /** [Wave 5 v4.0] Distribuicao de provas com motorista pelos 3 contextos
+   * canonicos. Snapshot — nao filtrado por periodo. */
+  contexto_motorista_dist?: DistContextoMotoristaItem[];
   /** Top vendedores por volume no periodo (max 200). */
   ranking: VendedorMetrica[];
   /** Top 20 provas atualmente atrasadas (snapshot). */
