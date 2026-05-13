@@ -3,17 +3,51 @@
  * Espelho fiel dos schemas Pydantic em backend/app/domain/schemas/prova.py.
  */
 
+/**
+ * Status da prova digital — 17 valores (10 v3.0 + 7 v4.0).
+ *
+ * Wave 3 v4.0 / Componente 11: Maquina de Estados Expandida (migration
+ * 013). Os 7 novos valores cobrem as 4 rotas v4.0 (MATRIZ, LAM_MATRIZ,
+ * FILIAL, LAM_FILIAL) com 3 contextos distintos do Motorista.
+ *
+ * Coexistencia v3.0/v4.0:
+ *   - Provas legacy (rota=NULL ou PADRAO/DIRETA) usam os 10 valores
+ *     v3.0 originais.
+ *   - Provas v4.0 (rota IN {MATRIZ,LAM_MATRIZ,FILIAL,LAM_FILIAL}) usam
+ *     os valores v4.0 novos.
+ *   - `COM_MOTORISTA` (v3.0) e `COM_MOTORISTA_ENTREGA_FINAL` (v4.0)
+ *     sao operacionalmente equivalentes mas DISTINTOS no enum (Decisao
+ *     M-2b(a) do Gate 1 do C11).
+ *
+ * Espelha `StatusProvaEnum` em `backend/app/db/models.py` e o tipo
+ * Postgres `status_prova_enum`. Toda alteracao exige sincronizacao
+ * coordenada nas 3 camadas — ver
+ * `backend/tests/test_status_prova_enum_drift.py`.
+ */
 export type StatusProva =
+  // ── Legacy v3.0 (Wave 0 + Wave 3) ─────────────────────────────────────
   | "CRIADA"
   | "RETIRADA_PELO_VENDEDOR"
   | "APROVADA_PELO_VENDEDOR"
   | "DE_VOLTA_3STUDIO"
-  | "COM_MOTORISTA"
-  | "ENVIADA_PARA_CLICHERIA"
-  | "ENCAMINHADA_A_CLICHERIA"
-  | "RECEBIDA_PELA_CLICHERIA"
+  | "COM_MOTORISTA"               // legacy v3.0 — 1 unico contexto
+  | "ENVIADA_PARA_CLICHERIA"      // legacy v3.0 (rota PADRAO)
+  | "ENCAMINHADA_A_CLICHERIA"     // legacy v3.0 (rota DIRETA)
+  | "RECEBIDA_PELA_CLICHERIA"     // terminal sucesso (v3.0 + v4.0)
   | "REPROVADA_PELO_VENDEDOR"
-  | "CANCELADA";
+  | "CANCELADA"                   // terminal cancelamento (v3.0 + v4.0)
+  // ── v4.0 (Wave 3 / Componente 11) ─────────────────────────────────────
+  // 3 contextos distintos do Motorista (US-006 v4.0)
+  | "COM_MOTORISTA_IDA_LAMINACAO"
+  | "COM_MOTORISTA_VOLTA_LAMINACAO"
+  | "COM_MOTORISTA_ENTREGA_FINAL"
+  // Etapas de laminacao (Lam. Matriz, Lam. Filial - US-005, US-007)
+  | "ENCAMINHADA_PARA_LAMINACAO"
+  | "LAMINACAO_CONCLUIDA"
+  // Estado de retorno apos volta de laminacao (Lam. Matriz apenas)
+  | "DE_VOLTA_3STUDIO_POS_LAMINACAO"
+  // Vendedor Filial recebe direto (sem retirada) — Filial, Lam. Filial
+  | "ENCAMINHADA_PARA_O_VENDEDOR";
 
 /**
  * Rota de encaminhamento (Wave 2 v4.0 — Componente 06).
@@ -154,6 +188,7 @@ export interface ProvaListResponse {
  * "Aguardando vendedor" e mais claro para o usuario sobre a acao
  * pendente. Decisao do Mario (ADR-125). */
 export const STATUS_LABELS: Record<StatusProva, string> = {
+  // ── Legacy v3.0 ────────────────────────────────────────────────────────
   CRIADA: "Aguardando vendedor",
   RETIRADA_PELO_VENDEDOR: "Retirada pelo vendedor",
   APROVADA_PELO_VENDEDOR: "Aprovada pelo vendedor",
@@ -164,12 +199,21 @@ export const STATUS_LABELS: Record<StatusProva, string> = {
   RECEBIDA_PELA_CLICHERIA: "Recebida pela clicheria",
   REPROVADA_PELO_VENDEDOR: "Reprovada pelo vendedor",
   CANCELADA: "Cancelada",
+  // ── v4.0 (Wave 3 / Componente 11) ──────────────────────────────────────
+  COM_MOTORISTA_IDA_LAMINACAO: "Com motorista (ida laminacao)",
+  COM_MOTORISTA_VOLTA_LAMINACAO: "Com motorista (volta laminacao)",
+  COM_MOTORISTA_ENTREGA_FINAL: "Com motorista (entrega final)",
+  ENCAMINHADA_PARA_LAMINACAO: "Encaminhada para laminacao",
+  LAMINACAO_CONCLUIDA: "Laminacao concluida",
+  DE_VOLTA_3STUDIO_POS_LAMINACAO: "De volta a 3Studio (pos-laminacao)",
+  ENCAMINHADA_PARA_O_VENDEDOR: "Encaminhada para o vendedor",
 };
 
 /** Labels pt-BR curtos — usados na listagem (Componente 07), onde a coluna
  * Status tem espaco limitado e o Figma pede versao abreviada. Preserva a
  * distintividade de todos os 10 estados. */
 export const STATUS_LABELS_SHORT: Record<StatusProva, string> = {
+  // ── Legacy v3.0 ────────────────────────────────────────────────────────
   CRIADA: "Aguardando",
   RETIRADA_PELO_VENDEDOR: "Retirada",
   APROVADA_PELO_VENDEDOR: "Aprovada",
@@ -180,6 +224,14 @@ export const STATUS_LABELS_SHORT: Record<StatusProva, string> = {
   RECEBIDA_PELA_CLICHERIA: "Na clicheria",
   REPROVADA_PELO_VENDEDOR: "Reprovada",
   CANCELADA: "Cancelada",
+  // ── v4.0 (Wave 3 / Componente 11) — versoes abreviadas para listagem ───
+  COM_MOTORISTA_IDA_LAMINACAO: "Ida laminacao",
+  COM_MOTORISTA_VOLTA_LAMINACAO: "Volta laminacao",
+  COM_MOTORISTA_ENTREGA_FINAL: "Entrega final",
+  ENCAMINHADA_PARA_LAMINACAO: "P/ laminar",
+  LAMINACAO_CONCLUIDA: "Laminada",
+  DE_VOLTA_3STUDIO_POS_LAMINACAO: "Pos-laminacao",
+  ENCAMINHADA_PARA_O_VENDEDOR: "P/ vendedor",
 };
 
 /** Labels pt-BR para as rotas (Wave 2 v4.0).
@@ -223,15 +275,29 @@ export const ROTA_CRIACAO_OPTIONS: readonly RotaCriacao[] = [
   "LAM_FILIAL",
 ] as const;
 
-/** Ordem canonica dos status para exibicao em selects. */
+/** Ordem canonica dos status para exibicao em selects.
+ *
+ * Ordem segue a sequencia tipica de fluxo: inicio → vendedor → 3Studio
+ * → laminacao (v4.0) → motorista (3 contextos v4.0 + 1 legacy) →
+ * clicheria → terminais → transversais.
+ *
+ * Wave 3 v4.0: 17 valores totais (10 v3.0 + 7 v4.0).
+ */
 export const STATUS_OPTIONS: readonly StatusProva[] = [
   "CRIADA",
+  "ENCAMINHADA_PARA_LAMINACAO",       // v4.0
+  "COM_MOTORISTA_IDA_LAMINACAO",       // v4.0
+  "LAMINACAO_CONCLUIDA",               // v4.0
+  "COM_MOTORISTA_VOLTA_LAMINACAO",     // v4.0
+  "DE_VOLTA_3STUDIO_POS_LAMINACAO",    // v4.0
+  "ENCAMINHADA_PARA_O_VENDEDOR",       // v4.0
   "RETIRADA_PELO_VENDEDOR",
   "APROVADA_PELO_VENDEDOR",
   "DE_VOLTA_3STUDIO",
-  "COM_MOTORISTA",
-  "ENVIADA_PARA_CLICHERIA",
-  "ENCAMINHADA_A_CLICHERIA",
+  "COM_MOTORISTA",                     // legacy v3.0
+  "COM_MOTORISTA_ENTREGA_FINAL",       // v4.0
+  "ENVIADA_PARA_CLICHERIA",            // legacy v3.0
+  "ENCAMINHADA_A_CLICHERIA",           // legacy v3.0
   "RECEBIDA_PELA_CLICHERIA",
   "REPROVADA_PELO_VENDEDOR",
   "CANCELADA",
