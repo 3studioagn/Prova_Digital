@@ -211,7 +211,8 @@ export const STATUS_LABELS: Record<StatusProva, string> = {
 
 /** Labels pt-BR curtos — usados na listagem (Componente 07), onde a coluna
  * Status tem espaco limitado e o Figma pede versao abreviada. Preserva a
- * distintividade de todos os 10 estados. */
+ * distintividade de todos os 17 estados (10 v3.0 + 7 v4.0 — Wave 3 v4.0
+ * C11 migration 013). */
 export const STATUS_LABELS_SHORT: Record<StatusProva, string> = {
   // ── Legacy v3.0 ────────────────────────────────────────────────────────
   CRIADA: "Aguardando",
