@@ -41,8 +41,9 @@ main`. Frontend-only, zero touch em backend, RLS ou migrations.
   scale=[1,1.9,1] em loop) + badge "Atual". Respeita
   `useReducedMotion` (RNF-010). Decisao 6.
 - **Modulo puro [lib/timeline-builder.ts](frontend/src/lib/timeline-builder.ts)**
-  (240 LOC) com pipeline `buildTimeline(prova, movimentacoes) ->
-  BuiltTimeline`. Helpers internos: `buildConcreteNodes`,
+  (354 LOC reais — era documentado como 240, reconciliado em
+  AUD-W3C12-002 pos-auditoria) com pipeline
+  `buildTimeline(prova, movimentacoes) -> BuiltTimeline`. Helpers internos: `buildConcreteNodes`,
   `derivePendingNodes`, `groupCyclesWithMetadata`,
   `extractCancellationInfo`. Testavel em
   `vitest --environment node` (D-13 da Wave 1 v4.0 preservado).

@@ -1453,7 +1453,51 @@ Gate 2**, com justificativas de eventuais desvios. Branch de execução:
 **Linhas de teste:** +656 (+246 prova.test + 410 builder.test).
 **Razão teste/código:** ~88% — alta cobertura.
 
-### 17.6 Pendências para PR de `development → main` (Wave 3 inteira)
+> **Nota pos-auditoria (AUD-W3C12-002 reconciliacao):** Os valores
+> acima representavam estimativas manuais feitas no fechamento do
+> Gate 2 do C12. A auditoria sênior independente apontou divergência
+> com os valores reais medidos via `wc -l`. A tabela revisada está
+> em §17.6 abaixo.
+
+### 17.6 Apêndice à §17.5 — LOCs reais reconciliados (pos-AUD-W3C12-002)
+
+Esta seção foi adicionada na sessão de correção pos-auditoria (commit
+da branch `wave3-v4-c12/fixes/execution`) para reconciliar os números
+documentados em §17.5 com os LOCs reais medidos via `wc -l`. A tabela
+original em §17.5 é preservada como ata do Gate 2 do C12.
+
+**Tabela reconciliada (medições reais em 2026-05-13 pós-correções
+AUD-001+005+007+010 desta sessão):**
+
+| Arquivo | LOC antes | LOC depois (real) | Δ | Documentado em §17.5 |
+|---|---|---|---|---|
+| `frontend/src/lib/types/prova.ts` | 482 | **681** | +199 | 690 (off por 9) |
+| `frontend/src/lib/types/__tests__/prova.test.ts` | 62 | **350** | +288 | 308 (off por 42) |
+| `frontend/src/lib/timeline-builder.ts` | 0 | **354** | +354 | 240 (off por 114) |
+| `frontend/src/lib/__tests__/timeline-builder.test.ts` | 0 | **552** | +552 | 410 (off por 142) |
+| `frontend/src/app/(dashboard)/provas/[id]/Timeline.tsx` | 273 | **561** | +288 | 410 (off por 151 — pos-AUD-001 que removeu 2 LOCs) |
+| `frontend/src/app/(dashboard)/provas/[id]/timeline.module.css` | 211 | **471** | +260 | 372 (off por 99) |
+
+**Razão da divergência em Timeline.tsx (151 LOC):** contagem manual
+em §17.5 excluiu (i) 73 LOC de SVG icons inline (CheckCircleIcon,
+AlertTriangleIcon, BanIcon), (ii) 22 LOC de JSDoc do cabeçalho,
+(iii) ~60 LOC dos subcomponentes inline (TimelineHeader,
+CancellationCard, TimelineStep, RenderNodes, TimelineCycleItem). O
+critério não estava documentado — a sessão pos-auditoria adota
+**contagem total via `wc -l`** como métrica única.
+
+**Linhas de código de produção (real):** +1101 (681-482 prova.ts +
+354 builder + 561-273 Timeline + 471-211 CSS = 199 + 354 + 288 + 260
+= 1101).
+**Linhas de teste (real):** +840 (350-62 prova.test + 552 builder.test
+= 288 + 552 = 840).
+**Razão teste/código:** ~76% — alta cobertura (ajustada após
+reconciliação).
+
+**AUD-W3C12-002 — RESOLVIDO.** Esta tabela substitui §17.5 como
+referência canônica para LOCs do C12.
+
+### 17.7 Pendências para PR de `development → main` (Wave 3 inteira)
 
 Herdadas das entregas anteriores da Wave 3 v4.0:
 

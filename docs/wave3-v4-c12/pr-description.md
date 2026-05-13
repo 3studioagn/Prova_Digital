@@ -39,8 +39,10 @@ mensagens (3 sub-itens 11.1/11.2/11.3).
   `ContextoMotorista` type + `contextoMotorista` + `ESTADOS_LAMINACAO` +
   `isInLaminationBlock` + `ROTA_ETAPAS` + `LEGACY_ROTA_PADRAO` +
   `LEGACY_ROTA_DIRETA` + `getRotaEtapas` + `getRotaLabel`
-- `Timeline.tsx` refactor (273 → 410 LOC) + `timeline.module.css` (211 →
-  372 LOC) com 5 subcomponentes internos + 3 SVG icons inline
+- `Timeline.tsx` refactor (273 → 561 LOC reais — era documentado como
+  410, reconciliado em AUD-W3C12-002 pos-auditoria; inclui 73 LOC de
+  SVG icons inline + 22 LOC de JSDoc + ~60 LOC de subcomponentes inline)
+  + `timeline.module.css` (211 → 471 LOC reais — era documentada como 372) com 5 subcomponentes internos + 3 SVG icons inline
 
 ### Modificado
 
