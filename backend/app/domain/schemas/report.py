@@ -56,10 +56,11 @@ class DistStatus(BaseModel):
 
 
 class DistRota(BaseModel):
-    """Distribuicao de provas por rota (PADRAO vs DIRETA).
+    """Distribuicao de provas por rota (legacy — PADRAO vs DIRETA + NULL).
 
-    Provas com `rota=NULL` (status pre-aprovacao) sao agrupadas em `nao_definida`
-    no schema acumulador (ver `IndicadoresGeral.distribuicao_rota`).
+    Wave 5 v3 — schema preservado para compat. Frontend v4.0 consome
+    `distribuicao_rota_v4` para detalhamento por 6 valores + categoria
+    legacy.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -67,6 +68,89 @@ class DistRota(BaseModel):
     rota: RotaEnum | None
     """`None` representa provas com rota nao definida (status pre-aprovacao)."""
     quantidade: int
+
+
+# ─── v4.0 (Wave 5 v4.0 / Componente 16) — distribuicao expandida ───────────
+
+
+RotaCategoria = Literal["matriz", "filial"]
+"""Categoria consolidada de rota — agrupa rotas v4.0 e legacy.
+
+- `matriz`: provas com `rota IN {MATRIZ, LAM_MATRIZ, PADRAO}` + provas
+  legacy `rota=NULL` cujo vendedor esta em `localizacao=MATRIZ`.
+- `filial`: provas com `rota IN {FILIAL, LAM_FILIAL, DIRETA}` + provas
+  legacy `rota=NULL` cujo vendedor esta em `localizacao=FILIAL`.
+
+Wave 5 v4.0 (Componente 16): usado por `?rota_categoria=...` na API e
+pelo card ROTA do `ReportGeral`. Frontend exibe 2 categorias visualmente
+identicas ao v3 (apenas a semantica interna foi expandida).
+"""
+
+DistRotaV4Categoria = Literal[
+    "v4_matriz",
+    "v4_lam_matriz",
+    "v4_filial",
+    "v4_lam_filial",
+    "legacy_padrao",
+    "legacy_direta",
+    "legacy_null_matriz",
+    "legacy_null_filial",
+    "legacy_null_indefinida",
+]
+"""Categoria detalhada de uma entrada de `distribuicao_rota_v4`.
+
+- `v4_*`: rota v4.0 explicita (Wave 2 v4.0).
+- `legacy_padrao` / `legacy_direta`: rota legacy v3.0 explicita.
+- `legacy_null_*`: rota=NULL com inferencia via `vendedor_localizacao`
+  (heuristica do C12 — Decisao 11.2).
+- `legacy_null_indefinida`: rota=NULL + sem localizacao (improvavel mas
+  defendido).
+
+Frontend agrupa todas as 9 categorias em apenas 2 (matriz/filial) para o
+card ROTA atual; expoe o detalhamento completo apenas no CSV summary
+(Wave 5 v4.0).
+"""
+
+
+class DistRotaV4(BaseModel):
+    """Distribuicao detalhada de provas por rota v4.0 + legacy.
+
+    Wave 5 v4.0 (Componente 16): substituicao funcional do schema `DistRota`
+    para a v4.0. `DistRota` (v3) permanece no payload por compat.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    categoria: DistRotaV4Categoria
+    """Categoria detalhada — ver `DistRotaV4Categoria`."""
+
+    rota: RotaEnum | None
+    """Rota subjacente (None para legacy NULL inferidas via localizacao)."""
+
+    quantidade: int
+
+
+class ConsolidacaoRota(BaseModel):
+    """Consolidacao da distribuicao por rota em 2 categorias (matriz/filial).
+
+    Wave 5 v4.0 (Componente 16): usado pelo card ROTA do `ReportGeral` para
+    preservar o layout v3 (2 dots: Matriz + Filial) ao mesmo tempo em que
+    cobre os 6 valores de `rota_enum` + provas legacy NULL.
+
+    Mapeamento:
+      - `matriz` = COUNT(rota IN {MATRIZ, LAM_MATRIZ, PADRAO})
+                 + COUNT(rota IS NULL AND vendedor.localizacao = MATRIZ)
+      - `filial` = COUNT(rota IN {FILIAL, LAM_FILIAL, DIRETA})
+                 + COUNT(rota IS NULL AND vendedor.localizacao = FILIAL)
+      - `indefinida` = COUNT(rota IS NULL AND vendedor.localizacao IS NULL)
+        (improvavel — apenas para integridade matematica do total).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    matriz: int
+    filial: int
+    indefinida: int = 0
 
 
 class PontoSerie(BaseModel):
@@ -101,15 +185,52 @@ class DistLocalizacao(BaseModel):
 
 
 class DistOrigemRota(BaseModel):
-    """Distribuicao de provas recebidas pela clicheria por origem de rota."""
+    """Distribuicao de provas recebidas pela clicheria por origem de rota.
+
+    Wave 5 v3 + v4.0 (Componente 16) — semantica expandida em v4.0:
+      - `via_padrao`: chegada via motorista. Legacy: `COM_MOTORISTA →
+        ENVIADA_PARA_CLICHERIA`. v4.0: `COM_MOTORISTA_ENTREGA_FINAL` (Matriz,
+        Lam. Matriz). UI exibe o mesmo card "Via PADRAO (motorista)".
+      - `via_direta`: chegada direto do vendedor da filial. Legacy:
+        `ENCAMINHADA_A_CLICHERIA`. v4.0: `APROVADA_PELO_VENDEDOR` quando
+        a rota e FILIAL ou LAM_FILIAL (sem motorista intermediario).
+    """
 
     model_config = ConfigDict(frozen=True)
 
     via_padrao: int
-    """Provas que vieram de COM_MOTORISTA → ENVIADA_PARA_CLICHERIA → RECEBIDA."""
+    """Chegada via motorista (legacy + v4.0 consolidado)."""
 
     via_direta: int
-    """Provas que vieram de ENCAMINHADA_A_CLICHERIA → RECEBIDA (vendedor Filial)."""
+    """Chegada direto da filial (legacy + v4.0 consolidado)."""
+
+
+# ─── v4.0 (Wave 5 v4.0 / Componente 16) — contexto do motorista ────────────
+
+
+DistContextoMotoristaKey = Literal[
+    "ida_laminacao",
+    "volta_laminacao",
+    "entrega_final",
+]
+"""3 contextos canonicos do Motorista (US-006 v4.0). Espelha
+`ContextoMotorista` do backend Python e do frontend TypeScript."""
+
+
+class DistContextoMotorista(BaseModel):
+    """Distribuicao de provas com motorista por contexto v4.0.
+
+    Wave 5 v4.0 (Componente 16): conta provas atualmente com status de
+    motorista (legacy `COM_MOTORISTA` mapeada para `entrega_final` por
+    paridade com `contexto_motorista()`). Frontend nao expoe visualmente
+    nesta sessao (preserva layout v3); valor disponivel para CSV +
+    consumo programatico via API.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    contexto: DistContextoMotoristaKey
+    quantidade: int
 
 
 # ─── Indicadores por scope ─────────────────────────────────────────────────
@@ -262,7 +383,14 @@ class IndicadoresClicheria(BaseModel):
 
 
 class ReportResponseGeral(BaseModel):
-    """Resposta de GET /api/v1/reports?scope=geral."""
+    """Resposta de GET /api/v1/reports?scope=geral.
+
+    Wave 5 v4.0 (Componente 16): adicionados campos
+    `distribuicao_rota_v4` e `consolidacao_rota` (aditivos — clientes
+    antigos ignoram). Campo `distribuicao_rota` v3 preservado por compat
+    (sera removido na Wave 7 / Componente 21 quando o backfill final
+    eliminar `rota IS NULL`).
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -273,10 +401,34 @@ class ReportResponseGeral(BaseModel):
     """Provas criadas por dia (00:00 UTC do bucket)."""
 
     distribuicao_status: list[DistStatus]
-    """Provas criadas no periodo agrupadas pelo status atual."""
+    """Provas criadas no periodo agrupadas pelo status atual.
+
+    Cobre os 17 valores de `StatusProvaEnum` (10 v3.0 + 7 v4.0 da Wave 3
+    v4.0 / C11). Frontend exibe apenas estados nao-terminais via
+    `STATUS_ATIVOS_SET` no donut de provas ativas; CSV summary inclui
+    todos os com `quantidade > 0`."""
 
     distribuicao_rota: list[DistRota]
-    """Provas criadas no periodo agrupadas pela rota."""
+    """[LEGACY v3] Provas criadas no periodo agrupadas pela rota
+    (apenas PADRAO/DIRETA/NULL contam visualmente — provas v4.0 ficam
+    como `quantidade=0` neste campo). Preservado para compat."""
+
+    distribuicao_rota_v4: list[DistRotaV4] = []
+    """[v4.0] Distribuicao detalhada cobrindo as 9 categorias possiveis
+    (4 rotas v4.0 + 2 legacy + 3 sub-buckets para `rota=NULL`). Campo
+    aditivo — clientes antigos ignoram. Default lista vazia para nao
+    quebrar deserializacao de payloads antigos cached."""
+
+    consolidacao_rota: ConsolidacaoRota = ConsolidacaoRota(
+        matriz=0, filial=0, indefinida=0
+    )
+    """[v4.0] Consolidacao em 2 categorias (matriz/filial) usada pelo card
+    ROTA do `ReportGeral`. Preserva layout v3 com semantica v4.0."""
+
+    contexto_motorista_dist: list[DistContextoMotorista] = []
+    """[v4.0] Distribuicao de provas atualmente com motorista pelos 3
+    contextos canonicos. Snapshot (nao filtrado por periodo). Campo
+    aditivo — UI v3 nao consome; CSV expoe."""
 
     ranking: list[VendedorMetrica]
     """Top vendedores por volume no periodo. Reusa o mesmo schema do

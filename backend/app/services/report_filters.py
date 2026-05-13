@@ -36,6 +36,20 @@ ReportScope = Literal["geral", "3studio", "vendedores", "clicheria"]
 """Perspectivas suportadas em GET /api/v1/reports."""
 
 
+RotaCategoria = Literal["matriz", "filial"]
+"""Categoria consolidada de rota (Wave 5 v4.0 — Componente 16).
+
+- `matriz`: filtra `rota IN {MATRIZ, LAM_MATRIZ, PADRAO}` UNION com
+  `rota IS NULL AND vendedor.localizacao = MATRIZ` (heuristica do C12).
+- `filial`: filtra `rota IN {FILIAL, LAM_FILIAL, DIRETA}` UNION com
+  `rota IS NULL AND vendedor.localizacao = FILIAL`.
+
+Coexiste com `rota` (filtro exato por valor v4.0+legacy). Se ambos
+fornecidos, `rota_categoria` toma precedencia (matriz/filial e
+mais abrangente que um valor especifico).
+"""
+
+
 # ─── Limites e defaults ────────────────────────────────────────────────────
 
 
@@ -86,11 +100,19 @@ class ReportFilters(BaseModel):
     """Filtro por vendedor especifico. Opcional."""
 
     rota: RotaEnum | None = None
-    """Filtro por rota. Opcional. Provas com `rota=NULL` sao excluidas se
-    este filtro for especificado."""
+    """Filtro por rota exata. Opcional. Provas com `rota=NULL` sao
+    excluidas se este filtro for especificado. Wave 5 v4.0: aceita
+    todos os 6 valores de `RotaEnum` (4 v4.0 + 2 legacy)."""
+
+    rota_categoria: RotaCategoria | None = None
+    """[Wave 5 v4.0] Filtro consolidado por categoria (matriz/filial).
+    Inclui provas v4.0 + legacy explicito + legacy NULL inferido via
+    `vendedor.localizacao`. Toma precedencia sobre `rota` se ambos
+    fornecidos."""
 
     status: StatusProvaEnum | None = None
-    """Filtro por status especifico. Opcional."""
+    """Filtro por status especifico. Opcional. Wave 5 v4.0: aceita
+    todos os 17 valores (10 v3.0 + 7 v4.0 da Wave 3 v4.0 / C11)."""
 
     @model_validator(mode="after")
     def _defaults_and_invariants(self) -> "ReportFilters":
@@ -188,6 +210,7 @@ def filters_equivalent(a: ReportFilters, b: ReportFilters) -> bool:
 
 __all__ = [
     "ReportScope",
+    "RotaCategoria",
     "ReportFilters",
     "to_cache_key",
     "filters_equivalent",
