@@ -1703,14 +1703,18 @@ def _summary_rows(payload: Any) -> Iterable[list[str]]:
         # Wave 5 v4.0: distribuicao detalhada por categoria
         for d4 in payload.distribuicao_rota_v4:
             rows.append([scope, f"rota_v4_{d4.categoria}", str(d4.quantidade)])
-        # Wave 5 v4.0: consolidacao em 2 baldes (matriz/filial)
+        # Wave 5 v4.0: consolidacao em 2 baldes (matriz/filial) + indefinida
+        # (sub-bucket para provas legacy NULL sem vendedor.localizacao).
+        # Wave 5 v4.0 / C16 fix AUD-W5C16-011 (2026-05-13): emitir
+        # `consolidacao_rota_indefinida` SEMPRE (mesmo quando 0), por
+        # simetria com `matriz`/`filial`. Zero e informacao valida; o
+        # guard `if > 0` quebrava expectativa do parser downstream.
         cons = payload.consolidacao_rota
         rows.append([scope, "consolidacao_rota_matriz", str(cons.matriz)])
         rows.append([scope, "consolidacao_rota_filial", str(cons.filial)])
-        if cons.indefinida > 0:
-            rows.append(
-                [scope, "consolidacao_rota_indefinida", str(cons.indefinida)]
-            )
+        rows.append(
+            [scope, "consolidacao_rota_indefinida", str(cons.indefinida)]
+        )
         # Wave 5 v4.0: distribuicao por contexto do motorista (snapshot)
         for dc in payload.contexto_motorista_dist:
             rows.append(

@@ -506,6 +506,83 @@ class TestLegacyNullIndefinida:
         assert item.quantidade == 2
 
 
+# ─── CSV summary: consolidacao_rota_indefinida sempre emitido (AUD-011) ───
+
+
+class TestCsvSummaryConsolidacaoIndefinida:
+    """Wave 5 v4.0 / C16 fix AUD-W5C16-011 (2026-05-13): valida que a
+    linha `consolidacao_rota_indefinida` aparece SEMPRE no CSV summary
+    do scope=geral, mesmo quando indefinida=0. Antes da correcao, o
+    guard `if cons.indefinida > 0` omitia a linha — assimetrico com
+    `matriz`/`filial` que sao sempre emitidas e quebrava expectativa
+    de parsers downstream que iteram por chave fixa."""
+
+    def _payload_com_indefinida(self, indefinida: int):
+        """Payload minimo para `_summary_rows` (cenario geral, sem
+        depender de IO ou banco). Constroi via `model_copy(update=...)`
+        porque `ReportResponseGeral` e frozen (Pydantic v2)."""
+        from app.domain.schemas.report import ConsolidacaoRota
+
+        base = _payload_geral_v4_minimo()
+        return base.model_copy(
+            update={
+                "consolidacao_rota": ConsolidacaoRota(
+                    matriz=9, filial=1, indefinida=indefinida
+                ),
+                "scope": "geral",  # required by _summary_rows scope dispatch
+            }
+        )
+
+    def test_consolidacao_indefinida_zero_aparece_no_csv(self):
+        """Cenario producao atual: indefinida=0 -> linha presente."""
+        from app.api.v1.reports import _summary_rows
+
+        payload = self._payload_com_indefinida(0)
+        rows = list(_summary_rows(payload))
+        chaves = {r[1] for r in rows}
+        assert "consolidacao_rota_matriz" in chaves
+        assert "consolidacao_rota_filial" in chaves
+        assert "consolidacao_rota_indefinida" in chaves
+        # Confirma valor "0" (nao omitido)
+        for r in rows:
+            if r[1] == "consolidacao_rota_indefinida":
+                assert r[2] == "0"
+                return
+        raise AssertionError("consolidacao_rota_indefinida nao encontrada")
+
+    def test_consolidacao_indefinida_positivo_aparece_no_csv(self):
+        """Cenario edge: indefinida=2 -> linha presente com valor."""
+        from app.api.v1.reports import _summary_rows
+
+        payload = self._payload_com_indefinida(2)
+        rows = list(_summary_rows(payload))
+        for r in rows:
+            if r[1] == "consolidacao_rota_indefinida":
+                assert r[2] == "2"
+                return
+        raise AssertionError("consolidacao_rota_indefinida nao encontrada")
+
+    def test_simetria_3_linhas_consolidacao(self):
+        """As 3 chaves consolidacao_rota_* aparecem juntas (simetria) em
+        ambos os cenarios (0 ou >0)."""
+        from app.api.v1.reports import _summary_rows
+
+        for indef in (0, 1, 5):
+            payload = self._payload_com_indefinida(indef)
+            rows = list(_summary_rows(payload))
+            cons_rows = [r for r in rows if r[1].startswith("consolidacao_rota_")]
+            assert len(cons_rows) == 3, (
+                f"esperado 3 linhas consolidacao_rota_*, encontrado "
+                f"{len(cons_rows)} com indefinida={indef}"
+            )
+            chaves = sorted(r[1] for r in cons_rows)
+            assert chaves == [
+                "consolidacao_rota_filial",
+                "consolidacao_rota_indefinida",
+                "consolidacao_rota_matriz",
+            ]
+
+
 # ─── _categoria_predicate: constroi expressao OR/EXISTS corretamente ───────
 
 
