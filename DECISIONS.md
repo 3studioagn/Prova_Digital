@@ -6964,5 +6964,63 @@ ainda nao atingidos viram nos `phase: "pending"`:
   sao 11 nos visiveis (1 current + 10 pendentes).
 - Snapshot tests cobrem essa logica explicitamente.
 
+---
+
+## Apendice a Decisao 7 do C12 — strikethrough nos passos anteriores ao cancelamento (registro pos-auditoria)
+
+**Wave:** 3 v4.0 / Componente 12 — Correcoes Pos-Auditoria
+**Data:** 2026-05-13
+**Status:** ACEITO COMO ESTA — decisao consciente pos-auditoria
+**Contexto:** AUD-W3C12-006 da auditoria senior do C12 (commit `2a18794`).
+
+**Achado original:** A Decisao 7 aprovada pelo Mario em 2026-05-13
+listou 3 mecanismos sobrepostos para comunicar cancelamento: "(b)+(c)
+tachado no ultimo ativo + no 'Cancelada' cinza + motivo destacado". A
+entrega do C12 implementou 3 dos 4 mecanismos (card vermelho
+`role="alert"` extra + no cinza `CANCELADA` + motivo destacado em
+vermelho), mas o **tachado/strikethrough no no imediatamente anterior
+ao cancelamento NAO foi implementado**.
+
+**Decisao pos-auditoria (Opcao A do fix-plan):** ACEITAR a implementacao
+atual sem o tachado. AUD-W3C12-006 fica rebaixado para INFO.
+
+**Por que nao implementar o tachado:**
+1. **Honestidade historica do registro.** A movimentacao imediatamente
+   anterior ao cancelamento (ex.: "Retirada pelo vendedor por Joao da
+   Silva em 12/05") aconteceu de fato — esta gravada em `movimentacoes`
+   com trigger de imutabilidade. Tachar visualmente esse no usa uma
+   convencao de UI cuja semantica forte eh "deletado/anulado/invalido",
+   o que comunicaria algo factualmente impreciso: a etapa anterior NAO
+   foi anulada, apenas o processo posterior foi interrompido.
+2. **Os 3 mecanismos ja implementados sao suficientes.** Card vermelho
+   transversal `role="alert"` (anuncio imediato no leitor de tela) + no
+   terminal cinza `CANCELADA` + motivo destacado em vermelho comunicam
+   o cancelamento sem ambiguidade. O proprio auditor classificou o
+   achado como BAIXO e usou a frase explicita "a essencia da Decisao 7
+   esta preservada via card vermelho + no cinza + motivo".
+3. **A11y permanece equivalente.** Tachado nao adiciona nada para
+   leitor de tela; `role="alert"` no card vermelho ja dispara anuncio
+   imediato.
+4. **Principio "do no harm".** Mexer agora em Timeline.tsx + builder +
+   CSS + adicionar teste — mesmo que ~10 LOCs — toca os 3 arquivos
+   centrais do C12 ja estabilizados, contra um ganho visual questionavel.
+
+**Como aplicar:**
+- Implementacao atual permanece inalterada.
+- AUD-W3C12-006 rebaixado de BAIXO para INFO no apendice de status do
+  `docs/wave3-v4-c12/audit-report.md`.
+
+**Alternativa rejeitada:**
+- Opcao B do fix-plan: implementar `text-decoration: line-through;
+  opacity: 0.6` no no anterior via flag `precedesCancellation:
+  boolean` calculada no builder. Rejeitada pelos motivos 1-4 acima.
+
+**Consequencias:**
+- Wave 3 nao tem strikethrough no cenario de cancelamento — comportamento
+  estavel para as proximas waves.
+- Wave 4 (dashboard) pode reusar `buildTimeline` sem campos adicionais.
+- Se uma futura iteracao quiser reabrir esta decisao (ex.: feedback
+  do operacional), abrir nova ADR superseding este apendice.
+
 
 
