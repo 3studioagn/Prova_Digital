@@ -14,64 +14,20 @@
 import { useCallback, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-import type {
-  ReportFilters,
-  ReportScope,
-  RotaCategoria,
-} from "@/lib/types/report";
-import { REPORT_SCOPES } from "@/lib/types/report";
+import type { ReportFilters } from "@/lib/types/report";
+
+/**
+ * Parsers puros (Wave 5 v4.0 / C16 fix AUD-W5C16-006): extraidos para
+ * modulo dedicado `_useReportFilters.parsers` para permitir reuso direto
+ * pelos testes Vitest sem mockar `next/navigation`.
+ */
 import {
-  ROTA_OPTIONS,
-  STATUS_OPTIONS,
-  type Rota,
-  type StatusProva,
-} from "@/lib/types/prova";
-
-const SCOPE_SET = new Set(REPORT_SCOPES);
-
-function parseScope(value: string | null): ReportScope {
-  if (value && (SCOPE_SET as Set<string>).has(value)) {
-    return value as ReportScope;
-  }
-  return "geral";
-}
-
-/** Wave 5 v4.0: aceita os 6 valores de `Rota` (4 v4.0 + 2 legacy).
- *
- * Fonte: `ROTA_OPTIONS` em `@/lib/types/prova` — TypeScript barra a build
- * se algum valor de `Rota` for esquecido aqui. URL com valor invalido
- * retorna `null` (filtro desativado, sem erro). */
-function parseRota(value: string | null): Rota | null {
-  if (value && (ROTA_OPTIONS as ReadonlyArray<string>).includes(value)) {
-    return value as Rota;
-  }
-  return null;
-}
-
-/** Wave 5 v4.0: aceita `matriz` ou `filial` como categoria consolidada. */
-function parseRotaCategoria(value: string | null): RotaCategoria | null {
-  if (value === "matriz" || value === "filial") return value;
-  return null;
-}
-
-/** Wave 5 v4.0: aceita os 17 valores de `StatusProva` (10 v3.0 + 7 v4.0).
- *
- * Fonte: `STATUS_OPTIONS` em `@/lib/types/prova`. Antes da Wave 5 v4.0,
- * o array era hard-codeado com os 10 valores v3.0 — filtros v4.0 na
- * URL (`?status=COM_MOTORISTA_IDA_LAMINACAO`) zeravam silenciosamente. */
-function parseStatus(value: string | null): StatusProva | null {
-  if (value && (STATUS_OPTIONS as ReadonlyArray<string>).includes(value)) {
-    return value as StatusProva;
-  }
-  return null;
-}
-
-/** Retorna `null` para vazio/null/undefined; trim em strings. */
-function nullableString(value: string | null): string | null {
-  if (value === null) return null;
-  const t = value.trim();
-  return t === "" ? null : t;
-}
+  nullableString,
+  parseRota,
+  parseRotaCategoria,
+  parseScope,
+  parseStatus,
+} from "./_useReportFilters.parsers";
 
 /**
  * Le os filtros atuais da URL e expoe setters que atualizam a URL.

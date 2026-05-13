@@ -7,46 +7,21 @@
  *  - `parseRotaCategoria` aceita matriz/filial; rejeita outros.
  *  - URL com rota invalida retorna null (sem erro).
  *
- * Como `useReportFilters` depende de `next/navigation`, testamos apenas
- * as funcoes puras de parsing exportadas. Para isso, expomos as helpers
- * internas via re-import dinamico — alternativa seria refatora-las para
- * um modulo `parsers.ts` dedicado (futuro).
- *
- * Estrategia simples e portavel: reimplementar as funcoes puras aqui
- * com `STATUS_OPTIONS` e `ROTA_OPTIONS` reais e testar paridade. Como
- * o hook usa as MESMAS constantes, paridade vale para o real.
+ * Wave 5 v4.0 / C16 fix AUD-W5C16-006 (2026-05-13): testes agora importam
+ * diretamente de `_useReportFilters.parsers` (modulo extraido), exercendo
+ * as funcoes REAIS que o hook consome. Antes da extracao, este arquivo
+ * re-implementava parsers identicos localmente — risco de drift silencioso
+ * caso alguem mudasse o hook sem atualizar a copia aqui.
  */
 import { describe, expect, it } from "vitest";
 
+import { ROTA_OPTIONS, STATUS_OPTIONS } from "@/lib/types/prova";
+import type { Rota, StatusProva } from "@/lib/types/prova";
 import {
-  ROTA_OPTIONS,
-  STATUS_OPTIONS,
-  type Rota,
-  type StatusProva,
-} from "@/lib/types/prova";
-import type { RotaCategoria } from "@/lib/types/report";
-
-// Re-implementacoes locais paridade-byte com `useReportFilters.ts`.
-// Se algum dos helpers mudar la, esta secao quebra deliberadamente.
-
-function parseRota(value: string | null): Rota | null {
-  if (value && (ROTA_OPTIONS as ReadonlyArray<string>).includes(value)) {
-    return value as Rota;
-  }
-  return null;
-}
-
-function parseStatus(value: string | null): StatusProva | null {
-  if (value && (STATUS_OPTIONS as ReadonlyArray<string>).includes(value)) {
-    return value as StatusProva;
-  }
-  return null;
-}
-
-function parseRotaCategoria(value: string | null): RotaCategoria | null {
-  if (value === "matriz" || value === "filial") return value;
-  return null;
-}
+  parseRota,
+  parseRotaCategoria,
+  parseStatus,
+} from "../_useReportFilters.parsers";
 
 // ─── parseRota ────────────────────────────────────────────────────────
 
