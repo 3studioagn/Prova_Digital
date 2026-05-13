@@ -235,21 +235,28 @@ export const STATUS_LABELS_SHORT: Record<StatusProva, string> = {
   ENCAMINHADA_PARA_O_VENDEDOR: "P/ vendedor",
 };
 
-/** Labels pt-BR para as rotas (Wave 2 v4.0).
+/** Labels pt-BR para as rotas (Wave 2 v4.0 + atualizacao Wave 3 v4.0 / C12).
  *
- * Wave 2 v4.0 / Componente 08: o sufixo "(legada v3.0)" foi removido
- * dos labels de PADRAO/DIRETA. Decisao do Mario (ADR-126): o sufixo era
- * informativo demais para a UX do detalhe — bastam os nomes "Padrao" e
- * "Direta". A distincao legacy continua disponivel via o enum no banco
- * (Wave 7 fara o backfill final).
+ * Wave 2 v4.0 / Componente 08 (ADR-126): o sufixo "(legada v3.0)" foi
+ * removido dos labels de PADRAO/DIRETA.
+ *
+ * Wave 3 v4.0 / Componente 12 (Decisao 11.1 do Gate 1 — supersede o
+ * ADR-126): os labels legacy `PADRAO`/`DIRETA` viram `"Matriz"`/`"Filial"`
+ * — alinhamento operacional com a nomenclatura v4.0. Conceitualmente
+ * `PADRAO` (v3.0) e `MATRIZ` (v4.0) sao a mesma "Matriz sem laminacao"
+ * para o vendedor; idem `DIRETA` e `FILIAL` ("Filial sem laminacao").
+ * A distincao tecnica (sequencia de estados na timeline, ausencia de
+ * laminacao) continua preservada via `LEGACY_ROTA_PADRAO`/`_DIRETA` no
+ * builder da Timeline. O enum Postgres NAO eh tocado (Wave 7 fara o
+ * backfill final).
  */
 export const ROTA_LABELS: Record<Rota, string> = {
   MATRIZ: "Matriz",
   LAM_MATRIZ: "Lam. Matriz",
   FILIAL: "Filial",
   LAM_FILIAL: "Lam. Filial",
-  PADRAO: "Padrao",
-  DIRETA: "Direta",
+  PADRAO: "Matriz",
+  DIRETA: "Filial",
 };
 
 /** Formata uma rota (ou ausencia dela) para exibicao na pagina de detalhe.
@@ -317,6 +324,201 @@ export const ROTA_OPTIONS: readonly Rota[] = [
   "PADRAO",
   "DIRETA",
 ] as const;
+
+// ─── Timeline visual (Componente 12 — Wave 3 v4.0) ────────────────────
+
+/**
+ * Tres contextos distintos do Motorista (US-006 v4.0). Espelho TS do
+ * `ContextoMotorista` Python em
+ * `backend/app/state_machine/v4/contextos.py`. Usado pela Timeline (C12)
+ * para renderizar o badge contextual em cada nó de motorista.
+ */
+export type ContextoMotorista =
+  | "ida_laminacao"
+  | "volta_laminacao"
+  | "entrega_final";
+
+/**
+ * Deriva o contexto do motorista a partir do `status_novo` da transicao.
+ * Espelho do helper Python `contexto_motorista(status)` — DAT v3.0 §8.1
+ * exige idempotencia entre as duas camadas. Retorna `null` se o status
+ * nao representa "prova com motorista".
+ *
+ * Mapeamento (Decisao M-5 do Gate 1 do C11 — ADR-151):
+ *   - COM_MOTORISTA_IDA_LAMINACAO    -> "ida_laminacao"
+ *   - COM_MOTORISTA_VOLTA_LAMINACAO  -> "volta_laminacao"
+ *   - COM_MOTORISTA_ENTREGA_FINAL    -> "entrega_final"
+ *   - COM_MOTORISTA (legacy v3.0)    -> "entrega_final" (compat)
+ *   - Qualquer outro                 -> null
+ */
+export function contextoMotorista(
+  status: StatusProva,
+): ContextoMotorista | null {
+  if (status === "COM_MOTORISTA_IDA_LAMINACAO") return "ida_laminacao";
+  if (status === "COM_MOTORISTA_VOLTA_LAMINACAO") return "volta_laminacao";
+  if (status === "COM_MOTORISTA_ENTREGA_FINAL") return "entrega_final";
+  if (status === "COM_MOTORISTA") return "entrega_final"; // legacy v3.0
+  return null;
+}
+
+/**
+ * Conjunto dos estados que compoem a "Etapa de Laminacao" no fluxo v4.0.
+ * Sequencia adjacente de nos com `isInLaminationBlock(node.status) ===
+ * true` forma o bloco visual destacado pelo C12 (Decisao 3 do Gate 1
+ * do C12 — opcao A: bloco visualmente separado).
+ *
+ * Cobre Lam. Matriz (5 estados) e Lam. Filial (3 estados — sem
+ * volta_laminacao nem pos_laminacao, pois vendedor+clicheria estao
+ * ambos na Filial).
+ */
+export const ESTADOS_LAMINACAO: readonly StatusProva[] = [
+  "ENCAMINHADA_PARA_LAMINACAO",
+  "COM_MOTORISTA_IDA_LAMINACAO",
+  "LAMINACAO_CONCLUIDA",
+  "COM_MOTORISTA_VOLTA_LAMINACAO", // so Lam. Matriz
+  "DE_VOLTA_3STUDIO_POS_LAMINACAO", // so Lam. Matriz
+] as const;
+
+/** True se o status pertence ao bloco visual de laminacao. */
+export function isInLaminationBlock(status: StatusProva): boolean {
+  return (ESTADOS_LAMINACAO as readonly string[]).includes(status);
+}
+
+/**
+ * Sequencia canonica de estados por rota v4.0 — espelha
+ * `estados_da_rota(rota)` do backend, mas com ORDEM (o backend devolve
+ * `frozenset`). Ordem derivada literalmente da Secao 5 do Requisitos
+ * v4.0 + UML 06.x.
+ *
+ * Inclui CRIADA (origem) e RECEBIDA_PELA_CLICHERIA (terminal sucesso);
+ * NAO inclui REPROVADA_PELO_VENDEDOR nem CANCELADA — sao transversais
+ * (Decisao 7 do Gate 1 do C12: renderizadas como ramificacoes visuais).
+ *
+ * Tamanhos: MATRIZ=6 · LAM_MATRIZ=11 · FILIAL=4 · LAM_FILIAL=7.
+ */
+export const ROTA_ETAPAS: Record<RotaCriacao, readonly StatusProva[]> = {
+  MATRIZ: [
+    "CRIADA",
+    "RETIRADA_PELO_VENDEDOR",
+    "APROVADA_PELO_VENDEDOR",
+    "DE_VOLTA_3STUDIO",
+    "COM_MOTORISTA_ENTREGA_FINAL",
+    "RECEBIDA_PELA_CLICHERIA",
+  ],
+  LAM_MATRIZ: [
+    "CRIADA",
+    "ENCAMINHADA_PARA_LAMINACAO",
+    "COM_MOTORISTA_IDA_LAMINACAO",
+    "LAMINACAO_CONCLUIDA",
+    "COM_MOTORISTA_VOLTA_LAMINACAO",
+    "DE_VOLTA_3STUDIO_POS_LAMINACAO",
+    "RETIRADA_PELO_VENDEDOR",
+    "APROVADA_PELO_VENDEDOR",
+    "DE_VOLTA_3STUDIO",
+    "COM_MOTORISTA_ENTREGA_FINAL",
+    "RECEBIDA_PELA_CLICHERIA",
+  ],
+  FILIAL: [
+    "CRIADA",
+    "ENCAMINHADA_PARA_O_VENDEDOR",
+    "APROVADA_PELO_VENDEDOR",
+    "RECEBIDA_PELA_CLICHERIA",
+  ],
+  LAM_FILIAL: [
+    "CRIADA",
+    "ENCAMINHADA_PARA_LAMINACAO",
+    "COM_MOTORISTA_IDA_LAMINACAO",
+    "LAMINACAO_CONCLUIDA",
+    "ENCAMINHADA_PARA_O_VENDEDOR",
+    "APROVADA_PELO_VENDEDOR",
+    "RECEBIDA_PELA_CLICHERIA",
+  ],
+} as const;
+
+/**
+ * Sequencia legacy v3.0 — rota PADRAO. Cobre 7 estados (com `COM_MOTORISTA`
+ * legacy + `ENVIADA_PARA_CLICHERIA`, que NAO existem nas rotas v4.0).
+ * Conceitualmente equivalente a `MATRIZ` v4.0 mas com 1 etapa extra
+ * (`ENVIADA_PARA_CLICHERIA`).
+ */
+export const LEGACY_ROTA_PADRAO: readonly StatusProva[] = [
+  "CRIADA",
+  "RETIRADA_PELO_VENDEDOR",
+  "APROVADA_PELO_VENDEDOR",
+  "DE_VOLTA_3STUDIO",
+  "COM_MOTORISTA",
+  "ENVIADA_PARA_CLICHERIA",
+  "RECEBIDA_PELA_CLICHERIA",
+] as const;
+
+/**
+ * Sequencia legacy v3.0 — rota DIRETA. Cobre 5 estados (com
+ * `ENCAMINHADA_A_CLICHERIA`, que NAO existe nas rotas v4.0).
+ * Conceitualmente equivalente a `FILIAL` v4.0 mas com `RETIRADA` em vez
+ * de `ENCAMINHADA_PARA_O_VENDEDOR`.
+ */
+export const LEGACY_ROTA_DIRETA: readonly StatusProva[] = [
+  "CRIADA",
+  "RETIRADA_PELO_VENDEDOR",
+  "APROVADA_PELO_VENDEDOR",
+  "ENCAMINHADA_A_CLICHERIA",
+  "RECEBIDA_PELA_CLICHERIA",
+] as const;
+
+/**
+ * Resolve a sequencia canonica que a Timeline (C12) deve renderizar.
+ *
+ * Wave 3 v4.0 / C12 — Decisao 11.2 do Gate 1: provas com `rota=NULL`
+ * usam heuristica baseada em `vendedor_localizacao` para inferir a
+ * sequencia legacy compativel. Em producao (validado via MCP) as 11
+ * provas com `rota=NULL` tem todas `vendedor_localizacao=FILIAL`,
+ * logo recebem `LEGACY_ROTA_DIRETA`.
+ *
+ * - rota v4.0 (MATRIZ/LAM_MATRIZ/FILIAL/LAM_FILIAL) -> ROTA_ETAPAS[rota]
+ * - rota legacy PADRAO -> LEGACY_ROTA_PADRAO
+ * - rota legacy DIRETA -> LEGACY_ROTA_DIRETA
+ * - rota=NULL + vendedor MATRIZ -> LEGACY_ROTA_PADRAO
+ * - rota=NULL + vendedor FILIAL -> LEGACY_ROTA_DIRETA
+ * - rota=NULL + vendedor=NULL  -> [] (fallback: so historico real)
+ */
+export function getRotaEtapas(
+  rota: Rota | null,
+  vendedorLocalizacao: Localizacao | null,
+): readonly StatusProva[] {
+  if (
+    rota === "MATRIZ" ||
+    rota === "LAM_MATRIZ" ||
+    rota === "FILIAL" ||
+    rota === "LAM_FILIAL"
+  ) {
+    return ROTA_ETAPAS[rota];
+  }
+  if (rota === "PADRAO") return LEGACY_ROTA_PADRAO;
+  if (rota === "DIRETA") return LEGACY_ROTA_DIRETA;
+  // rota IS NULL — heuristica via Decisao 11.2 do C12
+  if (vendedorLocalizacao === "MATRIZ") return LEGACY_ROTA_PADRAO;
+  if (vendedorLocalizacao === "FILIAL") return LEGACY_ROTA_DIRETA;
+  return [];
+}
+
+/**
+ * Resolve o label de rota a exibir no header da Timeline.
+ *
+ * Wave 3 v4.0 / C12 — Decisoes 11.1 e 11.2 do Gate 1:
+ * - Rotas v4.0 e legacy nao-nulas: usa `ROTA_LABELS` (PADRAO/DIRETA ja
+ *   renomeadas para "Matriz"/"Filial" — supersede ADR-126).
+ * - rota=NULL: heuristica via `vendedor_localizacao` para devolver
+ *   "Matriz" ou "Filial". Fallback "—" se nao houver localizacao.
+ */
+export function getRotaLabel(
+  rota: Rota | null,
+  vendedorLocalizacao: Localizacao | null,
+): string {
+  if (rota) return ROTA_LABELS[rota];
+  if (vendedorLocalizacao === "MATRIZ") return "Matriz";
+  if (vendedorLocalizacao === "FILIAL") return "Filial";
+  return "—";
+}
 
 // ─── Detalhe (Componente 08) ──────────────────────────────────────────
 
