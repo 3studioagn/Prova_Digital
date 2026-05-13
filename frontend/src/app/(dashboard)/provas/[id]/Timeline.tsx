@@ -200,7 +200,7 @@ function CancellationCard({ info }: CancellationCardProps) {
     ? `${info.ator.nome} (${SETOR_LABELS[info.ator.setor]})`
     : null;
   return (
-    <aside className={styles.cancellationCard} role="alert">
+    <div className={styles.cancellationCard} role="alert">
       <AlertTriangleIcon className={styles.cancellationCardIcon} />
       <div className={styles.cancellationCardBody}>
         <p className={styles.cancellationCardTitle}>
@@ -226,7 +226,7 @@ function CancellationCard({ info }: CancellationCardProps) {
           )}
         </p>
       </div>
-    </aside>
+    </div>
   );
 }
 
