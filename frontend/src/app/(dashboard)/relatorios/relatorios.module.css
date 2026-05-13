@@ -2330,3 +2330,33 @@
     flex: 1;
   }
 }
+
+/* ─── Wave 5 v4.0 / C16 fix AUD-W5C16-005 (2026-05-13) ─────────────────
+ *
+ * RNF-008 + RN-012 v4.0: respeita preferencia do usuario com
+ * motion-sickness. Bloco condicional ao media query
+ * `prefers-reduced-motion: reduce` — sem efeito em usuarios comuns.
+ *
+ * Zera duracoes de animacao/transicao em elementos animados da pasta
+ * `relatorios/` (cards de KPI, barras, segmentos do donut, sparkline,
+ * scroll). Framer Motion ja respeita `prefers-reduced-motion` por
+ * default ao animar `transform`, mas esta regra CSS reforca e cobre
+ * eventuais transicoes CSS puras (hover, badges, presets).
+ *
+ * Padrao consistente com `timeline.module.css` (Wave 3 C12) que ja
+ * implementa o mesmo bloco. */
+@media (prefers-reduced-motion: reduce) {
+  .metricCard,
+  .chartsRowGeral > *,
+  .barRow,
+  .donutSegment,
+  .donutContainer *,
+  .sparklineSvg,
+  .presetButton,
+  .scopeButton {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
