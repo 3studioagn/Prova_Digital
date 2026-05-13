@@ -6055,6 +6055,90 @@ A UX precisa ser excelente para esses usuarios.
   do banner]" (foco preserva, banner com role="alert" anuncia).
 - Smoke axe-core obrigatorio antes do PR — DEFERRED ate Mario rodar.
 
+### Apendice 1 (2026-05-11, pos-auditoria) — `<strong>` no banner do ManualPanel
+
+**Resolve:** AUD-W3C19-002 (MEDIO, "modificacao visual sutil").
+
+**Contexto da auditoria:** o relatorio
+`docs/wave3-v4-c19/audit-report.md` (commit `999e5b0`) classificou
+como achado MEDIO a adicao de `<strong>{state.mensagem}</strong>`
+no banner do `<ManualPanel>` (page.tsx linha 737 pos-C19). O texto
+era `{state.mensagem}` puro em `development`. O auditor descreveu
+como "modificacao visual sutil" e oferecu duas opcoes: reverter OU
+registrar formalmente.
+
+**Investigacao adicional (verificada nesta sessao de correcao):**
+
+1. **CameraPanel JA usava `<strong>{state.mensagem}</strong>`** no
+   banner desde o C10 (linha 362 em `development` / linha 426
+   pos-C19). Confirmado via `git show development:...page.tsx`.
+2. **CSS `.errorBanner strong { font-weight: 600 }`** ja existia em
+   `escanear.module.css` linha 510 em `development`. O C10
+   antecipou suporte ao `<strong>` no banner. Confirmado via
+   `git show development:...escanear.module.css`.
+3. O C19 adicionou o `<strong>` **apenas no ManualPanel**,
+   uniformizando os dois banners do mesmo componente.
+
+**Decisao (Plano B autorizado pelo Mario em 2026-05-11):** manter
+o `<strong>{state.mensagem}</strong>` no banner do `<ManualPanel>`.
+A mudanca **nao constitui modificacao visual nova** — apenas aplica
+ao ManualPanel a mesma marcacao semantica que ja existia no
+CameraPanel desde o C10, reutilizando regra CSS pre-existente. O
+efeito sao banners visualmente uniformes em todo o `/escanear`
+(o oposto seria disparidade — CameraPanel com peso 600 e
+ManualPanel com peso 400).
+
+**Justificativa de a11y (recomendacao do auditor):** `<strong>` em
+banner com `role="alert"` reforca a importancia semantica do
+alerta para leitores de tela e tecnologias assistivas. Sem ele,
+o conteudo de texto e plano e a enfase visual depende apenas da
+cor de fundo/borda do banner — insuficiente para usuarios com
+deficiencia visual ou daltonismo.
+
+**Confirmacao de escopo:**
+- `git diff <hash-pos-C10>..HEAD -- '**/*.css' '**/*.module.css'` retorna **vazio**. Zero modificacao de regra CSS.
+- A unica mudanca no `page.tsx` foi a adicao do par `<strong>...</strong>` em torno de `{state.mensagem}` no `<ManualPanel>`, replicando a marcacao ja presente no `<CameraPanel>`.
+
+**Consequencias:**
+- Uniformidade visual dos dois banners preservada.
+- A11y enriquecida sem regredir comportamento.
+- ADR-144 fica como ponto unico de documentacao para o estado de
+  a11y aprofundada do `<ManualPanel>` (foco automatico + label
+  estendida + hint sr-only + aria-describedby dinamico + botao
+  "Tentar novamente" + `<strong>` no banner + `aria-invalid` no
+  `<input>` — este ultimo do Apendice 2 abaixo).
+
+### Apendice 2 (2026-05-11, pos-auditoria) — `aria-invalid` no `<input>`
+
+**Resolve:** AUD-W3C19-004 (MEDIO, "aria-invalid no `<div>` wrapper
+em vez do `<input>`").
+
+**Contexto da auditoria:** o C10 entregou `aria-invalid` no
+`<div className={manualInputWrapper}>` (page.tsx:695-698). WAI-ARIA
+permite o atributo em qualquer elemento, mas leitores de tela
+esperam no campo de entrada (`<input>`) para anunciar "invalido"
+ao focar. O auditor classificou como heranca do C10 — nao e
+regressao do C19 — mas registrou para corrigir.
+
+**Decisao:** **adicionar** `aria-invalid` ao `<input>`,
+**mantendo** o atributo no `<div>` wrapper. Solucao de duplicacao
+benigna.
+
+**Justificativa da duplicacao:**
+- A regra CSS `.manualInputWrapper[aria-invalid="true"] { border-color: #b91c1c }` (escanear.module.css:581-583) depende do seletor de atributo **no wrapper** para colorir a borda do contorno.
+- Mover a regra para `.manualInputWrapper:has(input[aria-invalid="true"])` ou similar exigiria editar CSS — **vetado pelo escopo desta sessao de correcao** (Seção 1 do prompt: "Não toca CSS/visual da UI do C10").
+- Duplicacao de atributo de estado (aria-invalid no input + no wrapper) e padrao ARIA aceito quando o estado precisa simultaneamente alimentar (a) tecnologias assistivas no input e (b) regras de estilo no contexto pai. Os dois usos sao "trusted reflectors" do mesmo estado React `isError`.
+
+**Confirmacao de escopo:** apenas 1 atributo adicionado no JSX do
+`<input>` + 7 linhas de comentario explicando a decisao. Zero
+mudanca de CSS. Validado: `git diff <hash-pos-C10>..HEAD -- '**/*.css' '**/*.module.css'` retorna vazio.
+
+**Consequencias:**
+- Leitor de tela anuncia "invalido" ao focar no campo apos erro.
+- Borda vermelha do wrapper continua funcionando (regra CSS inalterada).
+- A11y aprofundada do ManualPanel agora atende ao padrao recomendado.
+- Smoke axe-core + leitor de tela em staging DEFERRED (cenarios 16-17-20 do `smoke-validation.md`).
+
 ## ADR-145 — Rate limiting backend do `/scan` permanece como follow-up
 
 **Data:** 2026-05-11 (Wave 3 v4.0 — Componente 19)
