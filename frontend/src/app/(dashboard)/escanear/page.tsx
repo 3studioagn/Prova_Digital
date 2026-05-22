@@ -32,6 +32,10 @@ import {
 // integracao da uniformizacao byte-a-byte. Ver `lib/c19-mensagens.ts`
 // para a invariante critica e seu teste Vitest (8 cenarios).
 import { mensagemFinal } from "@/lib/c19-mensagens";
+// Wave 8 v5.0 / C22 — reativacao da tela de assinatura no fluxo de scan.
+import { AssinaturaModal } from "@/components/assinatura/AssinaturaModal";
+import { deveAbrirAssinatura } from "@/lib/assinatura/helpers";
+import type { ScanResponse } from "@/lib/types/prova";
 import styles from "./escanear.module.css";
 
 /* ──────────────────────────────────────────────────────────────────────
@@ -73,6 +77,10 @@ export default function EscanearPage() {
   const [cameraState, setCameraState] = useState<CameraState>({ kind: "idle" });
   const [manualState, setManualState] = useState<ManualState>({ kind: "idle" });
 
+  // Wave 8 v5.0 / C22 — ScanResponse da prova identificada cujo ator e o
+  // proximo habilitado. Enquanto != null, o modal de assinatura fica aberto.
+  const [assinatura, setAssinatura] = useState<ScanResponse | null>(null);
+
   // Wave 3 v4.0 / C19 — hook que conecta o input do <ManualPanel> aos
   // utilitarios puros de lib/codigo-publico (mascara, auto-uppercase,
   // bloqueio rigido por posicao, validacao de formato).
@@ -83,6 +91,25 @@ export default function EscanearPage() {
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token ?? null;
   }, []);
+
+  // Wave 8 v5.0 / C22 — destino comum dos dois caminhos de identificacao
+  // (camera e digitacao manual). Regra unica confirmada pelo Mario:
+  //   - usuario E o proximo ator (transicoes_permitidas nao-vazio) ->
+  //     abre o modal de assinatura automaticamente (RF-028);
+  //   - caso contrario (nao e a vez dele OU prova terminal) -> abre
+  //     /provas/[id] normal, como ja acontecia (Decisao D6).
+  // O sub-caso ator-errado FORA do escopo RLS nao chega aqui: o /scan ja
+  // retornou 404 e a pagina exibiu o erro generico (anti-enumeracao).
+  const handleIdentificada = useCallback(
+    (scan: ScanResponse) => {
+      if (deveAbrirAssinatura(scan)) {
+        setAssinatura(scan);
+      } else {
+        router.push(`/provas/${scan.prova.id}`);
+      }
+    },
+    [router],
+  );
 
   const handleDetect = useCallback((payload: string) => {
     // AUD-W3C10-004 (race fix): html5-qrcode pode disparar onDetect
@@ -117,7 +144,7 @@ export default function EscanearPage() {
 
   useEffect(() => {
     // AUD-W3C10-004 + AUD-W3C10-018: deps completas (cameraState, getToken,
-    // router) — sem eslint-disable. O early-return barra recomputacoes
+    // handleIdentificada) — sem eslint-disable. O early-return barra recomputacoes
     // quando kind != "identifying"; o flag `cancelled` previne side-effects
     // duplicados se um novo payload chegar antes do anterior resolver
     // (combinado com o guard de handleDetect, essa situacao agora exige
@@ -130,7 +157,7 @@ export default function EscanearPage() {
       });
       if (cancelled) return;
       if (result.tipo === "sucesso") {
-        router.push(`/provas/${result.prova.prova.id}`);
+        handleIdentificada(result.prova);
         return;
       }
       setCameraState({
@@ -142,7 +169,7 @@ export default function EscanearPage() {
     return () => {
       cancelled = true;
     };
-  }, [cameraState, getToken, router]);
+  }, [cameraState, getToken, handleIdentificada]);
 
   const handleManualSubmit = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
@@ -167,7 +194,7 @@ export default function EscanearPage() {
         { getToken },
       );
       if (result.tipo === "sucesso") {
-        router.push(`/provas/${result.prova.prova.id}`);
+        handleIdentificada(result.prova);
         return;
       }
       setManualState({
@@ -176,7 +203,12 @@ export default function EscanearPage() {
         mensagem: mensagemFinal(result.codigo),
       });
     },
-    [codigoInput.codigoCompleto, codigoInput.isFormatValid, getToken, router],
+    [
+      codigoInput.codigoCompleto,
+      codigoInput.isFormatValid,
+      getToken,
+      handleIdentificada,
+    ],
   );
 
   // D8 — reset do banner de erro quando usuario comeca a editar de novo.
@@ -284,6 +316,18 @@ export default function EscanearPage() {
           </AnimatePresence>
         </div>
       </section>
+
+      {/* Wave 8 v5.0 / C22 — modal de assinatura. Abre automaticamente
+          (RF-028) quando a prova identificada tem o usuario logado como
+          proximo ator. TODA saida (sucesso, cancelamento, conflito,
+          sessao) navega para /provas/[id]. */}
+      {assinatura && (
+        <AssinaturaModal
+          scan={assinatura}
+          getToken={getToken}
+          onFechar={() => router.push(`/provas/${assinatura.prova.id}`)}
+        />
+      )}
     </div>
   );
 }
