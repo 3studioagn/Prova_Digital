@@ -42,6 +42,12 @@ interface ExecutarTransicaoInput {
  * faz uma chamada isolada. O componente chamador e responsavel por
  * guardar o resultado e decidir o proximo passo (voltar para idle,
  * recarregar scan, etc).
+ *
+ * Wave 8 v5.0 / Componente 22: hook reativado (estava orfao desde o
+ * redesenho do C10 v4.0). Adicionado o campo `status` ao retorno de
+ * `executar` para o chamador mapear erros com seguranca — distingue 409
+ * (race), 401 (sessao), 5xx (rede retentavel) de 422/404 (terminal
+ * generico), sem depender de string-matching da mensagem (anti-enumeracao).
  */
 export function useExecutarTransicao(
   getToken: () => Promise<string | null>,
@@ -57,6 +63,7 @@ export function useExecutarTransicao(
       data: TransicaoResponse | null;
       error: string | null;
       isConflict: boolean;
+      status: number | null;
     }> => {
       setState({ loading: true, error: null, result: null });
 
@@ -69,7 +76,7 @@ export function useExecutarTransicao(
       if (!token) {
         const error = "Sessao expirada. Faca login novamente.";
         setState({ loading: false, error, result: null });
-        return { data: null, error, isConflict: false };
+        return { data: null, error, isConflict: false, status: 401 };
       }
 
       try {
@@ -86,11 +93,13 @@ export function useExecutarTransicao(
           },
         );
         setState({ loading: false, error: null, result });
-        return { data: result, error: null, isConflict: false };
+        return { data: result, error: null, isConflict: false, status: 201 };
       } catch (err) {
         let msg = "Nao foi possivel executar a transicao.";
         let isConflict = false;
+        let status: number | null = null;
         if (err instanceof ApiError) {
+          status = err.status;
           if (err.status === 401) {
             msg = "Sessao expirada. Faca login novamente.";
           } else if (err.status === 404) {
@@ -107,7 +116,7 @@ export function useExecutarTransicao(
           }
         }
         setState({ loading: false, error: msg, result: null });
-        return { data: null, error: msg, isConflict };
+        return { data: null, error: msg, isConflict, status };
       }
     },
     [getToken],
