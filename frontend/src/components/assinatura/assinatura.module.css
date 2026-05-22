@@ -1,0 +1,358 @@
+/*
+ * AssinaturaModal — Wave 8 v5.0 / Componente 22.
+ *
+ * CSS Module do modal de assinatura. Classes do modal/canvas migradas
+ * verbatim da arqueologia (commit 6add246) e adaptadas: seletor
+ * Aprovar/Reprovar, badge de contexto e views de resultado.
+ *
+ * Tokens canonicos de globals.css — sem cores hard-coded (excecao:
+ * #ffffff como superficie elevada, ja usada no projeto). Touch targets
+ * >= 44px (RNF-013 — C22 entrega mobile-ready; o polimento fino e o C23).
+ */
+
+/* ── Backdrop + card ──────────────────────────────────────────────────── */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: var(--radius-card-lg);
+  padding: 1.75rem;
+  max-width: 520px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+/* ── Cabecalho + contexto da prova ────────────────────────────────────── */
+
+.cabecalho {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.titulo {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  color: var(--color-card-text);
+  line-height: 1.25;
+}
+
+/* Foco programatico (a11y — anuncio da view ao leitor de tela). Sem ring:
+   nao e navegacao por teclado do usuario. */
+.titulo:focus {
+  outline: none;
+}
+
+.provaInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.provaNome {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--color-card-text);
+}
+
+.provaMeta {
+  font-size: var(--fs-sm);
+  color: var(--color-card-text-muted);
+}
+
+.descricao {
+  font-size: var(--fs-sm);
+  color: var(--color-card-text-muted);
+  line-height: 1.5;
+}
+
+/* ── Transicao + badge de contexto do motorista ───────────────────────── */
+
+.transicao {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--color-card-text);
+  background: var(--color-card-surface-alt);
+  padding: 0.55rem 0.8rem;
+  border-radius: var(--radius-sm);
+}
+
+.contextoBadge {
+  align-self: flex-start;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--color-card-text);
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent);
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-pill);
+}
+
+/* ── Formulario ───────────────────────────────────────────────────────── */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--color-card-text);
+}
+
+.textarea {
+  width: 100%;
+  min-height: 76px;
+  padding: 0.7rem 0.85rem;
+  background: #ffffff;
+  border: 1px solid var(--color-card-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family);
+  font-size: var(--fs-base);
+  color: var(--color-card-text);
+  resize: vertical;
+}
+
+.textarea:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* ── Captura de assinatura (canvas) ───────────────────────────────────── */
+
+.capturaWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.capturaCanvasSlot {
+  width: 100%;
+}
+
+.capturaCanvas {
+  display: block;
+  width: 100%;
+  background: #ffffff;
+  border: 2px dashed var(--color-card-border);
+  border-radius: var(--radius-sm);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.capturaActions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.capturaHint {
+  font-size: var(--fs-xs);
+  color: var(--color-card-text-muted);
+}
+
+.capturaLimpar {
+  min-height: 44px;
+  padding: 0 0.6rem;
+  background: none;
+  border: none;
+  color: var(--color-card-text-muted);
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.capturaLimpar:hover {
+  color: var(--color-card-text);
+}
+
+.capturaLimpar:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Banner de erro retentavel (falha de rede — D5) ───────────────────── */
+
+.erroBanner {
+  padding: 0.7rem 0.9rem;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+/* ── Botoes ───────────────────────────────────────────────────────────── */
+
+.botaoAprovar,
+.botaoReprovar,
+.botaoSecundario {
+  min-height: 46px;
+  padding: 0 1.25rem;
+  font-family: var(--font-family);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.botaoAprovar {
+  background: #1c1c1c;
+  color: #ffffff;
+  border: 1px solid #1c1c1c;
+}
+
+.botaoAprovar:hover {
+  background: #333333;
+}
+
+.botaoReprovar {
+  background: var(--color-danger);
+  color: #ffffff;
+  border: 1px solid var(--color-danger);
+}
+
+.botaoReprovar:hover {
+  background: var(--color-danger-hover);
+}
+
+.botaoSecundario {
+  background: transparent;
+  color: var(--color-card-text);
+  border: 1px solid var(--color-card-border);
+}
+
+.botaoSecundario:hover {
+  background: var(--color-card-surface-alt);
+}
+
+.botaoAprovar:disabled,
+.botaoReprovar:disabled,
+.botaoSecundario:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── Seletor Aprovar/Reprovar (D3) ────────────────────────────────────── */
+
+.selecaoBotoes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.selecaoBotoes .botaoAprovar,
+.selecaoBotoes .botaoReprovar {
+  width: 100%;
+}
+
+/* ── Rodape de acoes ──────────────────────────────────────────────────── */
+
+.rodape {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.15rem;
+}
+
+/* ── Views de resultado (sucesso / aviso) ─────────────────────────────── */
+
+.resultado {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.85rem;
+  padding: 0.75rem 0 0.25rem;
+}
+
+.resultadoIconeSucesso,
+.resultadoIconeAviso {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-pill);
+}
+
+.resultadoIconeSucesso {
+  background: var(--color-accent);
+  color: var(--color-card-text);
+}
+
+.resultadoIconeAviso {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.resultadoTexto {
+  font-size: var(--fs-sm);
+  color: var(--color-card-text-muted);
+  line-height: 1.55;
+}
+
+.resultadoTexto strong {
+  color: var(--color-card-text);
+  font-weight: 600;
+}
+
+.resultado .botaoAprovar {
+  width: 100%;
+  max-width: 280px;
+}
+
+/* ── Mobile-ready (RNF-013 — C22; polimento fino fica para o C23) ─────── */
+
+@media (max-width: 460px) {
+  .card {
+    padding: 1.25rem;
+  }
+
+  .rodape {
+    flex-direction: column;
+  }
+
+  .rodape button {
+    width: 100%;
+  }
+}
+
+/* ── prefers-reduced-motion — RN-012 / RNF-010 ────────────────────────── */
+/* A animacao de entrada do modal e controlada por `useReducedMotion` do
+ * framer-motion (camada JS). Esta regra zera as transicoes de hover por
+ * defesa em profundidade (mesmo padrao dual JS+CSS do C12). */
+
+@media (prefers-reduced-motion: reduce) {
+  .botaoAprovar,
+  .botaoReprovar,
+  .botaoSecundario {
+    transition: none;
+  }
+}
