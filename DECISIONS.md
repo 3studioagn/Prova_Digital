@@ -7151,3 +7151,71 @@ inteira para 404 byte-a-byte, abrir sessao dedicada cobrindo as 11
 chaves (relatorios + auditoria + usuarios + configuracoes + scan +
 provas detail + provas list + provas create + provas cancel + provas
 restart + outras a inventariar). NAO escopo desta sessao.
+
+---
+
+## ADR-163 — Wave 8 v5.0 / C22: 11 decisoes de design da reativacao da tela de assinatura
+**Data:** 2026-05-22
+**Componente:** Wave 8 v5.0 / Componente 22 — Reativacao da Tela de Assinatura no Fluxo de Escaneamento
+**Contexto:** O frontend da tela de assinatura foi descontinuado no redesenho do C10 v4.0 (commit `e4d543b`, 2026-05-07). Resultado em producao: o ator escaneia uma prova, ela e identificada, mas nao ha como assina-la para movimenta-la. O Gate 1 do C22 (`docs/wave8-v5-c22/analysis.md` + `arqueologia.md`) recuperou o codigo original via arqueologia de Git e propos 11 decisoes de design, todas escaladas ao Mario. Mario aceitou as recomendacoes do Gate 1 e respondeu 2 perguntas adicionais de fluxo (Q1/Q2).
+
+**Decisao:** reativar a tela de assinatura como modal sobre `/escanear`, reconstruido a partir da arqueologia, sem tocar backend/RLS/migrations/endpoints.
+
+| # | Decisao | Escolha aprovada |
+|---|---|---|
+| D1 | Apresentacao | Modal sobre `/escanear` |
+| D2 | Mecanismo de captura | `react-signature-canvas` (canvas dedo/mouse) — confirmado pela arqueologia; pacote ja instalado (orfao) |
+| D3 | Fluxo do vendedor | Seletor Aprovar/Reprovar antes da assinatura (RF-008) |
+| D4 | Motivo da reprovacao | Texto livre, sem minimo rigido, `max 1000`, no mesmo modal |
+| D5 | Falha de rede | Retry manual; assinatura preservada em memoria (o canvas nao desmonta entre "assinando" e "enviando") |
+| D6 | Ator errado | Abre `/provas/[id]` — ver ADR-164 (decisao com escalacao dedicada) |
+| D7 | Pos-sucesso | Saida do modal navega para `/provas/[id]` |
+| D8 | Estado terminal | Subsumido pela regra unica de D6 (`transicoes_permitidas` vazio -> `/provas/[id]`) |
+| D9 | Geolocalizacao | Nao — `movimentacoes` nao tem coluna de geo; capturar exigiria migration (fora do escopo) |
+| D10 | Animacoes | `framer-motion` direto (C20 nao existe) + feedback inline; respeita `prefers-reduced-motion` via `useReducedMotion` |
+| D11 | Cobertura de testes | Opcao B — Vitest para logica pura + smoke E2E manual; sem instalar Playwright/axe |
+| Q1 | Ator errado in-scope | Abre `/provas/[id]` (ver ADR-164) |
+| Q2 | Abertura do modal | Automatica apos o scan (RF-028 "apresentar automaticamente") |
+
+**Decisao paralela — C20 e C21 pendentes:** o prompt do C22 assumia C20 (camada de animacoes) e C21 (migracao de dados) entregues. O Gate 1 constatou que NAO existem no codigo (sem branch, sem docs, sem `<MotionModal>`/`<PageTransition>`/`/lib/motion/`). Mario decidiu: C20 e C21 ficam pendentes; o C22 prossegue sem eles (suas dependencias reais — C05/C06/C10/C19/C11 — estao prontas). As animacoes do C20 serao aplicadas depois, quando a Wave 8 estiver correta. Implicacao: D10 usa `framer-motion` direto, mantido localizado para o C20 absorver depois sem retrabalho.
+
+**Alternativas rejeitadas (detalhe em `analysis.md` §5.5 — 2-3 opcoes por decisao):**
+- D1 — pagina dedicada `/assinar/[id]`: rejeitada (troca de rota, mais ceremonia, exigiria persistir o `ScanResponse` cross-route).
+- D5 — persistencia em `localStorage`/`IndexedDB`: rejeitada (overkill para uma imagem de assinatura; o usuario re-assinaria mesmo; in-memory basta).
+- D11 — instalar Playwright + axe (Opcao A): rejeitada (dependencia nova; a cultura do projeto e Vitest + smoke manual — D-13 da Wave 1 v4.0).
+
+**Consequencias:**
+- Reativacao fiel a arqueologia: `AssinaturaModal` reconstruido, `react-signature-canvas` reativado, hook `useExecutarTransicao` (orfao desde o C10 v4.0) reativado.
+- Zero backend, zero migration, zero RLS, zero endpoint novo. `git diff` em `backend/` vazio.
+- Bundle `/escanear`: 8.31 kB -> 15.9 kB (Size) / 210 kB -> 220 kB (First Load) — `react-signature-canvas` entra no bundle (era dependencia orfa) + codigo do modal.
+- Criterio 21 do prompt (snapshot tests por componente) NAO atendido — a Opcao B do D11 nao inclui infra de teste de componente; o smoke E2E manual cobre os componentes.
+
+**Documento:** `docs/wave8-v5-c22/analysis.md` (Gate 1 + Apendice de Execucao) + `arqueologia.md`.
+
+---
+
+## ADR-164 — Wave 8 v5.0 / C22: ator-errado in-scope abre `/provas/[id]` (revisao de RN-014/RF-006/Cenario 4)
+**Data:** 2026-05-22
+**Componente:** Wave 8 v5.0 / Componente 22
+**Contexto:** Ao autorizar o Gate 2, o Mario especificou o fluxo: *"se o ator for o certo, ao escanear aparece a opcao de assinar e depois mostra a `/provas/[id]`; se nao for o ator que vai assinar, ele escaneia e abre a `/provas/[id]` normal, igual ja acontece"*. Essa instrucao **diverge da redacao literal** de RN-014 ("tentativas de assinar por perfis nao-habilitados devem ser rejeitadas com mensagem generica indistinguivel da resposta para prova inexistente"), de RF-006 ("exibe mensagem clara de bloqueio") e do **Cenario 4 obrigatorio** do prompt ("ator escaneia prova que nao e dele -> mensagem generica"). Por tocar a RN-014 (clausula petrea de anti-enumeracao), foi escalado ao Mario com analise tecnica; Mario confirmou explicitamente "Abrir tela de detalhe" (Q1, 2026-05-22).
+
+**Decisao:** quando o `/scan` resolve uma prova com `transicoes_permitidas` vazio (o usuario logado nao e o proximo ator), o C22 navega para `/provas/[id]` em vez de exibir mensagem generica de bloqueio.
+
+**Por que e seguro perante a anti-enumeracao (RN-014):**
+1. O "ator errado" tem dois sub-casos. **(a) Prova FORA do escopo RLS** (ex.: vendedor escaneia prova de outro vendedor) -> o `/scan` retorna **404** e a pagina exibe o erro generico "Prova nao encontrada" — comportamento inalterado; o usuario nem consegue abrir `/provas/[id]` (o detalhe tambem da 404). **(b) Prova DENTRO do escopo, mas nao e a vez do usuario** -> o `/scan` retorna **200** com `transicoes_permitidas` vazio.
+2. O limite de enumeracao e o **escopo RLS + o 404 generico**, que NAO muda. Provas fora do escopo seguem dando 404 identico para inexistente/fora-de-escopo/formato-invalido (DAT §8.2).
+3. O sub-caso (b) so ocorre para provas que o usuario **ja ve na sua listagem** (estao no escopo RLS dele). Abrir o detalhe nao revela nada que ele ja nao pudesse ver. Zero ganho de enumeracao.
+4. A maquina de estados e publica (Requisitos Secao 5) — derivar "de quem e a vez" a partir do status nao e segredo.
+
+**O que de fato diverge:** a redacao **literal** de RN-014/RF-006 pede uma *mensagem* de bloqueio; o fluxo do Mario mostra a tela de detalhe. A **substancia** de RN-014 (anti-enumeracao) e integralmente preservada; a **forma literal** (mensagem) nao. O Cenario 4 do prompt fica reescrito conforme esta decisao.
+
+**Alternativa rejeitada:** mensagem generica "Prova nao encontrada" para o ator-errado in-scope (conformidade literal com RN-014/RF-006/Cenario 4). Rejeitada pelo Mario: (1) o fluxo "todo scan termina em `/provas/[id]`, com etapa de assinatura opcional para o ator certo" e mais simples e previsivel; (2) mostrar "nao encontrada" para uma prova que o usuario ja ve na listagem seria confuso (ex.: clicheria escaneia uma prova ja recebida e ouve "nao encontrada").
+
+**Consequencias:**
+- Regra unica do C22: `scan -> se voce e o proximo ator, assina antes; senao, vai direto ao detalhe`. As decisoes D6, D7 e D8 do ADR-163 convergem nessa regra.
+- O Cenario 4 do prompt fica **reescrito**: "ator errado in-scope -> `/provas/[id]`; ator errado fora-de-escopo -> erro generico 404 (inalterado)".
+- Recomenda-se destacar este ADR para a auditoria senior independente — toca clausula petrea (RN-014) e tem chancela humana explicita registrada (Mario, Q1, 2026-05-22).
+
+**Documento:** `docs/wave8-v5-c22/analysis.md` §0.3 + §5.5 (Decisao 6).
+
+---

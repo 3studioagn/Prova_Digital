@@ -2,6 +2,103 @@
 
 ---
 
+## v5.0 — Wave 8 — Componente 22 (novo na v5.0) (2026-05-22)
+
+**Branch:** `wave8-v5/componente-22` → PR contra `development`.
+**Base:** `wave8-v5-c22/analysis` (Gate 1 — arqueologia + analise read-only).
+
+Reativacao da tela de assinatura no fluxo de escaneamento (RF-028, RN-014).
+O frontend de assinatura foi descontinuado no redesenho do Componente 10
+v4.0 (commit `e4d543b`); o backend de assinatura permaneceu integralmente
+operacional. Esta entrega reconstroi a UI (recuperada via arqueologia de
+Git) e a religa ao `/escanear` — sem tocar backend, banco ou maquina de
+estados.
+
+### Adicionado
+- Modal de assinatura reativado no fluxo de escaneamento (RF-028): apos
+  identificar uma prova (camera ou digitacao manual), se o usuario logado
+  e o proximo ator habilitado, o modal abre automaticamente.
+- `components/assinatura/AssinaturaModal.tsx` — modal com seletor
+  Aprovar/Reprovar (vendedor), captura de assinatura, campo de motivo e
+  views de sucesso/conflito/sessao/erro. Animacao via `framer-motion`.
+- `components/assinatura/CapturaAssinatura.tsx` — wrapper do
+  `react-signature-canvas` com canvas responsivo (`ResizeObserver`).
+- `components/assinatura/assinatura.module.css` — CSS Module (classes do
+  modal/canvas migradas verbatim da arqueologia + seletor/contexto/
+  resultado). Touch targets >= 44px (RNF-013 — mobile-ready).
+- `lib/assinatura/helpers.ts` — helpers puros: labels de transicao v4.0
+  (17 estados), deteccao de proximo ator, contexto do motorista.
+- `lib/assinatura/__tests__/helpers.test.ts` — 17 testes Vitest.
+- Deteccao automatica do proximo ator via `transicoes_permitidas` do
+  `/scan` (ja calculado pelo backend; o C10 v4.0 havia parado de consumir).
+- Tratamento de race condition (409), sessao expirada (401) e falha de
+  rede (retry com a assinatura preservada em memoria).
+- Compatibilidade com as 4 rotas v4.0, provas legacy v3.0 e os 3 contextos
+  do motorista.
+
+### Modificado
+- `app/(dashboard)/escanear/page.tsx` — integracao leve: os 2 pontos
+  pos-identificacao (camera + manual) passam pela regra unica
+  `handleIdentificada` (abre o modal vs navega para `/provas/[id]`).
+  Logica de camera/manual/scanner intocada.
+- `hooks/useExecutarTransicao.ts` — reativado (estava orfao desde o
+  redesenho do C10 v4.0). Adicionado o campo `status` ao retorno para o
+  modal mapear erros com seguranca (anti-enumeracao).
+
+### Reusado
+- Sistema de assinatura original (`react-signature-canvas`) — recuperado
+  via arqueologia (commit-fonte `6add246`); pacote ja instalado.
+- Backend de assinatura (`POST /api/v1/provas/{id}/transicoes`,
+  `TransicaoRequest`, `_decode_assinatura`) — zero modificacao.
+- Camada de servico de identificacao (`identificacao-prova.ts`) e o
+  endpoint `/scan` — consumidos sem alteracao.
+- `useFocusTrap` (focus trap WCAG do modal).
+- `STATUS_LABELS`, `ROTA_LABELS`, `contextoMotorista` de `prova.ts`.
+
+### Sem alteracao
+- Backend de assinatura: intocado. `git diff` em `backend/` vazio.
+- C10, C19, C11, C06, C08, C12, C16: logica interna intocada.
+- `contrato-c12.md`: intocado.
+- Schema de banco, migrations, RLS, enums: zero modificacoes.
+- Dashboard, Atalhos, Log de Auditoria: intocados.
+
+### Decisoes
+- ADR-163 — 11 decisoes de design do C22.
+- ADR-164 — ator-errado in-scope abre `/provas/[id]` (revisao de
+  RN-014/RF-006/Cenario 4, com escalacao e chancela explicita do Mario).
+
+### Bundle size (pre-C22 vs pos-C22)
+| Rota | Size antes | Size depois | First Load antes | First Load depois |
+|---|---|---|---|---|
+| `/escanear` | 8.31 kB | 15.9 kB | 210 kB | 220 kB |
+
+Delta ~+7.6 kB (Size) / ~+10 kB (First Load): `react-signature-canvas`
+entra no bundle (era dependencia orfa) + codigo do modal.
+
+### Validacao
+- `npx tsc --noEmit`: exit 0.
+- `npx next build`: 13/13 paginas.
+- `npx next lint`: 0 warnings, 0 errors.
+- `npx vitest run`: **222 testes** (era 205 + 17 novos), 0 regressao.
+- Advisors MCP: identicos ao baseline (1 INFO + 1 WARN security; 13 INFO
+  performance) — esperado, o C22 nao toca o banco.
+
+### Pendencias para o PR `development -> main`
+- Smoke E2E manual dos 10 cenarios (`docs/wave8-v5-c22/smoke-validation.md`)
+  — exige backend local + sessao autenticada + provas-fixture nos estados
+  acionados. Nao automatizavel (Decisao D11 — Opcao B).
+- Auditoria senior independente.
+- Heranca da Wave 3: rate limit C19 (ADR-145), CI/CD pos-Wave 3 (ADR-156).
+- Infra: redeployar o backend no Railway (estava fora do ar no Gate 1).
+
+### INICIA A v5.0
+Primeira entrega da v5.0. C20 (animacoes) e C21 (migracao de dados) ficam
+pendentes por decisao do Mario — serao retomados apos a Wave 8. Proximo
+passo: Componente 23 (Responsividade Mobile da pagina de escaneamento),
+que depende do C22.
+
+---
+
 ## v4.0 — Wave 5 — Componente 16 — Correções Pós-Auditoria (2026-05-13)
 
 **Branch:** `wave5-v4-c16/fixes/execution` → PR contra `development`.

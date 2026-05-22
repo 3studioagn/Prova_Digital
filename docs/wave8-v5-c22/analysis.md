@@ -634,3 +634,74 @@ Garantir que o C22 nao quebra entregas anteriores:
    um bug de producao (nenhuma prova pode ser movimentada hoje).
 
 **Fim do Gate 1.**
+
+---
+
+## Apendice — Execução (Gate 2)
+
+**Data:** 2026-05-22 · **Branch:** `wave8-v5/componente-22` (a partir de
+`wave8-v5-c22/analysis`) · **Autorizacao:** `AUTORIZADO GATE 2 — WAVE 8
+v5.0 / C22` + respostas as 11 decisoes + Q1/Q2 (Mario, 2026-05-22).
+
+### A.1 Decisoes finais
+
+Consolidadas em ADR-163 (11 decisoes) + ADR-164 (ator-errado in-scope).
+Resumo: D1 Modal · D2 `react-signature-canvas` · D3 seletor
+Aprovar/Reprovar · D4 motivo sem minimo · D5 retry in-memory · D6
+ator-errado -> `/provas/[id]` · D7 pos-sucesso -> `/provas/[id]` · D8
+subsumido por D6 · D9 sem geo · D10 `framer-motion` direto · D11 Opcao B ·
+Q1 abrir detalhe · Q2 modal automatico. C20 e C21 mantidos **pendentes**
+por decisao do Mario — o C22 prossegue sem eles.
+
+### A.2 Diferencas entre o proposto (Gate 1 §5.6.1) e o realizado
+
+| Proposto no Gate 1 | Realizado | Motivo |
+|---|---|---|
+| `components/assinatura/` com ~8 arquivos (Seletor, CampoMotivo, ContextoMotorista, ConfirmacaoRecebimento, FeedbackSucesso, FeedbackErro, ...) | 3 arquivos: `AssinaturaModal.tsx` (sub-componentes `CabecalhoContexto`/`ResultadoView` inline), `CapturaAssinatura.tsx`, `assinatura.module.css` | O fluxo e data-driven (uma regra unica sobre `transicoes_permitidas`/`motivo_obrigatorio_em`); componentes por-perfil separados seriam abstracao desnecessaria. O modal da arqueologia tambem era um arquivo unico. |
+| `lib/assinatura/types.ts` | Nao criado | Os tipos necessarios ja vivem em `prova.ts` (`ScanResponse`, `StatusProva`, etc.). |
+| `hooks/useAssinaturaFlow.ts` | Nao criado | A orquestracao "abrir modal vs navegar" e a `useCallback` `handleIdentificada` (~6 linhas) no `escanear/page.tsx`. |
+| `usePreservacaoLocalAssinatura` | Nao criado | D5 = retry in-memory (o canvas nao desmonta entre "assinando" e "enviando"). Sem `localStorage`. |
+| D6/D7/D8 como decisoes separadas | Unificadas pela regra do Mario (Q1/ADR-164): scan -> ator certo assina; senao `/provas/[id]` | Esclarecimento de fluxo do Mario na autorizacao do Gate 2. |
+
+### A.3 Arquivos entregues
+
+**Novos:** `lib/assinatura/helpers.ts` · `lib/assinatura/__tests__/helpers.test.ts`
+· `components/assinatura/AssinaturaModal.tsx` ·
+`components/assinatura/CapturaAssinatura.tsx` ·
+`components/assinatura/assinatura.module.css`.
+**Modificados:** `app/(dashboard)/escanear/page.tsx` (integracao leve — 2
+pontos pos-identificacao) · `hooks/useExecutarTransicao.ts` (reativado +
+campo `status`).
+**Docs:** `CHANGELOG.md` · `DECISIONS.md` (ADR-163/164) · `CLAUDE.md` ·
+este `analysis.md` · `visual-guide.md` · `smoke-validation.md`.
+
+### A.4 Validacao tecnica
+
+- `npx tsc --noEmit`: exit 0.
+- `npx next build`: 13/13 paginas. `/escanear` em 15.9 kB / 220 kB
+  (era 8.31 kB / 210 kB — `react-signature-canvas` entra no bundle).
+- `npx next lint`: 0 warnings, 0 errors.
+- `npx vitest run`: **222 testes** (205 + 17 novos em `helpers.test.ts`),
+  0 regressao.
+- Advisors MCP (security + performance): identicos ao baseline do Gate 1
+  — esperado, o C22 nao toca o banco.
+
+### A.5 Verificacao funcional — limitacao assumida
+
+A verificacao **programatica** do modal no browser nao e viavel nesta
+sessao: exige (a) backend FastAPI rodando localmente; (b) uma sessao
+Supabase autenticada — sem credenciais de usuario disponiveis; (c)
+provas-fixture em estados acionaveis (R-6 — em producao so ha provas
+CRIADA / terminais; nenhuma em estado de motorista/clicheria/vendedor
+mid-flow). O deploy Railway esta fora do ar (D-4). Conforme a Decisao
+D11 (Opcao B) e a cultura do projeto (D-13), a verificacao funcional dos
+10 cenarios e o **smoke E2E manual** — checklist em `smoke-validation.md`.
+A correcao do codigo esta coberta por tsc + build + lint + 222 testes.
+
+### A.6 Pendencias
+
+Smoke E2E manual (Mario, `smoke-validation.md`) · auditoria senior
+independente · screenshots para o `visual-guide.md` · redeploy do backend
+no Railway · heranca da Wave 3 (rate limit C19 — ADR-145; CI/CD — ADR-156).
+
+**Fim do Apendice de Execucao.**
