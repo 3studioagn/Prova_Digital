@@ -63,6 +63,16 @@ import styles from "./assinatura.module.css";
 /** Easing canonico do projeto (espelha ENTER_EASE da /nova-prova e /escanear). */
 const ENTER_EASE = [0.32, 0.72, 0, 1] as const;
 
+/**
+ * ID do `<h2>` que serve de `aria-labelledby` do modal. AUD-W8C22-006:
+ * declarado uma vez para evitar duplicacao literal (duas `<h2>` do
+ * `CabecalhoContexto` e do `ResultadoView` compartilham o mesmo id —
+ * elas sao mutuamente exclusivas via `view`). O `data-modal-title`
+ * complementar permite ao effect de foco programatico localizar o
+ * titulo montado sem depender do id literal (`[data-modal-title]`).
+ */
+const TITULO_ID = "assinatura-titulo";
+
 interface AssinaturaModalProps {
   /** Resposta do `/scan` — prova + transicoes permitidas para o usuario. */
   scan: ScanResponse;
@@ -120,9 +130,12 @@ export function AssinaturaModal({
   // a11y: a cada troca de view, reposiciona o foco no titulo. Sem isto, o
   // elemento clicado (ex.: botao "Aprovar") desmonta e o foco cai no
   // body. O `<h2>` tem tabIndex={-1} para receber foco programatico.
+  // AUD-W8C22-006: busca via `[data-modal-title]` em vez do id literal —
+  // robusto a renomeacoes do id e suporta dois h2 mutuamente exclusivos
+  // (CabecalhoContexto vs ResultadoView) sem depender de seletor de id.
   useEffect(() => {
     const titulo = cardRef.current?.querySelector<HTMLElement>(
-      "#assinatura-titulo",
+      "[data-modal-title]",
     );
     titulo?.focus();
   }, [view]);
@@ -207,7 +220,7 @@ export function AssinaturaModal({
       className={styles.backdrop}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="assinatura-titulo"
+      aria-labelledby={TITULO_ID}
       ref={focusTrapRef}
       initial={reduzirMovimento ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -402,7 +415,12 @@ function CabecalhoContexto({
 }) {
   return (
     <header className={styles.cabecalho}>
-      <h2 id="assinatura-titulo" className={styles.titulo} tabIndex={-1}>
+      <h2
+        id={TITULO_ID}
+        className={styles.titulo}
+        data-modal-title
+        tabIndex={-1}
+      >
         {titulo}
       </h2>
       <div className={styles.provaInfo}>
@@ -446,7 +464,12 @@ function ResultadoView({
           <CloseIcon width={28} height={28} />
         )}
       </span>
-      <h2 id="assinatura-titulo" className={styles.titulo} tabIndex={-1}>
+      <h2
+        id={TITULO_ID}
+        className={styles.titulo}
+        data-modal-title
+        tabIndex={-1}
+      >
         {titulo}
       </h2>
       <p className={styles.resultadoTexto}>{children}</p>
