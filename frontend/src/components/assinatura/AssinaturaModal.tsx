@@ -34,6 +34,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import { useRouter } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
 import { CheckIcon, CloseIcon } from "@/components/icons";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
@@ -96,6 +97,7 @@ export function AssinaturaModal({
   getToken,
   onFechar,
 }: AssinaturaModalProps) {
+  const router = useRouter();
   const reduzirMovimento = useReducedMotion();
   const focusTrapRef = useFocusTrap<HTMLDivElement>(true);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -267,6 +269,12 @@ export function AssinaturaModal({
             tom="aviso"
             titulo="Sessao expirada"
             onFechar={onFechar}
+            // AUD-W8C22-007: navega direto a /login. O fluxo antigo
+            // (onFechar -> /provas/[id] -> middleware -> /login) e UX
+            // subotima — o label "Fazer login" cria expectativa de ir
+            // direto. O middleware ainda funciona como fallback se o
+            // botao nao for clicado (modal pode ser fechado por Esc).
+            onClickPrincipal={() => router.push("/login")}
             botaoLabel="Fazer login"
           >
             Sua sessao expirou. Faca login novamente para continuar.
@@ -440,12 +448,20 @@ function ResultadoView({
   titulo,
   botaoLabel,
   onFechar,
+  onClickPrincipal,
   children,
 }: {
   tom: "sucesso" | "aviso";
   titulo: string;
   botaoLabel: string;
   onFechar: () => void;
+  /**
+   * AUD-W8C22-007: handler opcional do botao principal. Se nao informado,
+   * usa `onFechar` (saida terminal padrao). Usado pela view "sessao" para
+   * navegar diretamente a `/login` em vez de cair em `/provas/[id]` →
+   * middleware → `/login` (UX subotima).
+   */
+  onClickPrincipal?: () => void;
   children: ReactNode;
 }) {
   return (
@@ -476,7 +492,7 @@ function ResultadoView({
       <button
         type="button"
         className={styles.botaoAprovar}
-        onClick={onFechar}
+        onClick={onClickPrincipal ?? onFechar}
       >
         {botaoLabel}
       </button>
