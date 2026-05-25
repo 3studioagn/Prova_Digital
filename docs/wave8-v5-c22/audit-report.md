@@ -685,3 +685,50 @@ NAO EXECUTADO — fica para smoke manual.
 ---
 
 **Fim do Relatorio.**
+
+---
+
+## Apendice — Status pos-correcao (2026-05-25)
+
+> Apenso pela sessao de correcao pos-auditoria
+> (`wave8-v5-c22/fixes/execution`). **O corpo do relatorio original
+> acima nao foi editado.** Esta secao registra apenas o status final
+> de cada achado.
+
+| ID | Severidade | Status final | Commit | Critério objetivo |
+|---|---|---|---|---|
+| AUD-W8C22-001 | ALTO | **RATIFICADO — NO-OP** | n/a | Chancela explicita do Mario em ADR-164 (Q1, 2026-05-22). Substancia de RN-014 preservada. Reafirmada na nota ao ADR-164. |
+| AUD-W8C22-002 | MEDIO | **DEFERRED ao Mario** | n/a | Screenshots no `visual-guide.md` so apos smoke E2E manual. |
+| AUD-W8C22-003 | MEDIO | **RESOLVIDO** | `b4522c0` | `useExecutarTransicao` mapeia 422 + demais para mensagens genericas. Teste do AUD-005 inclui `not.toContain("setor")`. |
+| AUD-W8C22-004 | MEDIO | **DEFERRED ao Mario** | n/a | 10 cenarios + 7 transversais — sessao dedicada do Mario com backend local + provas-fixture. |
+| AUD-W8C22-005 | MEDIO | **RESOLVIDO** | `8aa729d` | 15 testes novos em `__tests__/useExecutarTransicao.test.ts`; funcao pura `executarTransicaoRequest` extraida. Suite 237 passed (era 222). |
+| AUD-W8C22-006 | BAIXO | **RESOLVIDO** | `1a5519b` | Constante `TITULO_ID` + `data-modal-title` nos 2 h2; `querySelector("[data-modal-title]")`. |
+| AUD-W8C22-007 | BAIXO | **RESOLVIDO** | `58629ec` | `useRouter` + prop `onClickPrincipal` opcional em `ResultadoView`; view "sessao" navega direto a `/login`. |
+| AUD-W8C22-008 | BAIXO | **RESOLVIDO** | `2dd853e` | `statusAplicado` registrado de `data.prova.status`; view de sucesso usa `STATUS_LABELS[statusAplicado ?? destino]`. |
+| AUD-W8C22-009 | BAIXO | **DEFERRED com registro** | n/a | ADR-165: refactor de baixo retorno; parcialmente coberto pelo AUD-006 (`[data-modal-title]`). |
+| AUD-W8C22-010 | BAIXO | **DEFERRED com registro** | n/a | ADR-165: `required` HTML5 + validacao manual cooperam como defesa em profundidade. |
+| AUD-W8C22-101 | INFO | **NO-OP — nao atribuir** | n/a | 5 arquivos CSS uncommitted no working tree do Mario sao pre-C22 (C06 Visual Refresh). Stashados como `wave8-v5-c22/fixes: CSS uncommitted pre-C22`. |
+| AUD-W8C22-102 | INFO | **NO-OP — justificado** | n/a | +7.6 kB Size / +10 kB First Load — `react-signature-canvas` (era orfao) + codigo do modal. Declarado em ADR-163. |
+| AUD-W8C22-103 | INFO | **NO-OP — informativo** | n/a | 11 provas legacy NULL + 5 PADRAO/DIRETA em producao. Tratamento por design. |
+| AUD-W8C22-104 | INFO | **NO-OP — informativo** | n/a | 0 provas em estado mid-flow — confirma R-6 do smoke. |
+
+**Validacao final (suite global):**
+- `npx tsc --noEmit`: exit 0.
+- `npx next lint`: 0 warnings, 0 errors.
+- `npx vitest run`: **237 passed** (era 222 + 15 novos AUD-005; 0 regressao).
+- `git diff origin/development..HEAD -- backend/ docs/wave3-v4-c11/contrato-c12.md docs/wave3-v4-c10/contrato-c19.md shared/access-matrix.json`: **VAZIO** (clausulas petreas preservadas).
+- `npx next build`: a validar no fix-validation.md.
+- `get_advisors` MCP: a validar no fix-validation.md.
+
+**Documentos correspondentes:** `docs/wave8-v5-c22/fix-plan.md` (plano)
++ `docs/wave8-v5-c22/fix-validation.md` (validacao + auto-critica) +
+apendice ao ADR-163 e ADR-165 em `DECISIONS.md`.
+
+**Recomendacao final:** PR pronto para merge condicional em `development`.
+Smoke E2E manual (AUD-004) + screenshots (AUD-002) + nova rodada de
+auditoria independente em sessao separada **antes do PR `development →
+main`**. Pendencias herdadas: rate limit C19 (ADR-145), CI/CD pos-Wave 3
+(ADR-156), redeploy Railway. **Proximo componente recomendado apos a
+re-auditoria do C22:** Componente 23 (Responsividade Mobile da pagina
+de escaneamento), que depende deste consolidado.
+

@@ -2,6 +2,96 @@
 
 ---
 
+## v5.0 — Wave 8 — Componente 22 — Correções Pós-Auditoria (2026-05-25)
+
+**Branch:** `wave8-v5-c22/fixes/execution` → PR contra `development`.
+**Base:** `wave8-v5-c22/fixes/plan` (Gate 1 — `fix-plan.md`).
+**Auditoria de origem:** `docs/wave8-v5-c22/audit-report.md` (HEAD `3eb4069`).
+
+Sessao de correcao dos 14 achados da auditoria senior independente do C22:
+**0 CRITICOS · 1 ALTO (ratificado) · 4 MEDIOS · 5 BAIXOS · 4 INFO**.
+
+### Corrigidos em codigo (5 commits cirurgicos)
+- **AUD-W8C22-003** (MEDIO — anti-enumeracao): `useExecutarTransicao`
+  agora mapeia 422 inesperado e demais status nao-mapeados (403 etc.)
+  para mensagens **genericas fixas**, em vez de repassar `err.message`
+  cru. O `AssinaturaModal` hoje desestrutura so `executar`, mas qualquer
+  consumidor futuro que fizer `const { error } = useExecutarTransicao(...)`
+  estaria protegido contra vazamento de setores via
+  `AtorNaoAutorizadoError` (defesa em profundidade R-3 da analysis).
+  Commit `b4522c0`.
+- **AUD-W8C22-005** (MEDIO — cobertura de testes): logica do hook
+  extraida para funcao pura `executarTransicaoRequest(input, params)`
+  exportada, padrao identico ao `identificacao-prova.ts` do C10 v4.0.
+  15 testes Vitest novos em `__tests__/useExecutarTransicao.test.ts`
+  (`environment: node`, sem JSDOM/RTL) cobrindo 201/401/404/409/422/
+  502/503/403/rede + autenticacao + body — incluindo assercoes
+  especificas que validam AUD-W8C22-003 (`not.toContain("setor")`).
+  Commit `8aa729d`.
+- **AUD-W8C22-006** (BAIXO — a11y / HTML valido): extraida constante
+  `TITULO_ID` no `AssinaturaModal`; adicionado `data-modal-title` nos
+  dois `<h2>` (`CabecalhoContexto` e `ResultadoView`); `useEffect` de
+  foco programatico busca via `[data-modal-title]` em vez do id
+  literal. Robusto a renomeacao + funciona com dois h2 mutuamente
+  exclusivos sem depender de unicidade do id. Commit `1a5519b`.
+- **AUD-W8C22-007** (BAIXO — UX): view "sessao" do modal navega
+  diretamente a `/login` em vez de `/provas/[id]` → middleware →
+  `/login`. Implementado via prop opcional `onClickPrincipal` em
+  `ResultadoView`; `useRouter` importado no modal. Demais views
+  terminais (sucesso/conflito/erro) inalteradas. Commit `58629ec`.
+- **AUD-W8C22-008** (BAIXO — defesa em profundidade): view de sucesso
+  usa `STATUS_LABELS[statusAplicado ?? destino]` (status efetivo do
+  backend) em vez de `STATUS_LABELS[destino]`. Pequena defesa contra
+  o cenario hipotetico de o backend transformar o destino internamente.
+  Comportamento visivel ao usuario identico hoje. Commit `2dd853e`.
+
+### DEFERRED com registro em DECISIONS.md (2 BAIXOS)
+- **AUD-W8C22-009** (querySelector vs callback ref): refactor de baixo
+  retorno; o padrao atual funciona e foi parcialmente resolvido pelo
+  AUD-006 (`[data-modal-title]` no querySelector). Registrado.
+- **AUD-W8C22-010** (textarea `required` + validacao manual): cooperam
+  como defesa em profundidade — o `required` HTML5 tambem serve
+  usuarios sem JS, e alguns leitores anunciam `required`. Decisao
+  consciente. Registrado.
+
+### DEFERRED ao smoke E2E manual do Mario (2 MEDIOS)
+- **AUD-W8C22-002** (`visual-guide.md` STUB sem screenshots) — Mario
+  preenche durante o smoke.
+- **AUD-W8C22-004** (smoke E2E manual dos 10 cenarios + 7 transversais)
+  — sessao dedicada do Mario com backend local + provas-fixture.
+
+### Ratificados / NO-OP
+- **AUD-W8C22-001** (ALTO chancelado em ADR-164) — substancia de
+  RN-014 preservada via escopo RLS + 404 generico. Sem acao.
+- **AUD-W8C22-101..104** (INFO) — todos registros informativos.
+
+### Validacao tecnica
+- `npx tsc --noEmit`: exit 0.
+- `npx next lint`: 0 warnings, 0 errors.
+- `npx vitest run`: **237 testes** (era 222 + 15 novos), 0 regressao.
+- `git diff origin/development..HEAD -- backend/ docs/wave3-v4-c11/contrato-c12.md docs/wave3-v4-c10/contrato-c19.md shared/access-matrix.json`: **VAZIO** — clausulas petreas preservadas.
+- Advisors MCP: identicos ao baseline pos-C22 (1 INFO + 1 WARN
+  security; 13 INFO performance) — esperado (zero touch backend).
+
+### Sem alteracao em
+- Backend de assinatura: intocado.
+- `contrato-c12.md` / `contrato-c19.md` / `shared/access-matrix.json`: intocados.
+- C10, C19, C11, C06, C08, C12, C16: logica interna intocada.
+- C15 v3, C17 v3, C18 v3, Wave 1 (RBAC): intocados.
+- Schema de banco, migrations, RLS, enums: zero modificacoes.
+- `escanear/page.tsx`, `escanear.module.css`: nao tocados nesta sessao
+  (a integracao leve original do C22 segue inalterada).
+
+### Pendencias para o PR `development → main`
+- Smoke E2E manual dos 10 cenarios (AUD-W8C22-004).
+- Screenshots no `visual-guide.md` (AUD-W8C22-002).
+- Heranca da Wave 3: rate limit C19 (ADR-145), CI/CD pos-Wave 3 (ADR-156).
+- Infra: redeployar o backend no Railway (estava fora do ar).
+- Recomendado: nova rodada de auditoria independente em sessao
+  separada (foco extra: AUD-003 + 15 testes novos do hook).
+
+---
+
 ## v5.0 — Wave 8 — Componente 22 (novo na v5.0) (2026-05-22)
 
 **Branch:** `wave8-v5/componente-22` → PR contra `development`.

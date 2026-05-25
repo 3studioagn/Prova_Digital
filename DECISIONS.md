@@ -7219,3 +7219,136 @@ restart + outras a inventariar). NAO escopo desta sessao.
 **Documento:** `docs/wave8-v5-c22/analysis.md` §0.3 + §5.5 (Decisao 6).
 
 ---
+
+## Apendice ao ADR-163 — Wave 8 v5.0 / C22 (Fixes pos-auditoria, 2026-05-25)
+**Contexto:** sessao de correcao pos-auditoria senior do C22 (`audit-report.md`
+HEAD `3eb4069`). Veredito da auditoria: **APROVADO COM CORRECOES**. Foram
+corrigidos em codigo 2 MEDIOS (AUD-003 + AUD-005) e 3 BAIXOS (AUD-006 +
+AUD-007 + AUD-008); 2 BAIXOS deferred (AUD-009 + AUD-010 — ver ADR-165);
+2 MEDIOS deferred ao Mario (AUD-002 + AUD-004); 1 ALTO ratificado (AUD-001 —
+substancia de ADR-164 preservada).
+
+**Impacto nas decisoes do ADR-163:**
+- **D5** (falha de rede in-memory): inalterado. AUD-W8C22-003 reforca a
+  defesa em profundidade do hook, mas o comportamento da view "assinando"
+  apos falha de rede continua identico (`status >= 500 || status === null`
+  -> volta para "assinando" com `setErro`).
+- **D11** (Opcao B — Vitest + smoke manual): mantido. Cobertura de
+  testes ampliada com 15 testes novos do `useExecutarTransicao`
+  (`environment: node`, sem JSDOM/RTL), seguindo o padrao
+  `identificacao-prova.test.ts`. Sem instalar Playwright, axe-core ou
+  `@testing-library/react`.
+- **D6/D7/D8** (regra unica scan -> ator certo assina; senao
+  `/provas/[id]`): inalterado. AUD-W8C22-007 ajusta apenas a view
+  "sessao" (que e off-path da regra D6 — disparada por 401, nao por
+  ausencia de `transicoes_permitidas`).
+- **D10** (`framer-motion` direto): inalterado.
+
+**Defesa em profundidade anti-enumeracao (AUD-W8C22-003):**
+- O hook `useExecutarTransicao` agora mapeia 422 inesperado e demais
+  status nao-mapeados (403 etc.) para mensagens **genericas fixas**.
+- Nenhum consumidor atual le `state.error` no caminho 422 — o
+  `AssinaturaModal` desestrutura apenas `executar`. Mas qualquer
+  consumidor futuro que ler `error` esta protegido contra
+  `AtorNaoAutorizadoError` cujo texto LISTA setores permitidos.
+- `status` no retorno preserva a informacao tecnica para o chamador
+  decidir o tratamento.
+- 1 teste Vitest dedicado (`not.toContain("setor"/"VENDEDOR"/"MOTORISTA")`)
+  falha se a mensagem cru voltar.
+
+**Logica testavel pura (AUD-W8C22-005):**
+- Extraida `executarTransicaoRequest(input, params)` do hook, exportada
+  do mesmo modulo. Padrao identico ao `identificacao-prova.ts` do C10
+  v4.0. O hook continua com mesma assinatura externa — wrapper trivial
+  com `useState`.
+
+**Comportamento de a11y reforcado (AUD-W8C22-006):**
+- Constante `TITULO_ID` extraida; `data-modal-title` nos dois `<h2>`
+  (mutuamente exclusivos via `view`); `querySelector` busca por
+  `[data-modal-title]` em vez do id literal. Robusto a renomeacao e a
+  bugs futuros que tentem montar os dois h2 simultaneamente.
+
+**UX da view "sessao" (AUD-W8C22-007):**
+- Botao "Fazer login" agora chama `router.push("/login")` direto em vez
+  de `onFechar` -> `/provas/[id]` -> middleware -> `/login`. Implementado
+  via prop opcional `onClickPrincipal` em `ResultadoView` (3 outras
+  views terminais inalteradas).
+
+**Defesa em profundidade da view de sucesso (AUD-W8C22-008):**
+- `STATUS_LABELS[statusAplicado ?? destino]` em vez de
+  `STATUS_LABELS[destino]`. Comportamento identico hoje
+  (`statusAplicado === destino` sempre), mas blindado para o caso
+  hipotetico de o backend transformar o destino.
+
+**Confirmacao de invariantes:**
+- Reuso do `contrato-c12.md`: preservado.
+- Anti-enumeracao em 6 dimensoes: preservada (com nova defesa em
+  profundidade — ver acima).
+- Tratamento de provas legacy v3.0: inalterado (`AssinaturaModal`
+  agnostico de rota).
+- 3 contextos do motorista: inalterado (`badgeContextoMotorista`
+  espelhando `contextoMotorista()`).
+- Animacao + `prefers-reduced-motion`: inalterado.
+- Touch targets >= 44px: inalterado.
+- Bundle `/escanear` (15.9 kB / 220 kB): regressao desprezivel pos-fix
+  (extracao de funcao pura nao altera bundle; demais sao pequenas).
+
+**Documentos:** `docs/wave8-v5-c22/fix-plan.md` (plano) +
+`docs/wave8-v5-c22/fix-validation.md` (validacao) +
+`docs/wave8-v5-c22/audit-report.md` (apendice de status).
+
+---
+
+## Nota ao ADR-164 — Wave 8 v5.0 / C22 (Fixes pos-auditoria, 2026-05-25)
+**Contexto:** auditoria registrou AUD-W8C22-001 (ALTO chancelado) como
+divergencia formal vs RN-014/RF-006/Cenario 4 do prompt. A nota e que
+**a decisao continua ratificada** — auditor confirmou que a substancia
+de RN-014 (anti-enumeracao) e integralmente preservada (escopo RLS +
+404 generico fora-de-escopo). Sem acao. **Reafirmada pela sessao de
+correcao** apos analise: provas in-scope que o usuario ja ve na
+listagem nao revelam nada novo ao abrir o detalhe.
+
+---
+
+## ADR-165 — Wave 8 v5.0 / C22 (Fixes pos-auditoria): deferrals conscientes AUD-W8C22-009 e -010
+**Data:** 2026-05-25
+**Componente:** Wave 8 v5.0 / Componente 22 — Fixes pos-auditoria
+**Contexto:** dois achados BAIXOS da auditoria foram avaliados como
+**opcionais** pelo proprio auditor (rotulados "Recomendacao: opcional;
+padrao atual funciona"). Apos analise nesta sessao, ambos foram
+DEFERRED conscientemente. Registro abaixo para nao reabrir no futuro
+sem reavaliacao.
+
+**AUD-W8C22-009 — `useEffect([view])` usa `querySelector` em vez de
+callback ref:**
+- **Decisao:** DEFERRED.
+- **Justificativa:** o padrao atual funciona; refactor de baixo retorno.
+- **Parcialmente resolvido:** o AUD-W8C22-006 mudou o seletor de
+  `#assinatura-titulo` para `[data-modal-title]`, eliminando o
+  acoplamento com o id literal — defesa em profundidade que cobre o
+  caso de regressao listado pelo auditor.
+- **Custo da implementacao "ideal":** `useCallback` ref no h2 +
+  re-disparo em troca de `view` (h2 monta/desmonta) precisaria de
+  `useLayoutEffect` ou logica especifica de cleanup — mais complexo do
+  que o querySelector simples.
+
+**AUD-W8C22-010 — `textarea` com `required` HTML5 + validacao manual no
+submeter:**
+- **Decisao:** DEFERRED.
+- **Justificativa:** cooperacao defensiva, nao redundancia. (a) `required`
+  HTML5 protege usuarios sem JS (raro mas possivel); (b) alguns
+  leitores de tela anunciam "obrigatorio" via `required`, melhorando
+  a11y; (c) a validacao manual emite mensagem em pt-BR no banner do
+  modal (`role="alert"`), enquanto o `required` HTML5 emite a mensagem
+  do browser (variavel por locale). Manter ambos: o `required` e o
+  "cinto"; a validacao manual e o "suspensorio".
+
+**Consequencias:**
+- Sem mudanca de codigo. Status nos achados: DEFERRED (com referencia
+  a este ADR).
+- Se algum desses for reavaliado no futuro (ex.: padrao corporativo
+  mudar), reconsiderar a decisao.
+
+**Documento:** `docs/wave8-v5-c22/fix-plan.md` §2.6 + §2.7.
+
+---
