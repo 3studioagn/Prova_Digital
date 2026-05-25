@@ -119,6 +119,17 @@ export function AssinaturaModal({
   const [motivo, setMotivo] = useState("");
   /** Erro retentavel exibido no estado "assinando" (falha de rede — D5). */
   const [erro, setErro] = useState<string | null>(null);
+  /**
+   * AUD-W8C22-008: status efetivamente aplicado vindo do backend
+   * (`data.prova.status` no 201 da transicao). Usado na view de sucesso
+   * em vez de `destino` para defesa em profundidade — se algum dia o
+   * backend transformar o destino internamente antes de gravar, a view
+   * mostraria o valor errado. Hoje sempre bate com `destino` (o backend
+   * grava exatamente o que recebeu), mas a defesa nao custa.
+   */
+  const [statusAplicado, setStatusAplicado] = useState<StatusProva | null>(
+    null,
+  );
 
   // Esc fecha o modal (WAI-ARIA), exceto durante o envio.
   useEffect(() => {
@@ -188,6 +199,8 @@ export function AssinaturaModal({
       });
 
       if (data) {
+        // AUD-W8C22-008: defesa em profundidade — usa o status do backend.
+        setStatusAplicado(data.prova.status);
         setView("sucesso");
         return;
       }
@@ -248,7 +261,11 @@ export function AssinaturaModal({
             botaoLabel="Ver prova"
           >
             <strong>{scan.prova.nome}</strong> agora esta em{" "}
-            <strong>{STATUS_LABELS[destino]}</strong>.
+            {/* AUD-W8C22-008: prefere o status efetivo do backend; fallback
+                seguro para `destino` se algum dia `statusAplicado` ficar
+                null (impossivel hoje — o setView("sucesso") so e chamado
+                apos `setStatusAplicado(data.prova.status)`). */}
+            <strong>{STATUS_LABELS[statusAplicado ?? destino]}</strong>.
           </ResultadoView>
         )}
 
