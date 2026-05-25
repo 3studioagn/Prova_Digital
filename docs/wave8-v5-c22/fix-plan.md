@@ -525,3 +525,53 @@ Validação documental:
 **Nenhuma decisão pendente que exija nova escalação humana** — todas as decisões do plano cabem no escopo já aprovado (ADR-163/164). Se durante o Gate 2 surgir necessidade de instalar `@testing-library/react` para AUD-005 (caso a função `executar` não seja testável sem `renderHook`), **escalarei antes** com 2 opções (instalar a dep vs extrair a função pura).
 
 **Fim do Gate 1.**
+
+---
+
+## 8. Resultado da Execução (Gate 2 — anexado em 2026-05-25)
+
+> Esta seção foi anexada ao final do plano original após a conclusão
+> do Gate 2 (autorização: `AUTORIZADO GATE 2 — CORREÇÃO C22 v5.0`).
+> O corpo do plano acima (§0-§7) **não foi editado**.
+
+### 8.1 Diffs entre planejado e realizado
+
+| Item | Planejado no Gate 1 | Realizado no Gate 2 | Observação |
+|---|---|---|---|
+| AUD-W8C22-003 | Mudar 1 branch `else if (err.status === 422)` no hook + atualizar JSDoc | ✅ Realizado. Também ampliado para o branch "else" (403 e demais) — mesma defesa em profundidade contra `err.message` cru. | Cobertura ampliada além do mínimo. |
+| AUD-W8C22-005 | 7-8 testes Vitest cobrindo 201/401/404/409/422/5xx/rede + autenticação | ✅ **15 testes** entregues (mais granular: separei 502/503; adicionei 403; separei testes de body em 3 — `motivo_reprovacao` string, null e URL do endpoint). | Cobertura efetiva ~100% da função pura. |
+| AUD-W8C22-005 — refator | Avaliar `@testing-library/react` (renderHook) vs extrair função pura | ✅ **Extraída função pura** `executarTransicaoRequest` exportada do mesmo módulo. Padrão idêntico ao `identificacao-prova.ts`. Hook continua wrapper trivial. Sem instalar nenhuma dep nova. | Decisão B (Plano B preferencial) aplicada — não precisei escalar. |
+| AUD-W8C22-006 | Extrair `TITULO_ID` + adicionar `data-modal-title` + atualizar `querySelector` | ✅ Realizado. 3 substituições conforme planejado. | Sem desvio. |
+| AUD-W8C22-007 | `useRouter` + `onClickPrincipal` opcional em `ResultadoView` | ✅ Realizado. 4 outras views terminais inalteradas (fallback `onFechar` preservado). | Sem desvio. |
+| AUD-W8C22-008 | `setStatusAplicado(data.prova.status)` + `STATUS_LABELS[statusAplicado ?? destino]` | ✅ Realizado com fallback seguro para `destino`. | Sem desvio. |
+| AUD-W8C22-009 / -010 | DEFERRED com registro em DECISIONS.md | ✅ ADR-165 criado com justificativas explícitas. | Sem desvio. |
+| Documentação | CHANGELOG (apêndice) + DECISIONS (apêndice ADR-163 + nota ADR-164) + audit-report (apêndice de status) + fix-validation.md novo | ✅ Realizado. **+ ADR-165 novo** (deferrals AUD-009/010 — não previsto explicitamente como "novo ADR", mas o plano §6 mencionava "deferrals AUD-009/AUD-010 em DECISIONS"; criar ADR é o padrão estabelecido no projeto e mantém o registro estruturado). | Pequeno desvio cosmético — ganhou ADR próprio em vez de apêndice. |
+| Stash do CSS uncommitted (AUD-101) | Preservar com nome explícito | ✅ Stash `wave8-v5-c22/fixes: CSS uncommitted pre-C22 (AUD-W8C22-101 INFO) - preservar para Mario` criado antes da branch `wave8-v5-c22/fixes/plan`. | Sem desvio. |
+
+### 8.2 Commits da execução
+
+| # | SHA | Tipo | Achado | Descrição curta |
+|---|---|---|---|---|
+| 1 | `b4522c0` | fix | AUD-003 | hook mapeia 422 e demais para mensagem generica |
+| 2 | `8aa729d` | test | AUD-005 | testes Vitest do useExecutarTransicao (+ extração função pura) |
+| 3 | `1a5519b` | a11y | AUD-006 | TITULO_ID + data-modal-title no AssinaturaModal |
+| 4 | `58629ec` | fix | AUD-007 | view sessao navega direto a /login |
+| 5 | `2dd853e` | fix | AUD-008 | statusAplicado da resposta do backend na view sucesso |
+| 6 | `6b6b172` | docs | (geral) | CHANGELOG + DECISIONS (apêndice ADR-163 + ADR-165) + audit-report (apêndice) |
+
+(Este apêndice é o 7º commit — `docs: anexar Resultado da Execução ao fix-plan + fix-validation.md`.)
+
+### 8.3 Métrica final
+- **Testes:** 237 PASSED (era 222 + 15 novos · 0 regressão).
+- **tsc / lint / build:** todos OK; build 13/13 páginas.
+- **Bundle `/escanear`:** 15.9 kB / 221 kB (era 15.9 / 220 — +1 kB First Load aceitável pela adição do `useRouter`).
+- **Cláusulas pétreas:** 6/6 diffs vazios (backend, contratos, matriz RBAC, pages anteriores, libs anteriores, hooks anteriores, escanear.module.css).
+- **Achados resolvidos:** 5 em código + 4 DEFERRED (2 ao Mario + 2 com ADR-165) + 5 NO-OP (1 ALTO ratificado + 4 INFO) = 14/14 tratados.
+
+### 8.4 Itens deferred + pendências para o PR `development → main`
+- AUD-W8C22-002 (visual-guide screenshots) — após smoke do Mario.
+- AUD-W8C22-004 (smoke E2E manual) — sessão dedicada do Mario.
+- **Nova rodada de auditoria independente** em sessão separada (recomendação explícita do `fix-validation.md` §4).
+- Pendências herdadas: rate limit C19 (ADR-145) + CI/CD pos-Wave 3 (ADR-156) + redeploy Railway.
+
+**Fim do Resultado da Execução.**
