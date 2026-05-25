@@ -35,7 +35,13 @@ interface ExecutarTransicaoInput {
  *   - 401: "Sessao expirada. Faca login novamente."
  *   - 404: "Prova nao encontrada."
  *   - 409: "O status da prova mudou. Escaneie novamente." (race condition)
- *   - 422: mensagem do backend (motivo, rota, enum, etc)
+ *   - 422: mensagem GENERICA "Nao foi possivel registrar..."
+ *          — DEFESA EM PROFUNDIDADE ANTI-ENUMERACAO (AUD-W8C22-003): o
+ *          backend pode retornar 422 com `AtorNaoAutorizadoError` cujo
+ *          texto LISTA os setores permitidos. Mesmo o modal hoje nao
+ *          consumindo `error`, qualquer consumidor futuro que faca
+ *          `const { error } = useExecutarTransicao(...)` exporia. O
+ *          chamador usa `status === 422` para decidir o tratamento.
  *   - 502: "Falha de conexao. Tente novamente em instantes."
  *
  * Nao e um hook com state compartilhado — cada invocacao de `executar`
@@ -108,11 +114,22 @@ export function useExecutarTransicao(
             msg = "O status da prova mudou. Escaneie novamente.";
             isConflict = true;
           } else if (err.status === 422) {
-            msg = err.message;
+            // AUD-W8C22-003: defesa em profundidade anti-enumeracao. O
+            // backend pode retornar 422 com `AtorNaoAutorizadoError` cujo
+            // texto LISTA os setores permitidos. Mesmo o AssinaturaModal
+            // hoje desestruturando so `executar`, qualquer consumidor
+            // futuro que faca `const { error } = useExecutarTransicao(...)`
+            // exporia. Mensagem generica fixa; `status === 422` no retorno
+            // permite o chamador decidir o tratamento.
+            msg = "Nao foi possivel registrar a movimentacao.";
           } else if (err.status >= 500) {
             msg = "Falha de conexao. Tente novamente em instantes.";
           } else {
-            msg = err.message;
+            // Demais status (403, etc.) - tambem mensagem generica fixa
+            // (AUD-W8C22-003). NUNCA repassar `err.message` cru fora dos
+            // casos especificos acima (401/404/409/5xx ja tem texto pt-BR
+            // fixo). `status` no retorno preserva a informacao tecnica.
+            msg = "Nao foi possivel executar a transicao.";
           }
         }
         setState({ loading: false, error: msg, result: null });
