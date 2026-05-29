@@ -74,6 +74,17 @@
   /* ── Layout ─────────────────────────────────────────────────────────────── */
   --sidebar-width: 400px;
   --card-padding: clamp(2rem, 4vw, 4rem);
+
+  /* ── Mobile (Wave 8 v5.0 / C23) ─────────────────────────────────────────────
+   * Tokens consumidos APENAS por regras dentro de @media mobile/landscape.
+   * Inertes no desktop: as safe-area resolvem para 0 sem notch + viewport-fit.
+   * --touch-target-min: piso de 44px (iOS HIG) / 48dp Android (RNF-013, WCAG
+   * 2.1 SC 2.5.5). Usar onde um controle precise garantir area de toque. */
+  --touch-target-min: 44px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
 *,
