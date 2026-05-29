@@ -808,9 +808,12 @@
     padding-left: max(1rem, var(--safe-left));
     padding-right: max(1rem, var(--safe-right));
     padding-bottom: max(1rem, var(--safe-bottom));
-    /* Guarda contra qualquer overflow horizontal residual em telas estreitas
-     * (sem afetar o eixo Y — `clip` nao forca scroll vertical como `hidden`). */
-    overflow-x: clip;
+    /* NB: NAO usar overflow-x: clip/hidden aqui. O `.innerCard` ja tem
+     * `overflow: hidden` (recorta o conteudo dos painels) e o grid agora usa
+     * `minmax(0, 1fr)` (sem blowout horizontal). Um clip aqui era redundante e
+     * provocava uma 2a scrollbar vertical quando o shell esta em modo
+     * desktop-scroll (~769-900px): pageWrapper fica com altura limitada e o
+     * eixo Y vira `auto`. Removido. */
   }
 
   .cameraCta {
