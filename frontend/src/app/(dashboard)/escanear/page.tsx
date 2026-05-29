@@ -734,6 +734,13 @@ function ManualPanel({
             ref={inputRef}
             id="codigo-manual"
             type="text"
+            // Wave 8 v5.0 / C23 (Decisao 9): teclado nativo mobile otimizado.
+            // inputMode="text" — codigo e alfanumerico (PRV-AAAA-MM-NNNNNN);
+            // "numeric" excluiria as letras do sufixo. enterKeyHint="search"
+            // rotula a tecla de acao como "buscar". font-size do input ja e
+            // 16px (escanear.module.css), evitando o auto-zoom do iOS.
+            inputMode="text"
+            enterKeyHint="search"
             className={styles.manualInput}
             value={display}
             onChange={(e) => onChange(e.target.value)}
