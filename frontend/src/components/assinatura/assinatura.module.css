@@ -344,6 +344,59 @@
   }
 }
 
+/* ════════════════════════════════════════════════════════════════════
+ * Wave 8 v5.0 / C23 — Polimento mobile do modal (Decisao 7: (i) + (ii)
+ * pontual em landscape). APENAS CSS — sem tocar AssinaturaModal.tsx nem
+ * CapturaAssinatura.tsx (logica/props). O C22 ja entregou o piso mobile
+ * (botoes 46px, empilha <=460px, canvas responsivo via ResizeObserver).
+ * Desktop intocado: as safe-area resolvem para 0 e o landscape-curto so
+ * dispara em telefone deitado (altura <= 600px). */
+
+/* Portrait pequeno: respiro de safe-area nas bordas (notch/home indicator)
+ * e altura dinamica (dvh) para nao estourar atras da barra do navegador
+ * mobile. `max(1rem, ...)` mantem o padding atual quando nao ha inset. */
+@media (max-width: 460px) {
+  .backdrop {
+    padding-top: max(1rem, var(--safe-top));
+    padding-right: max(1rem, var(--safe-right));
+    padding-bottom: max(1rem, var(--safe-bottom));
+    padding-left: max(1rem, var(--safe-left));
+  }
+
+  .card {
+    max-height: 90dvh;
+  }
+}
+
+/* Landscape em telefone (altura curta): o modal vira um painel que usa a
+ * altura visivel inteira (dvh), com o rodape de acoes "grudado" ao fundo da
+ * area rolavel — assim "Confirmar"/"Cancelar" ficam sempre ao alcance do
+ * polegar (US-020.1) mesmo com o teclado aberto no campo de motivo. O canvas
+ * mantem os 200px definidos pelo componente; o conteudo rola se preciso. */
+@media (orientation: landscape) and (max-height: 600px) {
+  .backdrop {
+    align-items: stretch;
+    padding: max(0.5rem, var(--safe-top)) max(0.75rem, var(--safe-right))
+      max(0.5rem, var(--safe-bottom)) max(0.75rem, var(--safe-left));
+  }
+
+  .card {
+    max-height: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 1.2rem 1.5rem;
+    gap: 0.8rem;
+  }
+
+  .rodape {
+    position: sticky;
+    bottom: 0;
+    background: #ffffff;
+    padding-top: 0.6rem;
+    margin-top: 0;
+  }
+}
+
 /* ── prefers-reduced-motion — RN-012 / RNF-010 ────────────────────────── */
 /* A animacao de entrada do modal e controlada por `useReducedMotion` do
  * framer-motion (camada JS). Esta regra zera as transicoes de hover por

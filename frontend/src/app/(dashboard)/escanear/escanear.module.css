@@ -789,6 +789,109 @@
   }
 }
 
+/* ════════════════════════════════════════════════════════════════════
+ * Wave 8 v5.0 / C23 — Polimento mobile (desktop-first overrides).
+ * TUDO abaixo vive em @media mobile/landscape; o estado base (desktop
+ * >=1024px) permanece intocado — design ja aprovado pelo Mario. Cobre
+ * RF-029, RNF-013 e US-020: touch targets >=44px, safe areas (notch),
+ * orientacao landscape e ergonomia one-handed.
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* Safe areas (notch / home indicator) — env() ativado por viewport-fit=cover
+ * no layout root. Garante que o conteudo nao fique sob o notch (landscape) nem
+ * o home indicator (bottom). Inerte no desktop: os insets resolvem para 0.
+ * Tambem deixa os CTAs principais com largura total na coluna unica (US-020.1
+ * — botoes grandes; ficam na metade inferior do fluxo porque o preview domina
+ * o topo). Sem sticky: evita sobreposicao com o footer/teclado virtual. */
+@media (max-width: 900px) {
+  .pageWrapper {
+    padding-left: max(1rem, var(--safe-left));
+    padding-right: max(1rem, var(--safe-right));
+    padding-bottom: max(1rem, var(--safe-bottom));
+  }
+
+  .cameraCta {
+    max-width: none;
+  }
+
+  .manualInputWrapper,
+  .manualCta {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+/* Touch targets (RNF-013 / WCAG 2.1 SC 2.5.5): piso de 44px no link inline
+ * de erro ("Ir para digitacao manual" / "Tentar novamente"). */
+@media (max-width: 768px) {
+  .linkButton {
+    min-height: var(--touch-target-min);
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+@media (max-width: 540px) {
+  /* Restaura o piso de 44px no tab (o override anterior caia para 42px). */
+  .tabs {
+    height: 54px;
+  }
+
+  .tab {
+    height: var(--touch-target-min);
+  }
+
+  /* Contraste AA para uso ao ar livre (US-020.4 / Decisao 6): textos
+   * auxiliares pequenos sobre branco. #7a7a7a fica em ~4.3:1 (abaixo do 4.5
+   * exigido p/ texto pequeno); reforco APENAS no mobile — o desktop preserva
+   * o tom original do Figma. */
+  .previewHint,
+  .innerFooter,
+  .innerFooterLabel {
+    color: #6b6b6b;
+  }
+}
+
+/* Landscape em telefone (altura curta): impede o min-height:720px de forcar
+ * scroll vertical enorme e reaproveita a largura — a camera volta a 2 colunas
+ * e o preview encolhe mantendo o slot QUADRADO (Decisao D8.i). O seletor
+ * (orientation: landscape) + (max-height: 600px) atinge apenas telefones
+ * deitados; desktop/tablet tem altura > 600px e NAO dispara. */
+@media (orientation: landscape) and (max-height: 600px) {
+  .wrapper {
+    min-height: 0;
+  }
+
+  .innerCard {
+    min-height: 0;
+  }
+
+  .cameraPanel {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .previewSlot {
+    min-height: 0;
+    aspect-ratio: 1;
+    padding: 1.5rem;
+  }
+
+  .cameraSidebarTop {
+    padding: 0.75rem 0;
+  }
+
+  .manualPanel {
+    padding-left: 0;
+    justify-content: center;
+  }
+
+  .manualPanelTop {
+    padding-bottom: 0.75rem;
+  }
+}
+
 /* ─── prefers-reduced-motion (RN-012, RNF-010) ────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
