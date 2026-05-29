@@ -851,6 +851,24 @@
 }
 
 @media (max-width: 540px) {
+  /* Alarga o box branco (.innerCard) no telefone (pedido do Mario): reduz os
+   * gutters cinza dos conteineres PROPRIOS da pagina (pageWrapper + wrapper)
+   * para o branco usar mais da largura disponivel, e aperta levemente o
+   * padding interno do card. NAO toca o shell do dashboard (.main/.cardInner),
+   * que e compartilhado por todas as paginas. */
+  .pageWrapper {
+    padding-left: max(0px, var(--safe-left));
+    padding-right: max(0px, var(--safe-right));
+  }
+
+  .wrapper {
+    padding: 1rem 0.5rem;
+  }
+
+  .innerCard {
+    padding: 1.25rem 1rem 1rem;
+  }
+
   /* Restaura o piso de 44px no tab (o override anterior caia para 42px). */
   .tabs {
     height: 54px;
