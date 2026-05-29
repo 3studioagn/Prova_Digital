@@ -851,6 +851,18 @@
   .qrMockBox {
     width: min(220px, 100%);
   }
+
+  /* Sem piso de altura no mobile: wrapper e card acompanham o conteudo,
+   * eliminando o espaco cinza vazio + rolagem desnecessaria no tab manual
+   * (conteudo curto). No tab camera o conteudo ja preenche naturalmente, entao
+   * a aparencia nao muda la. */
+  .wrapper {
+    min-height: 0;
+  }
+
+  .innerCard {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 540px) {
