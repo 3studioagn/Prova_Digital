@@ -7352,3 +7352,69 @@ submeter:**
 **Documento:** `docs/wave8-v5-c22/fix-plan.md` §2.6 + §2.7.
 
 ---
+
+## ADR-166 — Wave 8 v5.0 / C23: 11 decisoes de design da responsividade mobile da pagina de escaneamento
+**Data:** 2026-05-29
+**Componente:** Wave 8 v5.0 / Componente 23 — Responsividade Mobile da Pagina de Escaneamento
+**Status:** ACEITO (autorizado pelo Mario apos o Gate 1)
+
+**Contexto:** o C23 e polimento mobile frontend-only sobre `/escanear` (C10 v4.0
++ C19) e o modal de assinatura (C22). Restricao petrea do Mario: "o design
+desktop que ja esta pronto deve continuar da mesma forma, pois ja esta aprovado."
+As 11 decisoes do Gate 1 foram respondidas seguindo as recomendacoes tecnicas,
+com a restricao desktop reforcando a Decisao 1.
+
+**Decisoes:**
+1. **Estrategia CSS = (ii) desktop-first com overrides.** Toda regra mobile vive
+   em `@media (max-width: ...)` / `@media (orientation: landscape) and (max-height: 600px)`.
+   O estado base (desktop >=1024px) NAO e alterado. Resolve o conflito Backlog
+   (pedia mobile-first) x restricao do Mario (desktop congelado) a favor do desktop.
+2. **Breakpoints = manter os atuais (1100/900/540) + reforcar <=480/<=360.** Menos
+   churn; reaproveita a cascata desktop-first ja existente em `escanear.module.css`.
+3. **Landscape = (i) adaptacao minima + (ii) pontual no modal.** Telefone deitado
+   (`max-height: 600px`): `/escanear` volta a 2 colunas e relaxa `min-height`;
+   modal vira painel de altura dinamica com rodape sticky. Nao bloquear landscape
+   (RF-029/US-020.3 exigem funcional).
+4. **One-handed = (iii) pragmatico.** CTAs principais full-width na metade inferior
+   do fluxo (o preview domina o topo). Sticky-bottom NAO usado em `/escanear`
+   (risco de sobreposicao com footer/teclado; nao verificavel sem auth nesta
+   sessao); usado APENAS no rodape do modal em landscape curto.
+5. **Notch = (ii) `viewport-fit=cover` + `env()`.** `export const viewport` no
+   `layout.tsx` (root). Unica forma de ativar `env(safe-area-inset-*)`. Sem
+   `maximumScale`/`userScalable` (WCAG 2.1 SC 1.4.4/1.4.10). Inerte no desktop.
+6. **Contraste = (i) estatico, escopado ao mobile.** `#7a7a7a` (~4.3:1) ->
+   `#6b6b6b` (~5.3:1) apenas em `previewHint`/`innerFooter` dentro de
+   `@media (max-width:540px)`. Desktop preserva o tom do Figma (congelado).
+7. **Modal C22 = (i) media queries + (ii) pontual em landscape.** Sem render
+   condicional (vetado — mudaria logica). Safe-area + `dvh` + rodape sticky.
+8. **Camera landscape = (i) viewport de captura quadrada.** O `useScanner` ja
+   entrega qrbox quadrado responsivo (AUD-W3C10-022); o CSS mantem o slot com
+   `aspect-ratio: 1`. Hook nao tocado.
+9. **Input C19 = `inputMode="text"` + `enterKeyHint="search"`.** Codigo e
+   alfanumerico; `numeric` excluiria letras. `font-size` ja 16px (sem auto-zoom
+   iOS). `autoCapitalize="characters"`/`autoComplete="off"` preservados.
+10. **Feedback do scan = (iii) combinacao.** Reaproveita `previewHint` + beam
+    amarelo (`qrScanBeam`, ja com `prefers-reduced-motion`). Sem toasts (C20 nao
+    existe no codigo — ver CHANGELOG do C22).
+11. **Testes = (ii) precedente do projeto.** Smoke manual (`smoke-validation.md`)
+    + DevTools device emulator + axe DevTools manual + Vitest pure-logic. **Sem
+    Playwright/axe-core** — preserva D-13 (Vitest `environment: node`, superficie
+    minima). Criterios 15/16 do prompt reinterpretados p/ entrega CSS-only: nao ha
+    nova logica TS a cobrir; "matriz E2E" = matriz de smoke manual + emulator.
+
+**Divergencias prompt x codigo registradas no Gate 1 (analysis.md §5):**
+C20 nao existe (usa framer-motion direto); Playwright/axe nao instalados (smoke
+manual); `viewport` export ausente (adicionado); shell do dashboard ja responsivo
+(`<768px` drawer, fora do escopo); `/escanear` usa hex do Figma, nao tokens
+(contraste ajustado pontualmente no mobile).
+
+**Consequencias:**
+- Desktop byte-a-byte preservado (validar com screenshots antes/depois no smoke).
+- `layout.tsx` (root) tocado — autorizado pelo Mario; mudanca global mas inerte
+  no desktop.
+- Bundle `/escanear` +~1 kB First Load.
+
+**Documentos:** `docs/wave8-v5-c23/analysis.md` (Gate 1 + Execucao),
+`smoke-validation.md`, `visual-guide.md`.
+
+---

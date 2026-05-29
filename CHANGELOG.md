@@ -2,6 +2,79 @@
 
 ---
 
+## v5.0 — Wave 8 — Componente 23 (novo na v5.0) (2026-05-29)
+
+**Branch:** `wave8-v5/componente-23` → PR contra `development`.
+**Gate 1:** `docs/wave8-v5-c23/analysis.md` (branch `wave8-v5-c23/analysis`).
+**Tipo:** frontend-only — CSS Modules + atributos HTML nao-invasivos. Zero backend.
+
+Responsividade mobile da pagina de escaneamento (RF-029, RNF-013, US-020) +
+polimento mobile do modal de assinatura (C22). Estrategia **desktop-first com
+overrides** (Decisao 1.ii / ADR-166): o design desktop ja aprovado permanece
+intocado byte-a-byte — toda mudanca vive em `@media` mobile/landscape.
+
+### Adicionado
+- Tokens mobile em `globals.css`: `--touch-target-min: 44px` + `--safe-*`
+  (`env(safe-area-inset-*, 0px)`). Inertes no desktop.
+- `export const viewport` com `viewportFit: "cover"` em `layout.tsx` — habilita
+  as safe areas (notch/home indicator). Sem `maximumScale`/`userScalable`
+  (preserva zoom — WCAG 2.1 SC 1.4.4/1.4.10).
+- `/escanear` (C10+C19): safe areas (`max(1rem, var(--safe-*))`), CTAs full-width
+  no mobile, touch targets >=44px (`.tab` 42->44px em <=540px; `.linkButton`),
+  contraste AA reforcado no mobile (`#7a7a7a`->`#6b6b6b` em textos auxiliares
+  pequenos — US-020.4), layout landscape de telefone (2 colunas + preview
+  quadrado, sem `min-height:720px` forcando scroll).
+- Modal de assinatura (C22): safe areas no backdrop, altura dinamica `90dvh`,
+  e em landscape de telefone painel com rodape de acoes sticky (one-handed).
+- `inputMode="text"` + `enterKeyHint="search"` no input manual do C19 (teclado
+  nativo otimizado; input ja era 16px, sem auto-zoom iOS).
+
+### Modificado
+- `escanear.module.css` (+103), `assinatura.module.css` (+53): apenas novas
+  `@media` (mobile/landscape) — nenhuma regra base (desktop) alterada.
+- `globals.css` (+5 tokens), `layout.tsx` (+viewport export).
+- `escanear/page.tsx`: +2 atributos no input (sem tocar handlers/estado/props).
+
+### Sem alteracao
+- Logica de C10/C19/C22: intocada (apenas CSS + atributos HTML).
+- Backend, RLS, migrations, enums, maquina de estados: zero modificacoes.
+- `contrato-c12.md`: intocado. C11/C06/C08/C12/C16: intocados.
+- Shell do dashboard, Dashboard v3, Atalhos v3, Log v3, Wave 1 (RBAC): intocados.
+- Identidade visual (cores/fontes/icones do Figma): preservada.
+
+### Validacao tecnica
+- `npx tsc --noEmit`: exit 0.
+- `npx next lint`: 0 warnings/errors.
+- `npx vitest run`: **237 testes**, 0 regressao (CSS-only — sem nova logica TS).
+- `npx next build`: 13/13 paginas. Bundle `/escanear`: 16 kB / 221 kB First Load
+  (era ~15.9 / 220 — +~0.1 kB Size / +1 kB First Load).
+- `git status`: somente 5 arquivos-fonte + `tsconfig.tsbuildinfo`.
+- Aviso de build `PackFileCacheStrategy` em `provas.module.css`: pre-existente,
+  alheio ao C23 (arquivo nao tocado).
+- Advisors MCP Supabase: identicos ao baseline (1 INFO + 1 WARN security; 13 INFO
+  performance). `alembic_version=013`, enums 17/6, trigger e 12 RLS preservados.
+
+### Decisoes (11 — ADR-166)
+1 CSS desktop-first overrides · 2 breakpoints atuais + reforco <=480/<=360 ·
+3 landscape adaptacao minima + 2-col pontual · 4 one-handed inline lower-third ·
+5 viewport-fit=cover + env() · 6 contraste AA estatico (mobile-scoped) ·
+7 modal media-queries + landscape pontual · 8 viewport de captura quadrada ·
+9 inputMode=text + enterKeyHint=search · 10 hint + beam (reduced-motion) ·
+11 smoke manual + emulator (sem Playwright — D-13 preservada).
+
+### Pendencias antes do PR `development -> main`
+- Smoke E2E manual do Mario (`docs/wave8-v5-c23/smoke-validation.md`) +
+  screenshots no `visual-guide.md` (dispositivos fisicos Android + iOS).
+- Auditoria senior independente do C23.
+- Heranca da Wave 3/C22: rate limit C19 (ADR-145), CI/CD (ADR-156),
+  redeploy do Railway.
+
+### FECHA A WAVE 8 v5.0
+Wave 8 completa em `development` apos o merge (C22 + C23). v5.0 oficialmente
+concluida ate o ponto atual de planejamento.
+
+---
+
 ## v5.0 — Wave 8 — Componente 22 — Correções Pós-Auditoria (2026-05-25)
 
 **Branch:** `wave8-v5-c22/fixes/execution` → PR contra `development`.

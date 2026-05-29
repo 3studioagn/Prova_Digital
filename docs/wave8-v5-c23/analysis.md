@@ -476,3 +476,55 @@ Este Gate 1 não avança para o Gate 2 sem:
 2. A string exata: **`AUTORIZADO GATE 2 — WAVE 8 v5.0 / C23`**.
 
 Nenhuma linha de código de produção foi escrita. Nenhum PR aberto.
+
+---
+
+## 12. Apêndice — Execução (Gate 2)
+
+Autorizado pelo Mario em 2026-05-29 ("AUTORIZADO GATE 2 — WAVE 8 v5.0 / C23"), com
+a restrição: **o design desktop já aprovado não muda**. Decisões consolidadas no
+ADR-166.
+
+### Decisões aplicadas
+1=(ii) desktop-first overrides · 2=manter+reforçar (≤480/≤360) · 3=(i)+(ii) modal ·
+4=(iii) inline lower-third (sticky só no modal landscape) · 5=(ii) viewport-fit+env ·
+6=(i) mobile-scoped · 7=(i)+(ii) · 8=(i) quadrado · 9=inputMode/enterKeyHint ·
+10=(iii) hint+beam · 11=(ii) smoke manual (sem Playwright).
+
+### Arquivos tocados (5 fonte + docs)
+- `frontend/src/app/globals.css` (+5 tokens mobile).
+- `frontend/src/app/layout.tsx` (+`viewport` export).
+- `frontend/src/app/(dashboard)/escanear/escanear.module.css` (+103 linhas, só @media).
+- `frontend/src/app/(dashboard)/escanear/page.tsx` (+inputMode/enterKeyHint).
+- `frontend/src/components/assinatura/assinatura.module.css` (+53 linhas, só @media).
+- Docs: este `analysis.md`, `CHANGELOG.md`, `DECISIONS.md` (ADR-166), `CLAUDE.md`,
+  `visual-guide.md`, `smoke-validation.md`.
+
+### Diferenças vs o proposto no Gate 1
+- **Hooks `useOrientation`/`useViewportSize`: NÃO criados** — detecção 100% via CSS
+  media queries (sem JS, sem perda de estado na rotação). Confirma a previsão §8.1.
+- **One-handed (Decisão 4): sticky-bottom NÃO aplicado em `/escanear`** (risco de
+  sobreposição com footer/teclado, não verificável sem auth nesta sessão). CTAs
+  full-width na metade inferior do fluxo; sticky usado apenas no rodapé do modal em
+  landscape curto. Conforto one-handed a validar no smoke do Mario.
+- **Contraste (Decisão 6): aplicado apenas no mobile** (`≤540px`) para não alterar o
+  desktop congelado.
+
+### Validação técnica
+- `tsc --noEmit` 0 · `next lint` 0 · `vitest run` **237** (0 regressão) · `next build`
+  **13/13**.
+- `/escanear`: **16 kB / 221 kB** First Load (era ~15.9 / 220).
+- `git status`: 5 fontes + `tsbuildinfo`. **Zero toque** em backend/RLS/migrations/
+  enums/máquina/`contrato-c12`/shell/C06/C08/C11/C12/C16.
+- Advisors MCP idênticos ao baseline; `alembic_version=013`, enums 17/6, trigger +
+  12 RLS preservados.
+- Aviso de build `PackFileCacheStrategy` (`provas.module.css`): pré-existente, alheio
+  ao C23.
+
+### Pendente (smoke manual do Mario — `smoke-validation.md`)
+- 10 cenários em dispositivos físicos (Android + iOS) + DevTools emulator.
+- Screenshots antes/depois (desktop = diff zero; mobile = novos layouts).
+- axe DevTools nos viewports mobile.
+- Smoke programático do `/login` NÃO executado: sem `frontend/.env` local, o dev
+  server erraria por env Supabase ausente (sinal enganoso). O build cobre a
+  compilação das 13 páginas; a validação de runtime fica no smoke em staging.

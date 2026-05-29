@@ -974,3 +974,53 @@ e `frontend/src/lib/types/__tests__/prova.test.ts` (8 cenarios).
 Padrao: testar funcoes puras isoladas em `__tests__/<nome>.test.ts`,
 sem render do componente — Vitest config esta em `environment: node`
 (sem jsdom) para minimizar superficie instalada (Wave 1 v4.0 / AUD-W1V4-005).
+
+---
+
+## Responsividade Mobile: breakpoints, tokens e touch targets (Wave 8 v5.0 / Componente 23)
+
+O C23 tornou a pagina `/escanear` (C10 + C19) e o modal de assinatura (C22)
+responsivos para mobile (RF-029, RNF-013, US-020) **sem alterar o design desktop
+ja aprovado**. Toda regra mobile vive em `@media` — o estado base (desktop
+>=1024px) e congelado.
+
+### Convencao: desktop-first com overrides (ADR-166)
+- O estado base das regras CSS = desktop (aprovado). **NUNCA** alterar regras base
+  para fazer mobile.
+- Mudancas mobile sempre dentro de `@media (max-width: ...)` ou
+  `@media (orientation: landscape) and (max-height: 600px)`.
+- Antes de marcar concluido: screenshots desktop antes/depois com **diff visual
+  zero**. O Mario congelou o desktop (feedback registrado na sessao do C23).
+
+### Breakpoints em uso (`escanear.module.css`)
+- Cascata herdada do C10: `<=1100px`, `<=900px` (camera vira 1 coluna), `<=540px`.
+- Reforco do C23: `<=768px` (touch target do link inline), `<=540px` (tab 44px +
+  contraste) e `(orientation: landscape) and (max-height: 600px)` (telefone deitado:
+  camera 2 colunas; modal painel sticky).
+
+### Tokens mobile (`globals.css`)
+- `--touch-target-min: 44px` — piso de area de toque (RNF-013 / WCAG 2.1 SC 2.5.5).
+- `--safe-top|right|bottom|left: env(safe-area-inset-*, 0px)` — notch/home indicator.
+  Inertes (0) sem notch ou sem `viewport-fit=cover`.
+- Consumir com `max(<valor-base>, var(--safe-*))` para nao reduzir o padding
+  existente quando o inset e 0 (desktop).
+
+### `viewport-fit=cover` (`app/layout.tsx`)
+- `export const viewport = { width, initialScale, viewportFit: "cover" }` habilita
+  as `env(safe-area-inset-*)`. **NUNCA** adicionar `maximumScale`/`userScalable:
+  false` (bloquear zoom viola WCAG 2.1 SC 1.4.4/1.4.10).
+
+### iOS: evitar auto-zoom
+- Inputs em telas tocaveis devem ter `font-size >= 16px`. O input do C19 e o
+  `textarea` do modal ja cumprem. Inputs novos devem manter >=16px.
+
+### Onde NAO mexer
+- Logica de C10/C19/C22 (so CSS + atributos HTML como `inputMode`/`enterKeyHint`).
+- `useScanner` (qrbox ja responsivo — AUD-W3C10-022).
+- Shell `(dashboard)/layout.module.css` (ja responsivo `<768px` — fora do C23).
+- Regras base (desktop) de qualquer `*.module.css`.
+
+### Testes (ADR-166 Decisao 11)
+- Sem Playwright/axe-core (preserva D-13: Vitest `environment: node`). Validacao
+  mobile = smoke manual (`docs/wave8-v5-c23/smoke-validation.md`) + DevTools device
+  emulator + axe DevTools (extensao). Vitest cobre apenas logica pura.
