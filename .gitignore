@@ -51,3 +51,4 @@ backend/etiqueta_preview.png
 
 # Diretorio temporario para extracao de .docx (Wave 2 v4.0 analysis e similar)
 .wave2-tmp/
+.env*

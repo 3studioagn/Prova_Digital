@@ -98,23 +98,40 @@ com QR Code, assinatura digital de cada movimentacao e auditoria imutavel.
 | CI/CD | GitHub Actions (lint, testes, keep-alive cron 6 dias) |
 | Deploy | Railway (backend) + Vercel (frontend) — configurado na Wave 3 Lote A |
 
-**Deploy em producao (configurado 2026-04-13):**
-- **Backend (Railway):** `https://provadigital-production.up.railway.app`
-  - Root Directory: `backend`
+**Deploy em producao (configurado 2026-04-13; backend migrado para nova conta Railway via CLI em 2026-06-08):**
+
+> **Migracao de conta Railway (2026-06-08):** o backend foi recriado numa **nova
+> conta Railway** via CLI. O frontend permaneceu na **mesma conta Vercel** (so foi
+> redeployado apontando para a URL nova do backend). Pontos aprendidos:
+> - As *mutations* da API do Railway (`railway init`, `railway variables --set`)
+>   retornaram `operation timed out` no CLI **mas gravaram mesmo assim** — o
+>   timeout era so na resposta. SEMPRE validar o efeito real (health checks /
+>   preflight CORS) antes de retentar, para nao duplicar projeto/variavel.
+> - A URL publica do Railway mudou (ganhou sufixo `-d64b`). Isso exigiu atualizar
+>   `NEXT_PUBLIC_API_URL` no Vercel (rebuild via `vercel --prod`) **e** `FRONTEND_URL`
+>   no Railway (CORS).
+> - Helper `scripts/deploy_railway_env.ps1` le `backend/.env` e seta todas as vars
+>   no servico Railway linkado (sobrescreve APP_ENV/APP_DEBUG/BACKEND_URL/FRONTEND_URL),
+>   sem expor valores no terminal.
+
+- **Backend (Railway):** `https://provadigital-production-d64b.up.railway.app`
+  - Conta: `mario3studio123's Projects` (login `mario.souza.3studio@gmail.com`); projeto + servico `provadigital`
+  - Root Directory: `backend` (deploy via CLI feito de dentro de `backend/` com `railway up`)
   - Start Command: `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-  - Variavel `FRONTEND_URL` deve apontar para a URL da Vercel (CORS)
-  - Todas as env vars do `backend/.env.example` configuradas no painel Variables
+  - Variavel `FRONTEND_URL` deve apontar para a URL da Vercel (CORS) — hoje `https://prova-digital-five.vercel.app`
+  - Todas as env vars do `backend/.env.example` configuradas no painel Variables (ou via `scripts/deploy_railway_env.ps1`)
   - Procfile presente em `backend/Procfile`
   - `requirements.txt` presente em `backend/requirements.txt` (Railway detecta automaticamente)
   - `pyproject.toml` tem `[tool.setuptools.packages.find] include = ["app*"]` para evitar flat-layout error
 - **Frontend (Vercel):** `https://prova-digital-five.vercel.app`
+  - Conta: `3studioagn` (scope `3studioagns-projects`); projeto `prova-digital`
   - Root Directory: `frontend`
   - Framework: Next.js (auto-detectado)
   - 3 env vars: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL`
   - `NEXT_PUBLIC_API_URL` deve apontar para a URL do Railway (sem `/` no final)
 - **Fluxo:** Celular → Vercel (frontend) → Railway (backend) → Supabase (DB) + R2 (imagens)
-- **CORS:** `FRONTEND_URL` no Railway = URL da Vercel. Sem isso, o browser bloqueia as chamadas.
-- **Redeploy automatico:** ambos redeployam quando ha push na `main` do GitHub
+- **CORS:** `FRONTEND_URL` no Railway = URL da Vercel. **Origem UNICA** — `main.py` usa `allow_origins=[settings.frontend_url]`. **Atencao (causa de confusao em 2026-06-08):** o projeto Vercel `prova-digital` responde por VARIOS dominios — ex.: `https://prova-digital-five.vercel.app` (o usado/divulgado, ATIVO no CORS) **e** `https://prova-digital-3studioagns-projects.vercel.app` (dominio `<projeto>-<team>` automatico). Como o CORS aceita so 1 origem, acessar por qualquer dominio diferente do que esta em `FRONTEND_URL` → `No 'Access-Control-Allow-Origin' header` no browser. Se precisar liberar mais de um simultaneamente, mudar `main.py` para aceitar uma LISTA de origens (`allow_origins=[...]` a partir de `FRONTEND_URL` separado por virgula) — follow-up nao feito ainda.
+- **Redeploy automatico:** o deploy de 2026-06-08 foi **imperativo via CLI** (`railway up` / `vercel --prod`), nao por push. **A reconfirmar/reconfigurar:** auto-deploy via GitHub na nova conta Railway (dashboard → servico → Settings → conectar repo + Root Directory `backend` + Production Branch); no Vercel, `vercel git connect` reativa (pode ja estar ativo se o projeto `prova-digital` mantinha o Git conectado).
 
 ---
 
